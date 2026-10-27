@@ -8,15 +8,31 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Capri" />
 <script>
-  if (location.hostname.includes('github.io')) {
-    var b = document.createElement('base');
-    b.href = '/capri/';
-    document.head.appendChild(b);
-  } else if (!document.querySelector('base')) {
-    var b2 = document.createElement('base');
-    b2.href = './';
-    document.head.appendChild(b2);
-  }
+  (function(){
+    if (location.hostname.includes('github.io')) {
+      var b = document.createElement('base');
+      b.href = '/capri/';
+      document.head.appendChild(b);
+    } else if (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      if (!document.querySelector('base')) {
+        var b2 = document.createElement('base');
+        b2.href = './';
+        document.head.appendChild(b2);
+      }
+    } else if (window.Capacitor) {
+      if (!document.querySelector('base')) {
+        var b3 = document.createElement('base');
+        b3.href = './';
+        document.head.appendChild(b3);
+      }
+    } else {
+      if (!document.querySelector('base')) {
+        var b4 = document.createElement('base');
+        b4.href = './';
+        document.head.appendChild(b4);
+      }
+    }
+  })();
 </script>
 <meta name="mobile-web-app-capable" content="yes" />
 <title>CAPRI // Project Capricorn</title>
@@ -224,12 +240,12 @@
     </div>
 
     <div class="field">
-      <span class="label">pc address</span>
+      <span class="label">pc address / backend</span>
       <div class="row">
-        <input id="apiBase" class="text" type="url" inputmode="url" spellcheck="false" placeholder="http://192.168.1.10:4173" />
+        <input id="apiBase" class="text" type="url" inputmode="url" spellcheck="false" placeholder="https://YOUR-PC-IP:4174 or http://192.168.1.10:4173" />
         <button id="apiSave" class="pill" type="button">SAVE</button>
       </div>
-      <p class="hint">Leave blank when this page is served by the PC. Set it when a wrapper app hosts the page somewhere else.</p>
+      <p class="hint">Required for the Android app. Point to your running Capri server on your PC (LAN or tunnel). Keep keys on the server only.</p>
     </div>
 
     <div class="field" id="auditField">

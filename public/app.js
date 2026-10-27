@@ -7,6 +7,7 @@ const $ = (sel) => document.querySelector(sel);
 const TOKEN_KEY = "capri.token";
 const API_KEY = "capri.api";
 const SESSION_KEY = "capri.session";
+const SERVER_KEY = "capri.server";
 
 const normBase = (v) => String(v || "").trim().replace(/\/+$/, "");
 
@@ -84,7 +85,7 @@ const el = {
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
   session: localStorage.getItem(SESSION_KEY) || "",
-  apiBase: normBase(localStorage.getItem(API_KEY) || ""),
+  apiBase: normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || ""),
   config: null,
   profile: null,
   voices: [],
@@ -1549,11 +1550,16 @@ async function renderAudit() {
 el.apiSave.addEventListener("click", () => {
   const next = normBase(el.apiBase.value);
   if (next && !/^https?:\/\//i.test(next)) {
-    showNotice("Use a full address, like http://192.168.1.10:4173", null, null, 6000);
+    showNotice("Use a full address, like http://192.168.1.10:4173 or https://...", null, null, 6000);
     return;
   }
-  if (next) localStorage.setItem(API_KEY, next);
-  else localStorage.removeItem(API_KEY);
+  if (next) {
+    localStorage.setItem(API_KEY, next);
+    localStorage.setItem(SERVER_KEY, next);
+  } else {
+    localStorage.removeItem(API_KEY);
+    localStorage.removeItem(SERVER_KEY);
+  }
   showNotice("Saved. Reloading the link.", null, null, 1800);
   setTimeout(() => location.reload(), 600);
 });
