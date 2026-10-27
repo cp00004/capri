@@ -82,10 +82,10 @@ const el = {
   voiceHint: $("#voiceHint"),
 };
 
-const DEFAULT_TUNNEL = "https://capri-cp00004.loca.lt";
+const DEFAULT_TUNNEL = "https://oregon-efforts-thats-licence.trycloudflare.com";
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
-const SAVED_TUNNEL = SAVED_BACKEND.endsWith(".loca.lt");
+const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)$/.test(new URL(SAVED_BACKEND || "http://localhost").hostname);
 const DEFAULT_BACKEND = LOCAL_HOST ? "" : DEFAULT_TUNNEL;
 if (!LOCAL_HOST && SAVED_TUNNEL && SAVED_BACKEND !== DEFAULT_TUNNEL) {
   localStorage.setItem(API_KEY, DEFAULT_TUNNEL);
