@@ -52,6 +52,7 @@ The console prints the LAN address and the six-digit pair code on every boot.
 | `CAPRI_PAIR_CODE` | random | Fixed six-digit pairing code. |
 | `CAPRI_PC` | — | Set to `off` to boot with her hands tied. |
 | `CAPRI_CERT` / `CAPRI_KEY` | `cert.pem` / `key.pem` | Custom certificate paths. |
+| `CAPRI_ALLOW_ORIGINS` | — | Comma-separated extra origins allowed to call the API. |
 
 `.env`, device tokens, the audit log and certificates are gitignored.
 
@@ -128,12 +129,13 @@ If you skip the certificate, the phone can still use the keyboard and hear her, 
 This repository is a small Node server plus a static UI. The mobile app you build from it has to reach the PC server; a bundled copy of the HTML alone cannot control anything.
 
 - If your builder wraps a URL, point it at the PC's LAN address. Use `https://<ip>:4174` so the mic works. The app is served same-origin, so nothing else is needed.
-- If your builder hosts the UI on its own domain, put the PC's address in **PC address**. The API sends CORS headers and accepts bearer tokens, so a cross-origin page can pair and talk to it. Keep it on HTTPS or the browser may block the calls as mixed content.
+- If your builder hosts the UI on its own domain, put the PC's address in **PC address** and add that builder's origin to `CAPRI_ALLOW_ORIGINS` in `.env` (comma-separated), then restart. The API sends CORS headers to allowed origins and accepts bearer tokens, so a cross-origin page can pair and talk to it. Keep it on HTTPS or the browser may block the calls as mixed content.
 - For a certificate the phone already trusts, run a tunnel in front of the PC (for example `cloudflared tunnel --url http://localhost:4173`) and use the tunnel URL as the PC address. A tunnel publishes the app beyond your LAN: the pair code and token model still apply, but treat it as an internet-facing service and lock her out when you are done.
 
 ## Security
 
-- Loopback is trusted; everything on the LAN needs a token from pairing.
+- Loopback is trusted; everything on the LAN needs a token from pairing. A page on another origin does **not** inherit loopback trust, even on this PC, so a random website cannot drive her through `localhost`.
+- Cross-origin API calls are only allowed for this PC's own addresses plus anything listed in `CAPRI_ALLOW_ORIGINS`.
 - Tokens are random 192-bit values, stored hashed in `.capri-devices.json`.
 - The static shell, manifest and `/api/config` are readable without a token. Config hides the code, device list and secrets from unpaired callers.
 - Chat, speech, transcription and every tool action require a valid token.

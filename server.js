@@ -39,6 +39,10 @@ const TTS_MODEL = "canopylabs/orpheus-v1-english";
 const STT_MODEL = process.env.CAPRI_STT_MODEL || "whisper-large-v3-turbo";
 const GROQ_BASE = "https://api.groq.com/openai/v1";
 const HOST_USER = os.userInfo().username;
+const ALLOWED_ORIGINS = (process.env.CAPRI_ALLOW_ORIGINS || "")
+  .split(",")
+  .map((s) => s.trim().replace(/\/+$/, ""))
+  .filter(Boolean);
 
 // optional https: the phone needs a secure page before it will give up the mic.
 // the desktop keeps plain http on PORT; the phone gets https on HTTPS_PORT.
@@ -128,7 +132,7 @@ function bearer(req) {
 }
 
 function auth(req) {
-  if (isLoopback(req.socket.remoteAddress)) return { scope: "local", name: "this pc" };
+  if (isLoopback(req.socket.remoteAddress) && trustedOrigin(req)) return { scope: "local", name: "this pc" };
   const token = bearer(req);
   if (!token) return null;
   const hash = sha(token);
@@ -136,6 +140,24 @@ function auth(req) {
   if (!device) return null;
   device.lastSeen = new Date().toISOString();
   return { scope: device.scope === "full" ? "full" : "voice", name: device.name, device };
+}
+
+// A page on another origin must not inherit loopback trust just because the
+// browser is on this machine. Same-origin requests (no Origin header, or our
+// own http/https origins) count as local; everything else needs a token.
+function trustedOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.includes(origin.replace(/\/+$/, ""))) return true;
+  try {
+    const u = new URL(origin);
+    const port = Number(u.port || (u.protocol === "https:" ? 443 : 80));
+    if (port !== PORT && port !== HTTPS_PORT) return false;
+    if (/^(localhost|127\.0\.0\.1|::1|\[::1\])$/.test(u.hostname)) return true;
+    return lanUrls().some((url) => new URL(url).hostname === u.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function lanUrls() {
@@ -657,11 +679,15 @@ const handler = async (req, res) => {
   // the app can be hosted elsewhere (a wrapper build, a tunnel) and still call this pc
   const origin = req.headers.origin;
   if (origin && pathname.startsWith("/api/")) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Max-Age", "600");
+    if (trustedOrigin(req)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Max-Age", "600");
+    } else if (req.method === "OPTIONS") {
+      return json(res, 403, { error: "origin_not_allowed", message: "Add this origin to CAPRI_ALLOW_ORIGINS in .env." });
+    }
   }
   if (req.method === "OPTIONS" && pathname.startsWith("/api/")) {
     res.writeHead(204);

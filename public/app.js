@@ -8,8 +8,6 @@ const TOKEN_KEY = "capri.token";
 const API_KEY = "capri.api";
 
 const normBase = (v) => String(v || "").trim().replace(/\/+$/, "");
-const flagApi = new URLSearchParams(location.search).get("api");
-if (flagApi) localStorage.setItem(API_KEY, normBase(flagApi));
 
 const el = {
   body: document.body,
