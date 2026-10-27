@@ -7,7 +7,17 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Capri" />
-<base href="./">
+<script>
+  if (location.hostname.includes('github.io')) {
+    var b = document.createElement('base');
+    b.href = '/capri/';
+    document.head.appendChild(b);
+  } else if (!document.querySelector('base')) {
+    var b2 = document.createElement('base');
+    b2.href = './';
+    document.head.appendChild(b2);
+  }
+</script>
 <meta name="mobile-web-app-capable" content="yes" />
 <title>CAPRI // Project Capricorn</title>
 <link rel="canonical" href="https://cp00004.github.io/capri/" />
@@ -162,6 +172,14 @@
         <button id="memoryForget" class="pill" type="button">FORGET IT ALL</button>
       </div>
       <p class="hint">Every request, answer, favourite and setting is stored in your profile, not in the repo.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">app banter</span>
+      <div class="row">
+        <button id="appBanterBtn" class="pill is-on" type="button"><span class="led"></span><span id="appBanterLabel">ON</span></button>
+      </div>
+      <p class="hint">Tease/comment when she opens apps or websites. Turn off if you want pure action.</p>
     </div>
 
     <div class="field">

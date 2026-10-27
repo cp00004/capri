@@ -567,7 +567,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
 
         for (const tc of delta.tool_calls || []) {
           const idx = tc.index ?? calls.length;
-          if (!calls[idx]) calls[idx] = { id: tc.id || `call_${idx}`, type: "function", function: { name: "", arguments: "" } };
+          if (!calls[idx]) calls[idx] = { id: tc.id || `call_${Date.now()}_${idx}`, type: "function", function: { name: "", arguments: "" } };
           if (tc.id) calls[idx].id = tc.id;
           if (tc.extra_content) calls[idx].extra_content = tc.extra_content;
           if (tc.thought_signature) calls[idx].thought_signature = tc.thought_signature;
@@ -613,16 +613,25 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       return;
     }
 
+    // Build clean tool_calls without leaking internal metadata that breaks some providers
+    const cleanToolCalls = toolCalls.map((tc, idx) => {
+      const out = {
+        id: tc.id || `call_${Date.now()}_${idx}`,
+        type: "function",
+        function: {
+          name: tc.function?.name || "",
+          arguments: typeof tc.function?.arguments === "string" ? tc.function.arguments : JSON.stringify(tc.function?.arguments || {}),
+        },
+      };
+      // Pass through if present for compatibility
+      if (tc.extra_content) out.extra_content = tc.extra_content;
+      if (tc.thought_signature) out.thought_signature = tc.thought_signature;
+      return out;
+    });
     messages.push({
       role: "assistant",
       content: content || null,
-      tool_calls: toolCalls.map((tc) => {
-        const out = { id: tc.id, type: "function", function: tc.function };
-        if (tc.extra_content) out.extra_content = tc.extra_content;
-        // Gemini/OpenAI require thought_signature on functionCall parts for some models; pass through if present
-        if (tc.thought_signature) out.thought_signature = tc.thought_signature;
-        return out;
-      }),
+      tool_calls: cleanToolCalls,
     });
 
     for (const call of toolCalls) {
@@ -639,10 +648,13 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
               // if tool missing, try extra
               try {
                 const { executeExtraTool } = await import("./lib/pc.js");
-                return await executeExtraTool(call.function.name, args);
+                if (typeof executeExtraTool === "function") {
+                  return await executeExtraTool(call.function.name, args);
+                }
               } catch (ex) {
-                return { ok: false, error: e?.message || String(e) };
+                // ignore
               }
+              return { ok: false, error: e?.message || String(e) };
             });
       const payload = JSON.stringify(result).slice(0, 8000);
       sse(res, {
