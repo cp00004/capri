@@ -362,8 +362,9 @@ async function chatCompletion({ provider, messages, tools, signal }) {
     messages,
   };
   if (provider.name === "gemini") {
-    // the free tier thinks before it talks; keep that budget short so she stays snappy
-    payload.reasoning_effort = "low";
+    // thinking causes thought_signature requirements; turn it off to avoid multi-turn signature issues
+    payload.reasoning_effort = "none";
+    payload.thinking_config = { thinking_budget: 0 };
   }
   if (tools) {
     payload.tools = tools;
