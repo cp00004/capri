@@ -198,7 +198,7 @@ function bearer(req) {
 }
 
 function auth(req) {
-  if (isLoopback(req.socket.remoteAddress) && trustedOrigin(req)) return { scope: "local", name: "this pc" };
+  if (isLoopback(req.socket.remoteAddress) && trustedLoopbackOrigin(req)) return { scope: "local", name: "this pc" };
   const token = bearer(req);
   if (!token) return null;
   const hash = sha(token);
@@ -208,9 +208,20 @@ function auth(req) {
   return { scope: device.scope === "full" ? "full" : "voice", name: device.name, device };
 }
 
-// A page on another origin must not inherit loopback trust just because the
-// browser is on this machine. Same-origin requests (no Origin header, or our
-// own http/https origins) count as local; everything else needs a token.
+function trustedLoopbackOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    const url = new URL(origin);
+    const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+    return (port === PORT || port === HTTPS_PORT) && url.host.toLowerCase() === String(req.headers.host || "").toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+// CORS controls which browser origins may call the API; it must never grant
+// PC-owner scope to a request forwarded through a local tunnel.
 function trustedOrigin(req) {
   const origin = req.headers.origin;
   if (!origin) return true;
