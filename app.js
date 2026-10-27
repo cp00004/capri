@@ -1378,6 +1378,7 @@ async function renderGoogle(force = false) {
   }
   state.googleReady = true;
   el.googleBtn.classList.add("hidden");
+  console.log("[capri] Google GIS initialized with client_id:", google.clientId);
   window.google.accounts.id.initialize({
     client_id: google.clientId,
     callback: handleGoogleCredential,
@@ -1387,14 +1388,27 @@ async function renderGoogle(force = false) {
   });
   el.googleButton.innerHTML = "";
   if (!state.profile?.google) {
-    window.google.accounts.id.renderButton(el.googleButton, {
-      type: "standard",
-      theme: "filled_black",
-      size: "large",
-      text: "continue_with",
-      shape: "pill",
-      width: 260,
-    });
+    try {
+      window.google.accounts.id.renderButton(el.googleButton, {
+        type: "standard",
+        theme: "filled_black",
+        size: "large",
+        text: "continue_with",
+        shape: "pill",
+        width: 260,
+      });
+      console.log("[capri] Google button rendered");
+    } catch (e) {
+      console.error("[capri] Failed to render Google button:", e);
+    }
+    // Also show the One Tap prompt as a fallback
+    try {
+      window.google.accounts.id.prompt((notification) => {
+        console.log("[capri] One Tap notification:", notification.getNotDisplayedReason?.() || notification.getSkippedReason?.() || "displayed");
+      });
+    } catch (e) {
+      console.error("[capri] One Tap prompt failed:", e);
+    }
   }
 }
 
@@ -1407,7 +1421,26 @@ el.googleBtn.addEventListener("click", async () => {
     return;
   }
   await renderGoogle(true);
-  window.google?.accounts?.id?.prompt?.();
+  // Try One Tap prompt
+  if (window.google?.accounts?.id) {
+    window.google.accounts.id.prompt((notification) => {
+      console.log("[capri] prompt result:", notification.getNotDisplayedReason?.() || notification.getSkippedReason?.() || "displayed");
+      if (notification.getNotDisplayedReason?.() || notification.getSkippedReason?.()) {
+        // One Tap didn't show, show fallback button
+        const fb = document.getElementById("googleFallbackBtn");
+        if (fb) fb.classList.remove("hidden");
+      }
+    });
+  }
+});
+
+const googleFallbackBtn = document.getElementById("googleFallbackBtn");
+googleFallbackBtn?.addEventListener("click", () => {
+  if (window.google?.accounts?.id) {
+    window.google.accounts.id.prompt();
+  } else {
+    showNotice("Google's script didn't load. Check your internet connection.", null, null, 8000);
+  }
 });
 
 el.signOutBtn.addEventListener("click", async () => {
