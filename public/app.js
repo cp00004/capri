@@ -2113,6 +2113,7 @@ async function boot() {
   if (!state.history.length) {
     typer.reset(cfg?.local ? "Capricorn is awake. Say the word." : "Capricorn is on the line.");
   }
+  if (wakeWord.enabled && !document.hidden) startWakeWord();
 }
 
 /* ---------------------------------------------------------------- lost link */
