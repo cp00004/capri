@@ -128,6 +128,7 @@ async function api(url, opts = {}) {
   const headers = new Headers(opts.headers || {});
   if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
   if (state.session) headers.set("X-Capri-Profile", state.session);
+  if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
   const res = await fetch(apiUrl(url), { ...opts, headers });
   if (res.status === 401) {
     showPair("That link is dead. Pair this device again.");
@@ -1108,7 +1109,10 @@ el.pairForm.addEventListener("submit", async (e) => {
   try {
     const res = await fetch(apiUrl("/api/pair"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(state.apiBase.includes(".loca.lt") ? { "Bypass-Tunnel-Reminder": "1" } : {}),
+      },
       body: JSON.stringify({ code, name }),
     });
     const data = await res.json().catch(() => ({}));
