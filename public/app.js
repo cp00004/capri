@@ -1161,6 +1161,14 @@ async function saveProfile(payload) {  if (!state.profile) return;
   }
 }
 
+const appBanter = localStorage.getItem("capri.appBanter") !== "0";
+window.capriAppBanter = appBanter;
+function toggleAppBanter(on){
+  localStorage.setItem("capri.appBanter", on ? "1" : "0");
+  window.capriAppBanter = on;
+  saveProfile({ settings: { app_banter: on ? "on" : "off" } });
+}
+
 el.prefNameSave.addEventListener("click", async () => {
   const name = el.prefName.value.trim();
   if (!name) return;
@@ -1399,11 +1407,13 @@ function setPcState() {
   const on = (local || full) && !state.config?.pcLocked;
 
   const locked = Boolean(state.config?.pcLocked);
-  el.pcState.textContent = local
-    ? (locked ? "locked out · this pc" : "full access · this pc")
-    : full
-      ? (locked ? "granted · locked out" : "full access · granted")
-      : "voice only";
+  if (el.pcState) {
+    el.pcState.textContent = local
+      ? (locked ? "locked out · this pc" : "full access · this pc")
+      : full
+        ? (locked ? "granted · locked out" : "full access · granted")
+        : "voice only";
+  }
   el.pcHint.textContent = local
     ? (state.config?.pcLocked
         ? "You locked her out. Flip it back when you want her hands again."
