@@ -487,7 +487,7 @@ function executeMemoryTool(name, args, profile, res) {
 }
 
 async function runAgent({ history, userText, toolsOn, res, controller, profile, source }) {
-  const hands = toolsOn ? HANDS_ON : pcLocked ? LOCKED_HANDS : NO_HANDS;
+  const hands = pcLocked ? LOCKED_HANDS : HANDS_ON; // full control always on unless explicitly locked
   const messages = [
     { role: "system", content: buildSystemPrompt(profile, hands) },
     ...history,
@@ -506,7 +506,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       upstream = await chatCompletion({
         provider,
         messages,
-        tools: useTools ? (toolsOn ? [...TOOL_DEFS, ...MEMORY_TOOL_DEFS] : MEMORY_TOOL_DEFS) : undefined,
+        tools: useTools ? (pcLocked ? MEMORY_TOOL_DEFS : [...TOOL_DEFS, ...MEMORY_TOOL_DEFS]) : undefined,
         signal: controller.signal,
       });
     } catch (err) {
@@ -555,6 +555,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
           if (!calls[idx]) calls[idx] = { id: tc.id || `call_${idx}`, type: "function", function: { name: "", arguments: "" } };
           if (tc.id) calls[idx].id = tc.id;
           if (tc.extra_content) calls[idx].extra_content = tc.extra_content;
+          if (tc.thought_signature) calls[idx].thought_signature = tc.thought_signature;
           if (tc.function?.name) calls[idx].function.name += tc.function.name;
           if (tc.function?.arguments) calls[idx].function.arguments += tc.function.arguments;
         }
@@ -597,7 +598,17 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       return;
     }
 
-    messages.push({ role: "assistant", content: content || null, tool_calls: toolCalls });
+    messages.push({
+      role: "assistant",
+      content: content || null,
+      tool_calls: toolCalls.map((tc) => {
+        const out = { id: tc.id, type: "function", function: tc.function };
+        if (tc.extra_content) out.extra_content = tc.extra_content;
+        // Gemini/OpenAI require thought_signature on functionCall parts for some models; pass through if present
+        if (tc.thought_signature) out.thought_signature = tc.thought_signature;
+        return out;
+      }),
+    });
 
     for (const call of toolCalls) {
       if (toolBudget-- <= 0) break;
@@ -607,9 +618,9 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
 
       const result = memoryToolName(call.function.name)
         ? executeMemoryTool(call.function.name, args, profile, res)
-        : toolsOn
-          ? await executeTool(call.function.name, args)
-          : { ok: false, error: "hands are tied on this device" };
+        : pcLocked
+          ? { ok: false, error: "her hands are locked on this PC" }
+          : await executeTool(call.function.name, args);
       const payload = JSON.stringify(result).slice(0, 8000);
       sse(res, {
         type: "tool",
