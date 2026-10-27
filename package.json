@@ -1,0 +1,16 @@
+{
+  "name": "capri",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Capri - a voice-first personality construct with hands on your PC",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "cert": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-cert.ps1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#07000c" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Capri" />
+<meta name="mobile-web-app-capable" content="yes" />
+<title>CAPRI // Project Capricorn</title>
+<link rel="icon" href="assets/favicon.png" type="image/png" />
+<link rel="apple-touch-icon" href="assets/icon-192.png" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body data-state="idle">
+<div class="grain" aria-hidden="true"></div>
+<div class="glow" aria-hidden="true"></div>
+
+<header class="top">
+  <span class="dot" id="stateDot" aria-hidden="true"></span>
+  <span class="tag" id="stateTag">online</span>
+  <button id="settingsBtn" class="icon" type="button" aria-label="Settings" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h9M4 12h6M4 17h11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <circle cx="17" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="13" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="18" cy="17" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    </svg>
+  </button>
+</header>
+
+<main class="stage">
+  <div class="portrait" id="portraitWrap">
+    <div class="hex-glow" aria-hidden="true"></div>
+    <div class="hex-frame">
+      <div class="hex-inner">
+        <img id="portraitImg" src="assets/capri.svg" alt="Capri" />
+        <div class="hex-tint" aria-hidden="true"></div>
+        <div class="hex-scan" aria-hidden="true"></div>
+        <div class="act" id="act" aria-live="polite"></div>
+        <div class="subtitle" id="subtitle"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="dock">
+  <div class="heard" id="heard"></div>
+  <button id="micBtn" class="mic" type="button" aria-label="Tap to talk">
+    <span class="mic-rings" aria-hidden="true"></span>
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/>
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M12 17.5V21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+  </button>
+  <div class="dock-row">
+    <button id="kbBtn" class="pill" type="button">KEYBOARD</button>
+  </div>
+</footer>
+
+<form id="kbForm" class="kb-sheet hidden" autocomplete="off">
+  <input id="kbInput" type="text" placeholder="type it, choom..." enterkeyhint="send" />
+  <button class="pill" type="submit">SEND</button>
+</form>
+
+<!-- ================================================= settings -->
+<section id="settings" class="sheet hidden" aria-label="Settings">
+  <div class="sheet-head">
+    <h2>SETTINGS</h2>
+    <button class="icon" type="button" data-close="settings" aria-label="Close">&times;</button>
+  </div>
+
+  <div class="sheet-body">
+    <div class="field">
+      <span class="label">voice</span>
+      <div class="row">
+        <select id="voiceSelect" aria-label="Voice"></select>
+        <button id="voiceBtn" class="pill is-on" type="button"><span class="led"></span><span id="voiceLabel">ON</span></button>
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="label">her hands</span>
+      <div class="row">
+        <span class="value" id="pcState">voice only</span>
+        <button id="accessBtn" class="pill hidden" type="button">REQUEST FULL ACCESS</button>
+        <button id="pcLockBtn" class="pill hidden" type="button">LOCK HER OUT</button>
+      </div>
+      <p class="hint" id="pcHint">PC control is off for this device.</p>
+    </div>
+
+    <div class="field" id="pairField">
+      <span class="label">pair a device</span>
+      <div class="row">
+        <span class="value code" id="pairCode">------</span>
+        <button class="pill" type="button" id="copyPair">COPY LINK</button>
+      </div>
+      <p class="hint" id="pairUrl">open the link on your phone, enter the code</p>
+    </div>
+
+    <div class="field" id="deviceField">
+      <span class="label">paired devices</span>
+      <div id="deviceList" class="devices"><p class="hint">nothing paired yet</p></div>
+    </div>
+
+    <div class="field">
+      <span class="label">link</span>
+      <div class="row wrap">
+        <button id="stopBtn" class="pill" type="button">CUT VOICE</button>
+        <button id="resetBtn" class="pill" type="button">RESET CONVERSATION</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="label">pc address</span>
+      <div class="row">
+        <input id="apiBase" class="text" type="url" inputmode="url" spellcheck="false" placeholder="http://192.168.1.10:4173" />
+        <button id="apiSave" class="pill" type="button">SAVE</button>
+      </div>
+      <p class="hint">Leave blank when this page is served by the PC. Set it when a wrapper app hosts the page somewhere else.</p>
+    </div>
+
+    <div class="field" id="auditField">
+      <span class="label">last actions</span>
+      <div id="auditList" class="audit"><p class="hint">nothing yet</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================= pairing -->
+<section id="pairPanel" class="sheet center hidden" aria-label="Pair device">
+  <div class="sheet-head">
+    <h2>PAIR THIS PHONE</h2>
+  </div>
+  <div class="sheet-body">
+    <p class="hint">On the PC, open Settings and read the six-digit code. Then give her a name.</p>
+    <form id="pairForm" class="stack">
+      <input id="pairName" type="text" placeholder="device name" maxlength="24" value="" />
+      <input id="pairCodeInput" type="tel" inputmode="numeric" placeholder="000000" maxlength="6" autocomplete="one-time-code" />
+      <button class="pill accent" type="submit">LINK ME</button>
+    </form>
+    <p class="hint" id="pairError"></p>
+  </div>
+</section>
+
+<!-- ================================================= desktop approval -->
+<section id="accessPrompt" class="sheet center prompt hidden" aria-label="Access request">
+  <div class="sheet-head">
+    <h2>CHROME REQUEST</h2>
+  </div>
+  <div class="sheet-body">
+    <p class="hint"><strong id="accessWho">A device</strong> wants Capri to have full access to this PC: files, commands, apps, screen.</p>
+    <div class="row">
+      <button id="accessAllow" class="pill accent" type="button">GIVE HER THE KEYS</button>
+      <button id="accessDeny" class="pill" type="button">DENY</button>
+    </div>
+  </div>
+</section>
+
+<div id="notice" class="toast hidden">
+  <span id="noticeText"></span>
+  <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

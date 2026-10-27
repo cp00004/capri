@@ -1,0 +1,16 @@
+.env
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# local state: paired devices, the PC action audit log, the phone certificate
+.capri-devices.json
+capri-actions.log
+*.pem
+*.key
+*.crt
+*.pfx
+
+# scratch screenshots from testing
+shots/

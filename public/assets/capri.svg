@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 620" preserveAspectRatio="xMidYMin slice" role="img" aria-label="Capri, Night City netrunner">
+  <defs>
+    <radialGradient id="p-back" cx="50%" cy="34%" r="62%">
+      <stop offset="0" stop-color="#12243a"/>
+      <stop offset=".55" stop-color="#080d18"/>
+      <stop offset="1" stop-color="#04060b"/>
+    </radialGradient>
+
+    <linearGradient id="p-hair" x1=".1" y1="0" x2=".9" y2="1">
+      <stop offset="0" stop-color="#1b2136"/>
+      <stop offset=".45" stop-color="#0d1120"/>
+      <stop offset="1" stop-color="#161b2e"/>
+    </linearGradient>
+
+    <linearGradient id="p-skin" x1=".2" y1="0" x2=".85" y2="1">
+      <stop offset="0" stop-color="#f0c6ad"/>
+      <stop offset=".5" stop-color="#d9a488"/>
+      <stop offset="1" stop-color="#a9725c"/>
+    </linearGradient>
+
+    <linearGradient id="p-jacket" x1="0" y1="0" x2=".7" y2="1">
+      <stop offset="0" stop-color="#1d2740"/>
+      <stop offset=".5" stop-color="#101725"/>
+      <stop offset="1" stop-color="#0a0e17"/>
+    </linearGradient>
+
+    <linearGradient id="p-visor" x1="0" y1="0" x2="1" y2=".4">
+      <stop offset="0" stop-color="#0a6b7d" stop-opacity=".95"/>
+      <stop offset=".3" stop-color="#22e7ff" stop-opacity=".95"/>
+      <stop offset=".55" stop-color="#e8fdff" stop-opacity=".98"/>
+      <stop offset=".8" stop-color="#22e7ff" stop-opacity=".95"/>
+      <stop offset="1" stop-color="#0a6b7d" stop-opacity=".95"/>
+    </linearGradient>
+
+    <filter id="p-glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="p-soft" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="22"/>
+    </filter>
+
+    <clipPath id="p-faceclip">
+      <path d="M230 186c56 0 88 44 88 98 0 58-36 102-88 102s-88-44-88-102c0-54 32-98 88-98Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- backdrop -->
+  <rect width="460" height="620" fill="url(#p-back)"/>
+
+  <g opacity=".5">
+    <path d="M0 120h460M0 240h460M0 360h460M0 480h460" stroke="#22e7ff" stroke-opacity=".05" stroke-width="1"/>
+    <path d="M40 0v620M140 0v620M240 0v620M340 0v620M440 0v620" stroke="#22e7ff" stroke-opacity=".04" stroke-width="1"/>
+  </g>
+
+  <!-- halo -->
+  <ellipse cx="230" cy="270" rx="150" ry="170" fill="#22e7ff" opacity=".10" filter="url(#p-soft)"/>
+  <ellipse cx="300" cy="330" rx="130" ry="150" fill="#ff2e88" opacity=".08" filter="url(#p-soft)"/>
+
+  <!-- hair mass -->
+  <path d="M96 306c-4-108 46-182 134-182s138 76 134 184c-2 44-14 84-32 112l-24-30c18-36 26-72 24-104-36 24-78 34-102 34s-64-10-100-34c-2 34 6 70 24 106l-24 30c-18-30-30-70-34-116Z" fill="url(#p-hair)"/>
+  <path d="M96 306c-4-108 46-182 134-182s138 76 134 184" fill="none" stroke="#2a3352" stroke-width="2" opacity=".7"/>
+  <path d="M118 250c-8 66 0 122 16 164" stroke="#ff2e88" stroke-width="2" opacity=".28" fill="none"/>
+  <path d="M342 246c10 68 2 126-14 168" stroke="#22e7ff" stroke-width="2" opacity=".3" fill="none"/>
+
+  <!-- shoulders / jacket -->
+  <path d="M28 620c4-84 22-140 62-172 26-21 62-32 100-38l20 44c8 12 20 20 34 20s26-8 34-20l20-44c38 6 74 17 100 38 40 32 58 88 62 172Z" fill="url(#p-jacket)"/>
+  <path d="M28 620c4-84 22-140 62-172 26-21 62-32 100-38l20 44-14 30-52 18c-40 14-64 52-72 118Z" fill="#0b1220" opacity=".85"/>
+  <path d="M432 620c-4-84-22-140-62-172-26-21-62-32-100-38l-20 44 14 30 52 18c40 14 64 52 72 118Z" fill="#0b1220" opacity=".85"/>
+
+  <!-- collar neon -->
+  <path d="M190 410 230 452 270 410" fill="none" stroke="#22e7ff" stroke-opacity=".85" stroke-width="2.5" filter="url(#p-glow)"/>
+  <path d="M176 424 214 476M284 424 246 476" stroke="#ff2e88" stroke-opacity=".55" stroke-width="1.6"/>
+
+  <!-- neck -->
+  <path d="M196 362h68v58c0 20-68 20-68 0Z" fill="#b98168"/>
+  <path d="M196 372c22 14 46 14 68 0v18c-22 12-46 12-68 0Z" fill="#8f5f4c" opacity=".8"/>
+
+  <!-- face -->
+  <path d="M230 186c56 0 88 44 88 98 0 58-36 102-88 102s-88-44-88-102c0-54 32-98 88-98Z" fill="url(#p-skin)"/>
+
+  <g clip-path="url(#p-faceclip)">
+    <!-- shadow side -->
+    <path d="M142 180h40c-16 40-18 96-4 152-18-22-32-58-36-152Z" fill="#6f4737" opacity=".35"/>
+    <!-- magenta rim -->
+    <path d="M306 196c14 30 14 92-6 136-6 12-14 22-22 30 26-18 40-52 40-88 0-30-4-58-12-78Z" fill="#ff2e88" opacity=".22"/>
+    <!-- cheek light -->
+    <ellipse cx="268" cy="316" rx="34" ry="22" fill="#f7d9c3" opacity=".18"/>
+    <!-- circuit tattoos -->
+    <g stroke="#22e7ff" stroke-opacity=".45" stroke-width="1.4" fill="none">
+      <path d="M158 320h18v14h12"/>
+      <path d="M172 306h10v10"/>
+      <path d="M300 330h-16v12h-10"/>
+    </g>
+  </g>
+
+  <!-- bangs -->
+  <path d="M144 288c-4-70 34-112 86-112 54 0 88 44 86 114-14-34-34-58-62-66-10 22-24 36-44 44-24-10-44-4-66 20Z" fill="url(#p-hair)"/>
+  <path d="M150 278c22-42 56-62 96-60" fill="none" stroke="#39456b" stroke-width="2" opacity=".8"/>
+  <path d="M292 214c-12 30-30 50-58 62 26-6 46-22 58-62Z" fill="#0a0e18" opacity=".65"/>
+
+  <!-- visor -->
+  <g filter="url(#p-glow)" opacity=".95">
+    <rect x="150" y="252" width="162" height="52" rx="24" fill="url(#p-visor)"/>
+  </g>
+  <rect x="150" y="252" width="162" height="52" rx="24" fill="none" stroke="#eafeff" stroke-opacity=".5" stroke-width="1.2"/>
+  <g opacity=".55">
+    <path d="M152 262h158M152 272h158M152 282h158M152 292h158" stroke="#04070e" stroke-opacity=".55" stroke-width="1.6"/>
+  </g>
+  <rect x="150" y="252" width="162" height="52" rx="24" fill="#04070e" opacity=".18"/>
+  <path d="M196 254h10v48h-10Z" fill="#04070e" opacity=".35"/>
+
+  <!-- jack port + cable -->
+  <circle cx="330" cy="296" r="6" fill="#101828" stroke="#22e7ff" stroke-width="1.6"/>
+  <path d="M336 300c26 4 44 18 52 38" stroke="#22e7ff" stroke-opacity=".5" stroke-width="2.4" fill="none"/>
+  <path d="M336 300c26 4 44 18 52 38" stroke="#ff2e88" stroke-opacity=".35" stroke-width="1" fill="none"/>
+
+  <!-- lips -->
+  <path d="M212 350c6-4 12-5 18-5s12 1 18 5c-6 7-12 10-18 10s-12-3-18-10Z" fill="#8d4152"/>
+  <path d="M216 351c5 2 9 3 14 3s9-1 14-3" stroke="#c46a7c" stroke-width="1" fill="none" opacity=".7"/>
+
+  <!-- nose hint -->
+  <path d="M228 300c-3 10-3 18 2 24" stroke="#8a5744" stroke-width="2" fill="none" opacity=".5" stroke-linecap="round"/>
+
+  <!-- vignette -->
+  <rect width="460" height="620" fill="url(#p-vignette)"/>
+  <defs>
+    <radialGradient id="p-vignette" cx="50%" cy="42%" r="76%">
+      <stop offset=".5" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".55"/>
+    </radialGradient>
+  </defs>
+</svg>
