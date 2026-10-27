@@ -746,6 +746,7 @@ appBanterBtn?.addEventListener('click', ()=>{
 
 const rec = {
   active: false,
+  listenQueued: false,
   stream: null,
   recorder: null,
   chunks: [],
@@ -765,7 +766,13 @@ function pickMime() {
 }
 
 async function startListening() {
-  if (rec.active || state.phase === "thinking") return;
+  if (rec.active) return;
+  if (state.phase === "thinking" || state.streaming) {
+    rec.listenQueued = true;
+    showNotice("I’ll listen as soon as I finish this reply.", null, null, 2500);
+    return;
+  }
+  rec.listenQueued = false;
   if (!window.isSecureContext) {
     showNotice(
       "Phone mics only unlock on a secure page. On the PC run npm run cert, reopen the https link, and trust Capri Local once. The keyboard still works.",
@@ -946,7 +953,10 @@ async function respond(userText) {
 
   speech.stopped = false;
   speech.onDrain = () => {
-    if (!state.streaming) setPhase("idle");
+    if (!state.streaming) {
+      setPhase("idle");
+      if (rec.listenQueued) startListening();
+    }
   };
 
   try {
@@ -1039,7 +1049,10 @@ async function respond(userText) {
   } finally {
     state.streaming = false;
     activeAbort = null;
-    if (!speech.busy) setPhase("idle");
+    if (!speech.busy) {
+      setPhase("idle");
+      if (rec.listenQueued) startListening();
+    }
   }
 }
 
@@ -1706,6 +1719,7 @@ function pollAccess() {
 }
 
 el.stopBtn.addEventListener("click", () => {
+  rec.listenQueued = false;
   speech.stop();
   activeAbort?.abort();
   typer.reset("");
