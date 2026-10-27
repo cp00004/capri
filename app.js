@@ -767,6 +767,7 @@ const wakeWord = {
   active: false,
   starting: false,
   pendingStart: false,
+  chimePending: false,
   recognition: null,
 };
 
@@ -914,6 +915,7 @@ function paintWakeWord() {
 
 function setWakeWordEnabled(enabled) {
   wakeWord.enabled = Boolean(enabled);
+  wakeWord.chimePending = wakeWord.enabled;
   localStorage.setItem("capri.wakeWord", wakeWord.enabled ? "1" : "0");
   paintWakeWord();
   if (!wakeWord.enabled) {
@@ -949,7 +951,10 @@ function startWakeWord() {
     wakeWord.active = true;
     setPhase("listening");
     paintWakeWord();
-    playListeningChime();
+    if (wakeWord.chimePending) {
+      wakeWord.chimePending = false;
+      playListeningChime();
+    }
   };
   recognition.onresult = (event) => {
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
