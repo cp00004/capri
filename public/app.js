@@ -82,10 +82,11 @@ const el = {
   voiceHint: $("#voiceHint"),
 };
 
+const DEFAULT_BACKEND = "https://ripe-ducks-itch.loca.lt";
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
   session: localStorage.getItem(SESSION_KEY) || "",
-  apiBase: normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || ""),
+  apiBase: normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || DEFAULT_BACKEND),
   config: null,
   profile: null,
   voices: [],
@@ -1805,6 +1806,11 @@ async function fetchConfig() {
 }
 
 async function boot() {
+  // Save default backend to localStorage if not already set
+  if (!localStorage.getItem(API_KEY) && !localStorage.getItem(SERVER_KEY)) {
+    localStorage.setItem(API_KEY, DEFAULT_BACKEND);
+    localStorage.setItem(SERVER_KEY, DEFAULT_BACKEND);
+  }
   let cfg = null;
   try {
     cfg = await fetchConfig();
