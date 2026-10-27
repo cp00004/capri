@@ -1854,18 +1854,9 @@ async function boot() {
           profileBgBar.style.width = Math.min(progress, 100) + '%';
           if (progress >= 100) {
             clearInterval(interval);
-            // After loading completes, hide profile bg and show sign-in if not signed in
+            // After loading completes, hide profile bg
             setTimeout(() => {
               profileBg.classList.add('hidden');
-              // Trigger sign-in flow if not signed in
-              if (!state.profile?.google && !state.session) {
-                openSheet(el.settings);
-                // Scroll to account section
-                const accountField = document.querySelector('#settings .field');
-                if (accountField) accountField.scrollIntoView({ behavior: 'smooth' });
-                // Show a notice
-                showNotice("Sign in with Google to save your memory across devices.", null, null, 8000);
-              }
             }, 500);
           }
         }, 30);
