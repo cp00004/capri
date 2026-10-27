@@ -1131,7 +1131,10 @@ async function handleAccessRequest(req, res, who) {
   if (!who.device && !who.sessionToken) return json(res, 403, { error: "sign_in_required", message: "Sign in with Google before requesting PC access." });
 
   const sessionHash = who.sessionToken ? sha(who.sessionToken) : "";
-  const existing = [...pendingAccess.values()].find((p) => (p.deviceId === who.device?.id || p.sessionHash === sessionHash) && Date.now() - p.at < 120_000);
+  const existing = [...pendingAccess.values()].find((p) => (
+    (who.device && p.deviceId === who.device.id) ||
+    (sessionHash && p.sessionHash === sessionHash)
+  ) && Date.now() - p.at < 120_000);
   if (existing) return json(res, 200, { pending: true, id: existing.id });
 
   if (pendingAccess.size >= 4) {
