@@ -1846,7 +1846,7 @@ async function boot() {
     state.config = cfg;
     state.scope = cfg.scope;
 
-    if (!cfg.paired && !cfg.local) {
+    if (!cfg.paired && !cfg.local && !cfg.profile?.google) {
       showPair("This device is not paired. Read the code on the PC.");
     }
 
