@@ -1181,7 +1181,7 @@ const handler = async (req, res) => {
     if (trustedOrigin(req)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
-      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Capri-Profile");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Capri-Profile, Bypass-Tunnel-Reminder");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
       res.setHeader("Access-Control-Expose-Headers", "X-Capri-Pitch, X-Capri-Grit, X-Capri-Engine");
       res.setHeader("Access-Control-Max-Age", "600");
