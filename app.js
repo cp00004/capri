@@ -82,14 +82,17 @@ const el = {
   voiceHint: $("#voiceHint"),
 };
 
-const STALE_TUNNEL = "https://ripe-ducks-itch.loca.lt";
+const DEFAULT_TUNNEL = "https://splendid-bulldog-40.loca.lt";
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
-const DEFAULT_BACKEND = LOCAL_HOST ? "" : STALE_TUNNEL;
+const SAVED_TUNNEL = SAVED_BACKEND.endsWith(".loca.lt");
+const DEFAULT_BACKEND = LOCAL_HOST ? "" : DEFAULT_TUNNEL;
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
   session: localStorage.getItem(SESSION_KEY) || "",
-  apiBase: LOCAL_HOST && SAVED_BACKEND === STALE_TUNNEL ? "" : SAVED_BACKEND || DEFAULT_BACKEND,
+  apiBase: LOCAL_HOST
+    ? (SAVED_TUNNEL ? "" : SAVED_BACKEND)
+    : (SAVED_TUNNEL && SAVED_BACKEND !== DEFAULT_TUNNEL ? DEFAULT_TUNNEL : SAVED_BACKEND || DEFAULT_BACKEND),
   config: null,
   profile: null,
   voices: [],
