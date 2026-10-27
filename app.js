@@ -746,6 +746,7 @@ appBanterBtn?.addEventListener('click', ()=>{
 
 const rec = {
   active: false,
+  starting: false,
   listenQueued: false,
   stream: null,
   recorder: null,
@@ -765,8 +766,31 @@ function pickMime() {
   return PREFERRED_MIME.find((m) => MediaRecorder.isTypeSupported(m)) || "";
 }
 
+function playListeningChime() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const oscillator = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const start = ctx.currentTime;
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(740, start);
+    oscillator.frequency.setValueAtTime(980, start + 0.075);
+    gain.gain.setValueAtTime(0.001, start);
+    gain.gain.exponentialRampToValueAtTime(0.08, start + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + 0.18);
+    oscillator.connect(gain).connect(ctx.destination);
+    oscillator.onended = () => ctx.close().catch(() => {});
+    oscillator.start(start);
+    oscillator.stop(start + 0.19);
+  } catch {
+    /* audio feedback is optional */
+  }
+}
+
 async function startListening() {
-  if (rec.active) return;
+  if (rec.active || rec.starting) return;
   if (state.phase === "thinking" || state.streaming) {
     rec.listenQueued = true;
     showNotice("I’ll listen as soon as I finish this reply.", null, null, 2500);
@@ -785,6 +809,7 @@ async function startListening() {
     return;
   }
 
+  rec.starting = true;
   speech.stop();
   setPhase("listening");
   clearHeard();
@@ -794,6 +819,7 @@ async function startListening() {
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
   } catch (err) {
+    rec.starting = false;
     setPhase("idle");
     showNotice(
       err?.name === "NotAllowedError"
@@ -817,9 +843,11 @@ async function startListening() {
   source.connect(rec.analyser);
 
   rec.active = true;
+  rec.starting = false;
   rec.finishing = false;
   rec.startedAt = performance.now();
   rec.silenceSince = rec.startedAt;
+  playListeningChime();
 
   const data = new Uint8Array(rec.analyser.fftSize);
 
@@ -1786,7 +1814,7 @@ el.accessDeny.addEventListener("click", () => answerAccess(false));
 
 el.micBtn.addEventListener("click", () => {
   unlockAudio();
-  if (rec.active) stopListening();
+  if (rec.active || rec.starting) stopListening();
   else startListening();
 });
 
