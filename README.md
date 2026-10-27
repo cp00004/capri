@@ -1,3 +1,11 @@
+
+## Published link (for your app builder)
+
+- **GitHub repo (public):** https://github.com/cp00004/capri
+- **GitHub Pages (static UI):** https://cp00004.github.io/capri/
+
+GitHub Pages only hosts the HTML/CSS/JS. Capri's server must stay running on your PC. In the app's Settings → **PC address**, point to your PC over LAN (`http://<your-ip>:4173` or `https://<your-ip>:4174`) or a tunnel. If your builder hosts the UI cross-origin, add its origin to `CAPRI_ALLOW_ORIGINS` in `.env`.
+
 # CAPRI // PROJECT CAPRICORN
 
 A voice-first personality construct with hands on your PC. You talk, she answers out loud, and when you tell her to do something on the machine, she does it.
