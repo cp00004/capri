@@ -611,7 +611,7 @@ input.text::placeholder { color: var(--ink-faint); }
   .stage {
     padding: calc(52px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
   }
-  .subtitle { font-size: 13px; bottom: 8%; line-height: 1.4; }
+  .subtitle { left: 13%; right: 13%; bottom: 17%; max-height: 46%; font-size: 13px; line-height: 1.4; }
   .dock { gap: 12px; padding: 6px 20px calc(18px + var(--safe-b)); }
   .heard { min-height: 1.4em; font-size: 11px; max-width: 92vw; }
   .mic { width: 76px; min-width: 76px; }
