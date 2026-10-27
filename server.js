@@ -209,12 +209,23 @@ function auth(req) {
 }
 
 function trustedLoopbackOrigin(req) {
+  let requestUrl;
+  try {
+    requestUrl = new URL(`http://${String(req.headers.host || "")}`);
+  } catch {
+    return false;
+  }
+  const requestPort = Number(requestUrl.port || 80);
+  if (!/^(localhost|127\.0\.0\.1|::1|\[::1\])$/i.test(requestUrl.hostname) || (requestPort !== PORT && requestPort !== HTTPS_PORT)) {
+    return false;
+  }
+
   const origin = req.headers.origin;
   if (!origin) return true;
   try {
     const url = new URL(origin);
     const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
-    return (port === PORT || port === HTTPS_PORT) && url.host.toLowerCase() === String(req.headers.host || "").toLowerCase();
+    return (port === PORT || port === HTTPS_PORT) && url.host.toLowerCase() === requestUrl.host.toLowerCase();
   } catch {
     return false;
   }
