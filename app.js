@@ -31,6 +31,9 @@ const el = {
   voiceSelect: $("#voiceSelect"),
   voiceBtn: $("#voiceBtn"),
   voiceLabel: $("#voiceLabel"),
+  wakeWordBtn: $("#wakeWordBtn"),
+  wakeWordState: $("#wakeWordState"),
+  wakeWordHint: $("#wakeWordHint"),
   pcState: $("#pcState"),
   pcHint: $("#pcHint"),
   accessBtn: $("#accessBtn"),
@@ -759,6 +762,14 @@ const rec = {
   finishing: false,
 };
 
+const wakeWord = {
+  enabled: localStorage.getItem("capri.wakeWord") === "1",
+  active: false,
+  starting: false,
+  pendingStart: false,
+  recognition: null,
+};
+
 const PREFERRED_MIME = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
 function pickMime() {
@@ -794,6 +805,11 @@ async function startListening() {
   if (state.phase === "thinking" || state.streaming) {
     rec.listenQueued = true;
     showNotice("I’ll listen as soon as I finish this reply.", null, null, 2500);
+    return;
+  }
+  if (wakeWord.active || wakeWord.starting) {
+    wakeWord.pendingStart = true;
+    wakeWord.recognition?.stop();
     return;
   }
   rec.listenQueued = false;
@@ -873,6 +889,118 @@ async function startListening() {
   };
   rec.raf = requestAnimationFrame(loop);
 }
+
+function paintWakeWord() {
+  if (!el.wakeWordBtn || !el.wakeWordState || !el.wakeWordHint) return;
+  const supported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+  el.wakeWordBtn.disabled = !supported;
+  el.wakeWordBtn.classList.toggle("is-on", wakeWord.enabled);
+  el.wakeWordBtn.setAttribute("aria-pressed", String(wakeWord.enabled));
+  el.wakeWordBtn.textContent = wakeWord.enabled ? "ON" : "OFF";
+  el.wakeWordState.textContent = !supported ? "not supported here" : wakeWord.active ? "listening for Capri" : wakeWord.enabled ? "armed" : "tap to enable";
+  el.wakeWordHint.textContent = supported
+    ? "When enabled, say Capri while this page is open and visible. Background listening needs native app support."
+    : "This browser does not support wake-word listening. Tap the mic to talk instead.";
+}
+
+function setWakeWordEnabled(enabled) {
+  wakeWord.enabled = Boolean(enabled);
+  localStorage.setItem("capri.wakeWord", wakeWord.enabled ? "1" : "0");
+  paintWakeWord();
+  if (!wakeWord.enabled) {
+    wakeWord.pendingStart = false;
+    const recognition = wakeWord.recognition;
+    wakeWord.recognition = null;
+    wakeWord.active = false;
+    wakeWord.starting = false;
+    try { recognition?.stop(); } catch { /* already stopped */ }
+    if (!rec.active && !state.streaming) setPhase("idle");
+    return;
+  }
+  startWakeWord();
+}
+
+function startWakeWord() {
+  if (!wakeWord.enabled || document.hidden || wakeWord.active || wakeWord.starting || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    setWakeWordEnabled(false);
+    showNotice("Wake-word listening is not supported in this browser. Use the mic button instead.", null, null, 7000);
+    return;
+  }
+
+  const recognition = new Recognition();
+  wakeWord.recognition = recognition;
+  wakeWord.starting = true;
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.lang = "en-US";
+  recognition.onstart = () => {
+    wakeWord.starting = false;
+    wakeWord.active = true;
+    setPhase("listening");
+    paintWakeWord();
+    playListeningChime();
+  };
+  recognition.onresult = (event) => {
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      if (!event.results[index].isFinal) continue;
+      if (/\bcapri\b/i.test(event.results[index][0]?.transcript || "")) {
+        wakeWord.pendingStart = true;
+        try { recognition.stop(); } catch { /* onend will resume */ }
+        return;
+      }
+    }
+  };
+  recognition.onerror = (event) => {
+    if (["not-allowed", "service-not-allowed"].includes(event.error)) {
+      wakeWord.enabled = false;
+      localStorage.setItem("capri.wakeWord", "0");
+      paintWakeWord();
+      showNotice("Allow microphone access for wake-word listening, then turn it on again.", null, null, 8000);
+    }
+  };
+  recognition.onend = () => {
+    if (wakeWord.recognition === recognition) wakeWord.recognition = null;
+    wakeWord.active = false;
+    wakeWord.starting = false;
+    paintWakeWord();
+    if (wakeWord.pendingStart && wakeWord.enabled && !document.hidden) {
+      wakeWord.pendingStart = false;
+      setTimeout(() => startListening(), 180);
+    } else if (wakeWord.enabled && !document.hidden) {
+      setTimeout(startWakeWord, 900);
+    } else if (!rec.active && !state.streaming) {
+      setPhase("idle");
+    }
+  };
+
+  try {
+    recognition.start();
+  } catch (error) {
+    wakeWord.recognition = null;
+    wakeWord.starting = false;
+    setWakeWordEnabled(false);
+    showNotice(`Wake-word listening could not start: ${error.message || error}`, null, null, 7000);
+  }
+}
+
+el.wakeWordBtn?.addEventListener("click", () => {
+  unlockAudio();
+  setWakeWordEnabled(!wakeWord.enabled);
+});
+
+paintWakeWord();
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    try { wakeWord.recognition?.stop(); } catch { /* already stopped */ }
+  } else if (wakeWord.pendingStart && wakeWord.enabled) {
+    wakeWord.pendingStart = false;
+    startListening();
+  } else if (wakeWord.enabled) {
+    startWakeWord();
+  }
+});
 
 function stopRecording() {
   return new Promise((resolve) => {
@@ -984,6 +1112,7 @@ async function respond(userText) {
     if (!state.streaming) {
       setPhase("idle");
       if (rec.listenQueued) startListening();
+      else if (wakeWord.enabled) startWakeWord();
     }
   };
 
@@ -1080,6 +1209,7 @@ async function respond(userText) {
     if (!speech.busy) {
       setPhase("idle");
       if (rec.listenQueued) startListening();
+      else if (wakeWord.enabled) startWakeWord();
     }
   }
 }
