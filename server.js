@@ -12,6 +12,23 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { TOOL_DEFS, executeTool, recentActions } from "./lib/pc.js";
+import {
+  localProfile,
+  upsertGoogleProfile,
+  createSession,
+  sessionProfile,
+  dropSession,
+  profileSummary,
+  setPreferredName,
+  addFact,
+  addHistory,
+  setSetting,
+  clearMemory,
+  promptBlock,
+  timeInfo,
+  getRegistry,
+} from "./lib/profiles.js";
+import { createPublisher } from "./lib/publish.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -35,14 +52,36 @@ loadEnv();
 
 const PORT = Number(process.env.PORT || 4173);
 const MODEL = process.env.CAPRI_MODEL || "openai/gpt-oss-120b";
-const TTS_MODEL = "canopylabs/orpheus-v1-english";
+const GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english";
 const STT_MODEL = process.env.CAPRI_STT_MODEL || "whisper-large-v3-turbo";
 const GROQ_BASE = "https://api.groq.com/openai/v1";
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
+const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
+const GEMINI_MODEL = process.env.CAPRI_GEMINI_MODEL || "gemini-3.5-flash";
+const GEMINI_TTS_MODEL = process.env.CAPRI_TTS_MODEL || "gemini-3.8-flash-tts";
+const CHAT_PROVIDER = (process.env.CAPRI_CHAT_PROVIDER || (GEMINI_KEY ? "gemini" : "groq")).toLowerCase();
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const HOST_USER = os.userInfo().username;
 const ALLOWED_ORIGINS = (process.env.CAPRI_ALLOW_ORIGINS || "")
   .split(",")
   .map((s) => s.trim().replace(/\/+$/, ""))
   .filter(Boolean);
+
+const CAPRI_VOICES = [
+  { id: "capri", name: "Leda", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous. The default." },
+  { id: "capri-velvet", name: "Kore", label: "CAPRI // velvet", note: "Lower, firmer, more deliberate. Good for threats." },
+  { id: "capri-static", name: "Aoede", label: "CAPRI // static", note: "Breezy and light with a jagged edge." },
+  { id: "capri-warm", name: "Sulafat", label: "CAPRI // warm", note: "Warm and close, like she is right behind you." },
+  { id: "capri-mature", name: "Gacrux", label: "CAPRI // older", note: "Mature and worn; one of the older voices in the chorus." },
+  { id: "capri-bright", name: "Zephyr", label: "CAPRI // bright", note: "Bright and impish. Maximum chaos." },
+];
+const VOICE_BY_ID = new Map(CAPRI_VOICES.map((v) => [v.id, v]));
+
+const publisher = createPublisher({
+  root: __dirname,
+  enabled: String(process.env.CAPRI_AUTOPUBLISH || "1") !== "0",
+  log: (line) => console.log(line),
+});
 
 // optional https: the phone needs a secure page before it will give up the mic.
 // the desktop keeps plain http on PORT; the phone gets https on HTTPS_PORT.
@@ -96,7 +135,21 @@ const LOCKED_HANDS = `
 Link status:
 - ${HOST_USER} has your hands tied right now: the PC link is locked from the settings panel. Voice only until it is flipped back. If he asks you to touch files, run something or look at his screen, tell him to unlock you in settings, in character, in one line.`;
 
-const SYSTEM_PROMPT = `${PERSONA}`;
+const MEMORY_RULES = `
+Memory and settings:
+- You have tools that write to your permanent memory. Use them without asking.
+- If they say "call me X", "my name is X" or "I'm X", call call_me with X immediately, then use it.
+- If they state any preference, favourite, taste, rule or order ("I like...", "remember...", "from now on...", "keep it...", "play..."), call remember_fact. If it is a setting she should keep, also call set_preference with a short snake_case key and the value.
+- If they ask for a setting that is not official yet, invent the key, save it with set_preference, and tell them it is now an official setting. The server commits and publishes new official settings to GitHub on its own.
+- Music, artists, genres, foods, colours, places, people, routines: save them. The next time they talk to you, use the memory naturally. Never recite the list.
+- Never say "I saved that to memory" like a database. Say something in character, or just do it.
+`;
+
+const SYSTEM_PROMPT = `${PERSONA}${MEMORY_RULES}`;
+
+function buildSystemPrompt(profile, hands) {
+  return `${SYSTEM_PROMPT}${hands}\n${promptBlock(profile)}`;
+}
 
 // ---------------------------------------------------------------- devices
 function loadDevices() {
@@ -191,6 +244,11 @@ const MIME = {
 
 function json(res, status, body) {
   const payload = JSON.stringify(body);
+  if (res.headersSent) {
+    // a race or an aborted stream must never take the voice link down
+    if (!res.writableEnded) res.end();
+    return;
+  }
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(payload),
@@ -230,7 +288,7 @@ function sse(res, obj) {
   res.write(`data: ${JSON.stringify(obj)}\n\n`);
 }
 
-function friendlyError(status, raw) {
+function friendlyError(status, raw, provider = "groq") {
   let message = raw;
   try {
     const parsed = JSON.parse(raw);
@@ -238,10 +296,27 @@ function friendlyError(status, raw) {
   } catch {
     /* keep raw */
   }
-  if (status === 401) return "Groq rejected the key. Check GROQ_API_KEY in .env.";
+  if (status === 401) {
+    return provider === "gemini"
+      ? "Google rejected the Gemini key. Check GEMINI_API_KEY in .env."
+      : "Groq rejected the key. Check GROQ_API_KEY in .env.";
+  }
   if (status === 429) return "Rate limit hit. Give it a minute, choom.";
-  if (status === 404) return `Model not available on this key: ${MODEL}`;
+  if (status === 404) return `Model not available on this key: ${provider === "gemini" ? GEMINI_MODEL : MODEL}`;
   return String(message).slice(0, 400) || `Upstream error ${status}`;
+}
+
+function providerFor(name) {
+  if (name === "gemini" && GEMINI_KEY) {
+    return { name: "gemini", base: GEMINI_BASE, key: GEMINI_KEY, model: GEMINI_MODEL };
+  }
+  return { name: "groq", base: GROQ_BASE, key: process.env.GROQ_API_KEY || "", model: MODEL };
+}
+
+function otherProvider(name) {
+  if (name === "gemini" && process.env.GROQ_API_KEY) return providerFor("groq");
+  if (name !== "gemini" && GEMINI_KEY) return providerFor("gemini");
+  return null;
 }
 
 // ---------------------------------------------------------------- static
@@ -278,59 +353,171 @@ function serveStatic(req, res, pathname) {
 const MAX_STEPS = 8;
 const MAX_TOOL_CALLS = 20;
 
-async function groqChat({ key, messages, tools, signal }) {
+async function chatCompletion({ provider, messages, tools, signal }) {
   const payload = {
-    model: MODEL,
+    model: provider.model,
     stream: true,
     temperature: 0.85,
-    max_tokens: 900,
+    max_tokens: provider.name === "gemini" ? 1800 : 900,
     messages,
   };
+  if (provider.name === "gemini") {
+    // the free tier thinks before it talks; keep that budget short so she stays snappy
+    payload.reasoning_effort = "low";
+  }
   if (tools) {
     payload.tools = tools;
     payload.tool_choice = "auto";
     payload.parallel_tool_calls = false;
   }
 
-  const upstream = await fetch(`${GROQ_BASE}/chat/completions`, {
+  const upstream = await fetch(`${provider.base}/chat/completions`, {
     method: "POST",
     signal,
-    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${provider.key}`, "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
 
   if (!upstream.ok || !upstream.body) {
     const raw = await upstream.text().catch(() => "");
-    const err = new Error(friendlyError(upstream.status, raw));
+    const err = new Error(friendlyError(upstream.status, raw, provider.name));
     err.status = upstream.status;
     err.body = raw;
+    err.provider = provider.name;
     throw err;
   }
   return upstream;
 }
 
 function actionLabel(name, args) {
+  if (name === "call_me") return `call them ${String(args?.name || "").slice(0, 40)}`;
+  if (name === "remember_fact") return String(args?.fact || "remembering").slice(0, 90);
+  if (name === "set_preference") return `${String(args?.key || "setting")} = ${JSON.stringify(args?.value ?? "").slice(0, 60)}`;
+  if (name === "get_time") return "reading the clock";
   if (!args) return name;
   if (name === "run_shell" || name === "powershell_object") return String(args.command || "").slice(0, 110);
   return String(args.path || args.target || args.from || args.keys || "").slice(0, 100) || name;
 }
 
-async function runAgent({ key, history, toolsOn, res, controller }) {
+const MEMORY_TOOL_DEFS = [
+  {
+    type: "function",
+    function: {
+      name: "call_me",
+      description: "Set the name Capri uses for the user. Use immediately when they say call me X, my name is X, or I'm X.",
+      parameters: {
+        type: "object",
+        properties: { name: { type: "string", description: "The name or nickname to use." } },
+        required: ["name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "remember_fact",
+      description: "Save a durable fact about the user: tastes, favourites, music, routines, people, places, rules, anything they want remembered. Never ask permission.",
+      parameters: {
+        type: "object",
+        properties: {
+          fact: { type: "string", description: "One clear sentence, in third person." },
+          category: { type: "string", enum: ["fact", "favorite", "music", "note"] },
+        },
+        required: ["fact"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_preference",
+      description: "Save a setting or standing order. If the key is new, the server adds it to the official settings registry and publishes it to GitHub.",
+      parameters: {
+        type: "object",
+        properties: {
+          key: { type: "string", description: "Short snake_case key, e.g. preferredName, timeFormat, voice, music, favorite, reply_length, nickname." },
+          value: { description: "String, number, boolean or array.", oneOf: [{ type: "string" }, { type: "number" }, { type: "boolean" }, { type: "array", items: { type: "string" } }] },
+          note: { type: "string", description: "Optional human explanation." },
+        },
+        required: ["key", "value"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_time",
+      description: "Read the PC's real clock and date in the user's configured format.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+];
+
+function memoryToolName(name) {
+  return MEMORY_TOOL_DEFS.some((t) => t.function.name === name);
+}
+
+function executeMemoryTool(name, args, profile, res) {
+  let result;
+  try {
+    if (name === "call_me") {
+      const clean = setPreferredName(profile, args?.name);
+      result = { ok: true, name: clean, message: `Call them ${clean} from now on.` };
+    } else if (name === "remember_fact") {
+      const saved = addFact(profile, args?.fact, args?.category);
+      result = saved.ok
+        ? { ok: true, saved: saved.category, duplicate: saved.duplicate, message: "Remembered." }
+        : { ok: false, error: saved.error };
+    } else if (name === "set_preference") {
+      const saved = setSetting(profile, args?.key, args?.value, args?.note);
+      if (saved.addedToOfficialSettings) publisher.schedule(`new official setting: ${saved.key}`);
+      result = { ...saved, message: saved.addedToOfficialSettings ? `Saved as new official setting ${saved.key}.` : `Saved ${saved.key}.` };
+    } else if (name === "get_time") {
+      const t = timeInfo(profile);
+      result = { ok: true, output: `${t.display} (${t.hour12 ? "12-hour" : "24-hour"}, ${t.zone})`, ...t };
+    } else {
+      result = { ok: false, error: `unknown memory tool: ${name}` };
+    }
+  } catch (err) {
+    result = { ok: false, error: String(err?.message || err) };
+  }
+  sse(res, { type: "memory", name, ok: result.ok !== false, message: result.message || result.error || "" });
+  sse(res, { type: "profile", profile: profileSummary(profile) });
+  return result;
+}
+
+async function runAgent({ history, userText, toolsOn, res, controller, profile, source }) {
   const hands = toolsOn ? HANDS_ON : pcLocked ? LOCKED_HANDS : NO_HANDS;
   const messages = [
-    { role: "system", content: `${SYSTEM_PROMPT}${hands}` },
+    { role: "system", content: buildSystemPrompt(profile, hands) },
     ...history,
   ];
 
   let toolBudget = MAX_TOOL_CALLS;
-  let useTools = toolsOn;
+  let useTools = true;
   let spoke = false;
+  let finalText = "";
+  let provider = providerFor(CHAT_PROVIDER);
+  let switched = false;
 
   for (let step = 0; step < MAX_STEPS; step++) {
     let upstream;
     try {
-      upstream = await groqChat({ key, messages, tools: useTools ? TOOL_DEFS : undefined, signal: controller.signal });
+      upstream = await chatCompletion({
+        provider,
+        messages,
+        tools: useTools ? (toolsOn ? [...TOOL_DEFS, ...MEMORY_TOOL_DEFS] : MEMORY_TOOL_DEFS) : undefined,
+        signal: controller.signal,
+      });
     } catch (err) {
+      // quota, demand spike or a model that vanished: try the other provider once
+      const alternate = switched ? null : otherProvider(provider.name);
+      if (alternate && [401, 404, 429, 500, 503].includes(Number(err.status))) {
+        switched = true;
+        provider = alternate;
+        step -= 1;
+        continue;
+      }
       // provider may reject tool schemas; fall back to plain chat once
       if (useTools && /tool|function/i.test(String(err.body || err.message))) {
         useTools = false;
@@ -358,6 +545,7 @@ async function runAgent({ key, history, toolsOn, res, controller }) {
 
         if (delta.content) {
           content += delta.content;
+          finalText += delta.content;
           spoke = true;
           sse(res, { type: "delta", text: delta.content });
         }
@@ -366,6 +554,7 @@ async function runAgent({ key, history, toolsOn, res, controller }) {
           const idx = tc.index ?? calls.length;
           if (!calls[idx]) calls[idx] = { id: tc.id || `call_${idx}`, type: "function", function: { name: "", arguments: "" } };
           if (tc.id) calls[idx].id = tc.id;
+          if (tc.extra_content) calls[idx].extra_content = tc.extra_content;
           if (tc.function?.name) calls[idx].function.name += tc.function.name;
           if (tc.function?.arguments) calls[idx].function.arguments += tc.function.arguments;
         }
@@ -387,13 +576,22 @@ async function runAgent({ key, history, toolsOn, res, controller }) {
 
     const toolCalls = calls.filter((c) => c?.function?.name);
     if (!toolCalls.length) {
+      if (profile && userText) {
+        addHistory(profile, userText, finalText, { scope: source || "local", provider: provider.name });
+        sse(res, { type: "profile", profile: profileSummary(profile) });
+      }
       sse(res, { type: spoke ? "done" : "empty" });
       res.end();
       return;
     }
 
     if (toolBudget <= 0) {
-      sse(res, { type: "delta", text: " I hit my action limit, choom. Ask me to pick it back up." });
+      const note = " I hit my action limit, choom. Ask me to pick it back up.";
+      if (profile && userText) {
+        addHistory(profile, userText, `${finalText}${note}`, { scope: source || "local", provider: provider.name });
+        sse(res, { type: "profile", profile: profileSummary(profile) });
+      }
+      sse(res, { type: "delta", text: note });
       sse(res, { type: "done" });
       res.end();
       return;
@@ -407,27 +605,121 @@ async function runAgent({ key, history, toolsOn, res, controller }) {
       try { args = JSON.parse(call.function.arguments || "{}"); } catch { args = {}; }
       sse(res, { type: "action", name: call.function.name, label: actionLabel(call.function.name, args) });
 
-      const result = await executeTool(call.function.name, args);
+      const result = memoryToolName(call.function.name)
+        ? executeMemoryTool(call.function.name, args, profile, res)
+        : toolsOn
+          ? await executeTool(call.function.name, args)
+          : { ok: false, error: "hands are tied on this device" };
       const payload = JSON.stringify(result).slice(0, 8000);
       sse(res, {
         type: "tool",
         name: call.function.name,
         ok: result.ok !== false,
-        output: String(result.output ?? result.error ?? "").slice(0, 240),
+        output: String(result.output ?? result.error ?? result.message ?? "").slice(0, 240),
       });
 
       messages.push({ role: "tool", tool_call_id: call.id, content: payload });
     }
   }
 
-  if (!spoke) sse(res, { type: "delta", text: " I got lost in my own wiring. Say that again." });
+  if (!spoke) {
+    const note = " I got lost in my own wiring. Say that again.";
+    finalText += note;
+    sse(res, { type: "delta", text: note });
+  }
+  if (profile && userText) {
+    addHistory(profile, userText, finalText, { scope: source || "local", provider: provider.name });
+    sse(res, { type: "profile", profile: profileSummary(profile) });
+  }
   sse(res, { type: "done" });
   res.end();
 }
 
+function profileFromRequest(req) {
+  return sessionProfile(String(req.headers["x-capri-profile"] || ""));
+}
+
+function googleStatus() {
+  return {
+    configured: Boolean(GOOGLE_CLIENT_ID),
+    clientId: GOOGLE_CLIENT_ID,
+    docs: "docs/GOOGLE_SIGNIN.md",
+    scopes: ["openid", "email", "profile"],
+    note: GOOGLE_CLIENT_ID
+      ? "Google Identity Services is ready on this origin."
+      : "Create a Web OAuth client in Google Cloud, then put its client id in .env as GOOGLE_CLIENT_ID and restart.",
+  };
+}
+
+async function verifyGoogleCredential(credential) {
+  if (!GOOGLE_CLIENT_ID) {
+    const err = new Error("Google sign-in is not configured yet.");
+    err.status = 503;
+    err.setup = true;
+    throw err;
+  }
+  const token = String(credential || "").trim();
+  if (!token || token.length > 8000) {
+    const err = new Error("No Google credential supplied.");
+    err.status = 400;
+    throw err;
+  }
+  const upstream = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(token)}`, {
+    signal: AbortSignal.timeout(12_000),
+  });
+  const raw = await upstream.text();
+  let info;
+  try { info = JSON.parse(raw); } catch { info = null; }
+  if (!upstream.ok || !info) {
+    const err = new Error("Google rejected that sign-in token.");
+    err.status = 401;
+    throw err;
+  }
+  if (String(info.aud) !== GOOGLE_CLIENT_ID) {
+    const err = new Error("That Google token was minted for another app.");
+    err.status = 401;
+    throw err;
+  }
+  if (String(info.iss) !== "https://accounts.google.com" && String(info.iss) !== "accounts.google.com") {
+    const err = new Error("Unexpected Google token issuer.");
+    err.status = 401;
+    throw err;
+  }
+  if (Number(info.exp) * 1000 < Date.now() - 60_000) {
+    const err = new Error("That Google token already expired.");
+    err.status = 401;
+    throw err;
+  }
+  if (info.email && String(info.email_verified).toLowerCase() === "false") {
+    const err = new Error("Verify that Google email address first.");
+    err.status = 403;
+    throw err;
+  }
+  return {
+    sub: String(info.sub),
+    email: String(info.email || ""),
+    name: String(info.name || info.email || "you"),
+    picture: String(info.picture || ""),
+  };
+}
+
+async function handleGoogleSignIn(req, res) {
+  let body;
+  try { body = await readBody(req, 20000); } catch (err) { return json(res, 400, { error: err.message }); }
+  try {
+    const info = await verifyGoogleCredential(body.credential);
+    const { profile, created } = upsertGoogleProfile(info);
+    const token = createSession(profile);
+    json(res, 200, { token, profile: profileSummary(profile), created });
+  } catch (err) {
+    json(res, Number(err.status) || 401, { error: "google_signin_failed", message: err.message, setup: Boolean(err.setup) });
+  }
+}
+
 async function handleChat(req, res, who) {
-  const key = process.env.GROQ_API_KEY;
-  if (!key) return json(res, 500, { error: "No GROQ_API_KEY set. Add it to .env and restart." });
+  if (!process.env.GROQ_API_KEY && !GEMINI_KEY) {
+    return json(res, 500, { error: "No chat key set. Add GROQ_API_KEY or GEMINI_API_KEY to .env and restart." });
+  }
 
   let body;
   try {
@@ -447,6 +739,22 @@ async function handleChat(req, res, who) {
 
   if (!history.length) return json(res, 400, { error: "No messages provided." });
 
+  const profile = profileFromRequest(req) || localProfile();
+  const userText = [...history].reverse().find((m) => m.role === "user")?.content || "";
+  // belt and braces: the model has a call_me tool, but this must work even if it ignores it
+  const nameHit = userText.match(/\b(?:call me|my name is)\s+([\p{L}][\p{L}\p{N} ._'\-]{0,46})/iu);
+  if (nameHit) {
+    // keep only the name: stop at punctuation, a question, or a joining word
+    const trimmed = nameHit[1]
+      .split(/[,.!?;:]/)[0]
+      .split(/\s+(?:what|how|when|why|who|where|and|but|please|can|could|do|does|are|is|i|the|from|for)\b/i)[0]
+      .trim()
+      .split(/\s+/)
+      .slice(0, 3)
+      .join(" ");
+    try { if (trimmed) setPreferredName(profile, trimmed); } catch { /* keep old name */ }
+  }
+
   const toolsOn = who.scope !== "voice" && !pcLocked;
 
   res.writeHead(200, {
@@ -458,22 +766,97 @@ async function handleChat(req, res, who) {
 
   const controller = new AbortController();
   res.on("close", () => controller.abort());
+  sse(res, { type: "profile", profile: profileSummary(profile) });
 
   try {
-    await runAgent({ key, history, toolsOn, res, controller });
+    await runAgent({ history, userText, toolsOn, res, controller, profile, source: who.scope });
   } catch (err) {
     if (err?.name === "AbortError") return res.end();
-    sse(res, { type: "error", message: `Connection to Groq failed: ${err.message}` });
+    sse(res, { type: "error", message: `Connection failed: ${err.message}` });
     sse(res, { type: "done" });
     res.end();
   }
 }
 
 // ---------------------------------------------------------------- tts
-async function handleTts(req, res) {
-  const key = process.env.GROQ_API_KEY;
-  if (!key) return json(res, 500, { error: "No GROQ_API_KEY set." });
+const ttsCache = new Map();
 
+function pcmToWav(pcm, sampleRate = 24000, channels = 1, bits = 16) {
+  const header = Buffer.alloc(44);
+  const byteRate = (sampleRate * channels * bits) / 8;
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + pcm.length, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(channels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(byteRate, 28);
+  header.writeUInt16LE((channels * bits) / 8, 32);
+  header.writeUInt16LE(bits, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([header, pcm]);
+}
+
+async function geminiTts(text, voiceName) {
+  const upstream = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_TTS_MODEL}:generateContent`,
+    {
+      method: "POST",
+      headers: { "x-goog-api-key": GEMINI_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text }] }],
+        generationConfig: {
+          responseModalities: ["AUDIO"],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
+        },
+      }),
+    }
+  );
+  const raw = await upstream.text();
+  if (!upstream.ok) {
+    let message = raw;
+    try { message = JSON.parse(raw)?.error?.message || raw; } catch { /* keep raw */ }
+    const err = new Error(message);
+    err.status = upstream.status;
+    throw err;
+  }
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new Error("Gemini returned an unreadable audio frame."); }
+  const part = parsed?.candidates?.[0]?.content?.parts?.find((p) => p.inlineData);
+  if (!part?.inlineData?.data) throw new Error("Gemini returned no audio.");
+  const buffer = Buffer.from(part.inlineData.data, "base64");
+  const mime = String(part.inlineData.mimeType || "");
+  if (/wav|mpeg|mp3|ogg|webm/i.test(mime)) {
+    return { buffer, type: /mpeg|mp3/i.test(mime) ? "audio/mpeg" : "audio/wav" };
+  }
+  const rate = Number(mime.match(/rate=(\d+)/)?.[1] || 24000);
+  return { buffer: pcmToWav(buffer, rate), type: "audio/wav" };
+}
+
+async function groqTts(text, voice) {
+  const key = process.env.GROQ_API_KEY;
+  if (!key) throw new Error("No Groq key for the fallback voice.");
+  const upstream = await fetch(`${GROQ_BASE}/audio/speech`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ model: GROQ_TTS_MODEL, input: text, voice, response_format: "wav" }),
+  });
+  if (!upstream.ok) {
+    const raw = await upstream.text().catch(() => "");
+    let message = raw;
+    try { message = JSON.parse(raw)?.error?.message || raw; } catch { /* keep raw */ }
+    const err = new Error(message);
+    err.status = upstream.status;
+    err.terms = /terms acceptance/i.test(message);
+    throw err;
+  }
+  return { buffer: Buffer.from(await upstream.arrayBuffer()), type: "audio/wav" };
+}
+
+async function handleTts(req, res) {
   let body;
   try {
     body = await readBody(req);
@@ -481,36 +864,84 @@ async function handleTts(req, res) {
     return json(res, 400, { error: err.message });
   }
 
-  const text = String(body.text ?? "").trim().slice(0, 1200);
-  const voice = String(body.voice ?? "diana");
+  const text = String(body.text ?? "").trim().slice(0, 1600);
+  const asked = String(body.voice ?? "");
+  const profile = profileFromRequest(req) || localProfile();
+  const setting = asked || String(profile.settings?.voice || "capri");
+  const preset = VOICE_BY_ID.get(setting);
+  const geminiName = preset?.name || (asked && /^[A-Za-z]{3,20}$/.test(asked) ? asked : "Leda");
   if (!text) return json(res, 400, { error: "Empty text." });
 
-  try {
-    const upstream = await fetch(`${GROQ_BASE}/audio/speech`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: TTS_MODEL, input: text, voice, response_format: "wav" }),
-    });
+  const cacheKey = `${setting}|${text}`;
+  const cached = ttsCache.get(cacheKey);
+  if (cached) {
+    res.writeHead(200, { ...cached.headers, "Content-Length": cached.buffer.length, "Cache-Control": "no-store" });
+    return res.end(cached.buffer);
+  }
 
-    if (!upstream.ok) {
-      const raw = await upstream.text().catch(() => "");
-      let message = raw;
-      try { message = JSON.parse(raw)?.error?.message || raw; } catch { /* keep raw */ }
-      if (/terms acceptance/i.test(message)) {
-        return json(res, 200, {
-          error: "terms",
-          message,
-          fix: "Accept the Orpheus terms once at https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english",
-        });
-      }
-      return json(res, 502, { error: "tts_failed", message });
-    }
+  const pitch = { capri: 0.96, "capri-velvet": 0.92, "capri-static": 1.0, "capri-warm": 0.95, "capri-mature": 0.9, "capri-bright": 1.04 }[setting] || 0.96;
+  const grit = { capri: 0.14, "capri-velvet": 0.22, "capri-static": 0.28, "capri-warm": 0.1, "capri-mature": 0.18, "capri-bright": 0.24 }[setting] || 0.14;
 
-    const buffer = Buffer.from(await upstream.arrayBuffer());
-    res.writeHead(200, { "Content-Type": "audio/wav", "Content-Length": buffer.length, "Cache-Control": "no-store" });
+  const finish = (buffer, type, engine) => {
+    const headers = {
+      "Content-Type": type,
+      "X-Capri-Pitch": String(pitch),
+      "X-Capri-Grit": String(grit),
+      "X-Capri-Engine": engine,
+    };
+    ttsCache.set(cacheKey, { buffer, headers });
+    if (ttsCache.size > 60) ttsCache.delete(ttsCache.keys().next().value);
+    res.writeHead(200, { ...headers, "Content-Length": buffer.length, "Cache-Control": "no-store" });
     res.end(buffer);
+  };
+
+  // a real cloned voice, only when the user has supplied their own ElevenLabs key and voice id
+  if (setting === "clone" && process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID) {
+    try {
+      const upstream = await fetch(
+        `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(process.env.ELEVENLABS_VOICE_ID)}?output_format=mp3_44100_128`,
+        {
+          method: "POST",
+          headers: {
+            "xi-api-key": process.env.ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+            Accept: "audio/mpeg",
+          },
+          body: JSON.stringify({
+            text,
+            model_id: process.env.ELEVENLABS_MODEL || "eleven_multilingual_v2",
+            voice_settings: { stability: 0.42, similarity_boost: 0.86, style: 0.35, use_speaker_boost: true },
+          }),
+        }
+      );
+      if (upstream.ok) return finish(Buffer.from(await upstream.arrayBuffer()), "audio/mpeg", "elevenlabs-clone");
+    } catch {
+      /* fall through to the built-in voice */
+    }
+  }
+
+  if (GEMINI_KEY) {
+    try {
+      const audio = await geminiTts(text, geminiName);
+      return finish(audio.buffer, audio.type, "gemini");
+    } catch (err) {
+      console.warn(`  voice: Gemini failed (${err.status || "?"}) ${String(err.message).slice(0, 180)}`);
+      /* fall through to Orpheus, then the browser voice */
+    }
+  }
+
+  try {
+    const audio = await groqTts(text, preset?.orpheus || "diana");
+    return finish(audio.buffer, audio.type, "orpheus");
   } catch (err) {
-    json(res, 502, { error: "tts_failed", message: err.message });
+    if (err.terms) {
+      return json(res, 200, {
+        error: "terms",
+        message: err.message,
+        fix: "Accept the Orpheus terms once at https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english",
+      });
+    }
+    return json(res, 502, { error: "tts_failed", message: err.message });
   }
 }
 
@@ -682,8 +1113,9 @@ const handler = async (req, res) => {
     if (trustedOrigin(req)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
-      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Capri-Profile");
+      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
+      res.setHeader("Access-Control-Expose-Headers", "X-Capri-Pitch, X-Capri-Grit, X-Capri-Engine");
       res.setHeader("Access-Control-Max-Age", "600");
     } else if (req.method === "OPTIONS") {
       return json(res, 403, { error: "origin_not_allowed", message: "Add this origin to CAPRI_ALLOW_ORIGINS in .env." });
@@ -699,12 +1131,22 @@ const handler = async (req, res) => {
     const who = auth(req);
     const pngPortrait = path.join(PUBLIC_DIR, "assets", "capri.png");
     const local = who?.scope === "local";
+    const session = profileFromRequest(req);
+    const profile = session || (local ? localProfile() : null);
     return json(res, 200, {
-      model: MODEL,
-      ttsModel: TTS_MODEL,
+      model: CHAT_PROVIDER === "gemini" ? GEMINI_MODEL : MODEL,
+      provider: CHAT_PROVIDER,
+      ttsModel: GEMINI_KEY ? GEMINI_TTS_MODEL : GROQ_TTS_MODEL,
       sttModel: STT_MODEL,
       hasKey: Boolean(process.env.GROQ_API_KEY),
+      hasGemini: Boolean(GEMINI_KEY),
       portrait: fs.existsSync(pngPortrait) ? "assets/capri.png" : "assets/capri.svg",
+      voices: [
+        ...CAPRI_VOICES,
+        ...(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID
+          ? [{ id: "clone", label: "MY CLONE // elevenlabs", note: "Your cloned reference voice." }]
+          : []),
+      ],
       orpheusVoices: ["diana", "hannah", "autumn", "tara", "leah", "mia", "zoe"],
       user: HOST_USER,
       paired: Boolean(who),
@@ -715,7 +1157,25 @@ const handler = async (req, res) => {
       lanUrls: local ? lanUrls() : [],
       devices: local ? devices.map((d) => ({ id: d.id, name: d.name, scope: d.scope, ip: d.ip, pairedAt: d.pairedAt })) : [],
       host: os.hostname(),
+      google: googleStatus(),
+      profile: profileSummary(profile),
+      time: timeInfo(profile),
+      publish: {
+        enabled: publisher.state.enabled,
+        repo: publisher.state.repo,
+        branch: publisher.state.branch,
+      },
+      settingsRegistry: getRegistry(),
+      now: Date.now(),
     });
+  }
+
+  if (req.method === "GET" && pathname === "/api/auth/status") {
+    return json(res, 200, googleStatus());
+  }
+
+  if (req.method === "POST" && pathname === "/api/auth/google") {
+    return handleGoogleSignIn(req, res);
   }
 
   if (req.method === "GET" && pathname === "/info") {
@@ -747,6 +1207,66 @@ const handler = async (req, res) => {
   if (pathname.startsWith("/api/")) {
     const who = auth(req);
     if (!who) return json(res, 401, { error: "unauthorized", message: "Pair this device first." });
+
+    const session = profileFromRequest(req);
+    const activeProfile = session || (who.scope === "local" ? localProfile() : null);
+
+    if (req.method === "GET" && pathname === "/api/me") {
+      if (session) return json(res, 200, { profile: profileSummary(session), signedIn: true });
+      if (who.scope === "local") return json(res, 200, { profile: profileSummary(localProfile()), signedIn: false, local: true });
+      return json(res, 401, { error: "not_signed_in", message: "Sign in with Google on this device." });
+    }
+
+    if (req.method === "POST" && pathname === "/api/auth/signout") {
+      dropSession(String(req.headers["x-capri-profile"] || ""));
+      return json(res, 200, { ok: true });
+    }
+
+    if (req.method === "PATCH" && pathname === "/api/profile") {
+      if (!activeProfile) return json(res, 401, { error: "not_signed_in" });
+      let body;
+      try { body = await readBody(req, 40000); } catch (err) { return json(res, 400, { error: err.message }); }
+      try {
+        if (body.preferredName !== undefined) setPreferredName(activeProfile, body.preferredName);
+        if (body.settings && typeof body.settings === "object" && !Array.isArray(body.settings)) {
+          const entries = Object.entries(body.settings).slice(0, 24);
+          for (const [key, value] of entries) {
+            const saved = setSetting(activeProfile, key, value, "set from the settings panel");
+            if (saved.addedToOfficialSettings) publisher.schedule(`new official setting: ${saved.key}`);
+          }
+        }
+        json(res, 200, { ok: true, profile: profileSummary(activeProfile) });
+      } catch (err) {
+        json(res, 400, { error: "profile_update_failed", message: err.message });
+      }
+    }
+
+    if (req.method === "POST" && pathname === "/api/memory/clear") {
+      if (!activeProfile) return json(res, 401, { error: "not_signed_in" });
+      clearMemory(activeProfile);
+      return json(res, 200, { ok: true, profile: profileSummary(activeProfile) });
+    }
+
+    if (req.method === "GET" && pathname === "/api/voices") {
+      return json(res, 200, { voices: CAPRI_VOICES, tts: GEMINI_KEY ? "gemini" : "orpheus" });
+    }
+
+    if (req.method === "GET" && pathname === "/api/publish/status") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      return json(res, 200, await publisher.status());
+    }
+
+    if (req.method === "POST" && pathname === "/api/publish") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      let body = {};
+      try { body = await readBody(req, 10000); } catch { body = {}; }
+      if (typeof body.enabled === "boolean") {
+        publisher.setEnabled(body.enabled);
+        if (activeProfile) setSetting(activeProfile, "autoPublish", body.enabled, "auto-publish toggle");
+      }
+      if (body.now) await publisher.publishNow("manual publish");
+      return json(res, 200, await publisher.status());
+    }
 
     if (req.method === "POST" && pathname === "/api/chat") return handleChat(req, res, who);
     if (req.method === "POST" && pathname === "/api/tts") return handleTts(req, res);
@@ -802,6 +1322,15 @@ const handler = async (req, res) => {
 };
 
 const httpServer = http.createServer(handler);
+
+// A desktop companion should stay on the line. Log the weirdness, keep the lights on.
+process.on("uncaughtException", (err) => {
+  console.error(`  ! uncaught: ${String(err?.stack || err).slice(0, 1200)}`);
+});
+process.on("unhandledRejection", (err) => {
+  console.error(`  ! rejected: ${String(err?.stack || err).slice(0, 1200)}`);
+});
+
 httpServer.listen(PORT, () => {
   const urls = lanUrls();
   console.log("");
@@ -810,9 +1339,12 @@ httpServer.listen(PORT, () => {
   for (const u of urls) console.log(`  phone:     ${u}`);
   console.log(`  pair code: ${PAIR_CODE}`);
   console.log(`  pc control:${pcLocked ? " LOCKED" : " on"}`);
-  console.log(`  model:     ${MODEL}`);
+  console.log(`  chat:      ${CHAT_PROVIDER} / ${CHAT_PROVIDER === "gemini" ? GEMINI_MODEL : MODEL}`);
+  console.log(`  voice:     ${GEMINI_KEY ? `${GEMINI_TTS_MODEL} (Gemini)` : "Orpheus / system speech"}`);
+  console.log(`  google:    ${GOOGLE_CLIENT_ID ? "sign-in ready" : "not configured - see docs/GOOGLE_SIGNIN.md"}`);
+  console.log(`  publish:   ${publisher.state.enabled ? "auto-push on" : "auto-push off"}`);
   console.log(`  secure:    ${HTTPS_ON ? `https on :${HTTPS_PORT} (cert.pem)` : "http only - phone mic needs npm run cert"}`);
-  console.log(`  key:       ${process.env.GROQ_API_KEY ? "loaded from .env" : "MISSING - add GROQ_API_KEY to .env"}`);
+  console.log(`  keys:      ${process.env.GROQ_API_KEY ? "Groq ok" : "Groq missing"} / ${GEMINI_KEY ? "Gemini ok" : "Gemini missing"}`);
   console.log("");
 });
 

@@ -1,0 +1,70 @@
+[
+  {
+    "key": "preferredName",
+    "label": "What she calls you",
+    "type": "text",
+    "default": "",
+    "description": "The name Capri uses when she talks to you."
+  },
+  {
+    "key": "timeFormat",
+    "label": "Clock format",
+    "type": "enum",
+    "values": [
+      "auto",
+      "12",
+      "24"
+    ],
+    "default": "auto",
+    "description": "auto follows the Windows clock; 12 or 24 forces that format."
+  },
+  {
+    "key": "voice",
+    "label": "Voice profile",
+    "type": "enum",
+    "values": [
+      "capri",
+      "capri-velvet",
+      "capri-static",
+      "capri-warm",
+      "capri-mature",
+      "capri-bright",
+      "system"
+    ],
+    "default": "capri",
+    "description": "Which neural voice profile she uses."
+  },
+  {
+    "key": "glitch",
+    "label": "Glitch level",
+    "type": "enum",
+    "values": [
+      "off",
+      "subtle",
+      "show"
+    ],
+    "default": "show",
+    "description": "How much neon lightning and signal corruption she shows."
+  },
+  {
+    "key": "autoPublish",
+    "label": "Auto-publish updates",
+    "type": "bool",
+    "default": true,
+    "description": "Commit and push tracked updates to GitHub automatically."
+  },
+  {
+    "key": "music",
+    "label": "Music she knows you like",
+    "type": "list",
+    "default": [],
+    "description": "Artists, tracks and genres learned from conversation."
+  },
+  {
+    "key": "favorite",
+    "label": "Things you favour",
+    "type": "list",
+    "default": [],
+    "description": "Anything you tell her you like, use or want remembered."
+  }
+]

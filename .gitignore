@@ -4,9 +4,14 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# local state: paired devices, the PC action audit log, the phone certificate
+# local state: paired devices, profiles, memory, publish logs, phone certificate
 .capri-devices.json
+.capri-users.json
+.capri-publish.json
+.capri-publish.log
+.capri-*.json
 capri-actions.log
+voice-samples/
 *.pem
 *.key
 *.crt

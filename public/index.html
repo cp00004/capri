@@ -40,8 +40,13 @@
     <div class="hex-frame">
       <div class="hex-inner">
         <img id="portraitImg" src="assets/capri.svg" alt="Capri" />
+        <img class="ghost ghost-a" id="ghostA" src="assets/capri.svg" alt="" aria-hidden="true" />
+        <img class="ghost ghost-b" id="ghostB" src="assets/capri.svg" alt="" aria-hidden="true" />
+        <canvas class="arcs" id="arcCanvas" aria-hidden="true"></canvas>
         <div class="hex-tint" aria-hidden="true"></div>
         <div class="hex-scan" aria-hidden="true"></div>
+        <div class="tear" id="tearA" aria-hidden="true"></div>
+        <div class="tear" id="tearB" aria-hidden="true"></div>
         <div class="act" id="act" aria-live="polite"></div>
         <div class="subtitle" id="subtitle"></div>
       </div>
@@ -78,11 +83,84 @@
 
   <div class="sheet-body">
     <div class="field">
-      <span class="label">voice</span>
-      <div class="row">
-        <select id="voiceSelect" aria-label="Voice"></select>
-        <button id="voiceBtn" class="pill is-on" type="button"><span class="led"></span><span id="voiceLabel">ON</span></button>
+      <span class="label">account</span>
+      <div class="row wrap" id="accountRow">
+        <span class="value" id="accountName">this pc</span>
+        <button id="googleBtn" class="pill accent" type="button">SIGN IN WITH GOOGLE</button>
+        <button id="signOutBtn" class="pill hidden" type="button">SIGN OUT</button>
       </div>
+      <div id="googleButton" class="google-slot" aria-hidden="true"></div>
+      <p class="hint" id="accountHint">Sign in once and your memory follows you to any device.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">what she calls you</span>
+      <div class="row">
+        <input id="prefName" class="text" type="text" maxlength="48" placeholder="your name" autocomplete="nickname" />
+        <button id="prefNameSave" class="pill" type="button">SET</button>
+      </div>
+      <p class="hint">Say "call me ..." out loud, or set it here. It is remembered.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">voice profile</span>
+      <div class="row">
+        <select id="voiceSelect" aria-label="Voice profile"></select>
+        <button id="voicePreview" class="pill" type="button">PREVIEW</button>
+      </div>
+      <p class="hint" id="voiceHint">Neural voice with a show-matched edge. Preview it before you commit.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">voice output</span>
+      <div class="row">
+        <button id="voiceBtn" class="pill is-on" type="button"><span class="led"></span><span id="voiceLabel">ON</span></button>
+        <span class="value" id="ttsEngine">neural</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="label">clock</span>
+      <div class="row">
+        <select id="timeFormat" aria-label="Clock format">
+          <option value="auto">PC SETTING</option>
+          <option value="12">12-HOUR</option>
+          <option value="24">24-HOUR</option>
+        </select>
+        <span class="value mono" id="clockNow">--:--</span>
+      </div>
+      <p class="hint">PC SETTING follows the Windows taskbar clock. She reads it like a person, never military time.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">glitch</span>
+      <div class="row">
+        <select id="glitchLevel" aria-label="Glitch level">
+          <option value="show">SHOW</option>
+          <option value="subtle">SUBTLE</option>
+          <option value="off">OFF</option>
+        </select>
+        <button id="glitchTest" class="pill" type="button">SURGE</button>
+      </div>
+      <p class="hint">Neon arcs, torn frames and signal corruption. Off is calmer for photosensitive eyes.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">memory</span>
+      <div class="row wrap">
+        <span class="value" id="memoryCount">0 saved</span>
+        <button id="memoryForget" class="pill" type="button">FORGET IT ALL</button>
+      </div>
+      <p class="hint">Every request, answer, favourite and setting is stored in your profile, not in the repo.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">auto-publish</span>
+      <div class="row wrap">
+        <span class="value" id="publishState">on</span>
+        <button id="publishNow" class="pill" type="button">PUBLISH NOW</button>
+      </div>
+      <p class="hint" id="publishHint">Every tracked update is committed and pushed to GitHub automatically.</p>
     </div>
 
     <div class="field">

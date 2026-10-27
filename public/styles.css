@@ -640,3 +640,117 @@ input.text::placeholder { color: var(--ink-faint); }
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* ---------------------------------------------------------------- electric glitch */
+.ghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 22%;
+  pointer-events: none;
+  opacity: 0;
+  mix-blend-mode: screen;
+  will-change: transform, opacity, clip-path;
+}
+.ghost-a { filter: saturate(2.2) contrast(1.18) hue-rotate(295deg) brightness(1.12); }
+.ghost-b { filter: saturate(2.1) contrast(1.2) hue-rotate(118deg) brightness(1.05); }
+
+.arcs {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.85;
+  mix-blend-mode: screen;
+}
+
+.tear {
+  position: absolute;
+  left: -4%;
+  right: -4%;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--mint), #fff, var(--pink), transparent);
+  box-shadow: 0 0 14px var(--pink), 0 0 30px rgba(109, 255, 190, 0.7);
+  mix-blend-mode: screen;
+}
+#tearA { top: 31%; }
+#tearB { top: 63%; }
+
+.portrait.glitching .ghost-a {
+  opacity: 0.72;
+  animation: ghost-a 320ms steps(2, end) 2;
+}
+.portrait.glitching .ghost-b {
+  opacity: 0.55;
+  animation: ghost-b 380ms steps(3, end) 2;
+}
+.portrait.glitching .hex-inner { animation: frame-jolt 300ms steps(2, end) 1; }
+.portrait.glitching #tearA { animation: tear 300ms steps(2, end) 1; }
+.portrait.glitching #tearB { animation: tear 260ms steps(2, end) 1 reverse; }
+.portrait.glitching .hex-scan { opacity: 0.85; }
+
+body.surge .glow { animation: surge-glow 420ms ease-out 1; }
+body.surge .stage { animation: stage-shake 300ms steps(2, end) 1; }
+body.surge::after { animation: scan-pop 420ms steps(3, end) 1; }
+
+@keyframes ghost-a {
+  0%   { transform: translate(-7px, 2px) skewX(-2deg); clip-path: inset(8% 0 62% 0); }
+  45%  { transform: translate(9px, -4px) skewX(3deg); clip-path: inset(48% 0 24% 0); }
+  100% { transform: translate(-3px, 1px); clip-path: inset(0 0 0 0); opacity: 0; }
+}
+@keyframes ghost-b {
+  0%   { transform: translate(8px, -2px); clip-path: inset(28% 0 44% 0); }
+  50%  { transform: translate(-10px, 5px); clip-path: inset(66% 0 6% 0); }
+  100% { transform: translate(2px, 0); clip-path: inset(0 0 0 0); opacity: 0; }
+}
+@keyframes frame-jolt {
+  0% { transform: translate(0, 0); filter: none; }
+  25% { transform: translate(-3px, 1px); filter: saturate(1.6) brightness(1.18); }
+  55% { transform: translate(4px, -2px); filter: saturate(2.1) brightness(0.82); }
+  80% { transform: translate(-1px, 2px); }
+  100% { transform: translate(0, 0); filter: none; }
+}
+@keyframes tear {
+  0% { opacity: 0; transform: translateX(-8%); }
+  20% { opacity: 0.95; transform: translateX(0); }
+  60% { opacity: 0.6; transform: translateX(5%); }
+  100% { opacity: 0; transform: translateX(10%); }
+}
+@keyframes surge-glow {
+  0% { filter: blur(30px) brightness(1); }
+  22% { filter: blur(18px) brightness(2.4); }
+  44% { filter: blur(36px) brightness(0.7); }
+  100% { filter: blur(30px) brightness(1); }
+}
+@keyframes stage-shake {
+  0%, 100% { transform: translate(0, 0); }
+  30% { transform: translate(-3px, 2px); }
+  60% { transform: translate(3px, -1px); }
+}
+@keyframes scan-pop {
+  0% { opacity: 0.5; }
+  20% { opacity: 0.95; }
+  50% { opacity: 0.2; }
+  100% { opacity: 0.5; }
+}
+
+.google-slot { display: flex; justify-content: flex-start; }
+.google-slot:empty { display: none; }
+.google-slot iframe { color-scheme: light; }
+
+.mono { font-family: var(--mono); letter-spacing: 0.08em; }
+.field a { color: var(--mint); text-decoration: none; border-bottom: 1px solid rgba(109, 255, 190, 0.35); }
+.field a:hover { color: var(--white); border-bottom-color: var(--pink); }
+#memoryForget.armed { color: var(--pink); border-color: var(--pink); }
+#clockNow { min-width: 78px; text-align: right; color: var(--mint); }
+
+body[data-glitch="off"] .arcs,
+body[data-glitch="off"] .ghost,
+body[data-glitch="off"] .tear { display: none; }
+body[data-glitch="subtle"] .ghost { opacity: 0 !important; }
+body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 180ms; }

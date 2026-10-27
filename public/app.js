@@ -6,6 +6,7 @@
 const $ = (sel) => document.querySelector(sel);
 const TOKEN_KEY = "capri.token";
 const API_KEY = "capri.api";
+const SESSION_KEY = "capri.session";
 
 const normBase = (v) => String(v || "").trim().replace(/\/+$/, "");
 
@@ -53,17 +54,46 @@ const el = {
   stateTag: $("#stateTag"),
   apiBase: $("#apiBase"),
   apiSave: $("#apiSave"),
+  ghostA: $("#ghostA"),
+  ghostB: $("#ghostB"),
+  arcCanvas: $("#arcCanvas"),
+  portraitWrap: $("#portraitWrap"),
+  tearA: $("#tearA"),
+  tearB: $("#tearB"),
+  accountName: $("#accountName"),
+  accountHint: $("#accountHint"),
+  googleBtn: $("#googleBtn"),
+  googleButton: $("#googleButton"),
+  signOutBtn: $("#signOutBtn"),
+  prefName: $("#prefName"),
+  prefNameSave: $("#prefNameSave"),
+  timeFormat: $("#timeFormat"),
+  clockNow: $("#clockNow"),
+  glitchLevel: $("#glitchLevel"),
+  glitchTest: $("#glitchTest"),
+  memoryCount: $("#memoryCount"),
+  memoryForget: $("#memoryForget"),
+  publishState: $("#publishState"),
+  publishNow: $("#publishNow"),
+  publishHint: $("#publishHint"),
+  ttsEngine: $("#ttsEngine"),
+  voicePreview: $("#voicePreview"),
+  voiceHint: $("#voiceHint"),
 };
 
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
+  session: localStorage.getItem(SESSION_KEY) || "",
   apiBase: normBase(localStorage.getItem(API_KEY) || ""),
   config: null,
+  profile: null,
+  voices: [],
   history: [],
   phase: "idle",
   voiceOn: localStorage.getItem("capri.voiceOn") !== "0",
-  orpheusAvailable: true,
-  orpheusVoice: localStorage.getItem("capri.voice") || "diana",
+  orpheusAvailable: false,
+  orpheusVoice: localStorage.getItem("capri.voice") || "capri",
+  voicePreset: localStorage.getItem("capri.voicePreset") || "capri",
   browserVoice: null,
   orpheusVoices: ["diana", "hannah", "autumn", "tara", "leah", "mia", "zoe"],
   portrait: "assets/capri.svg",
@@ -72,6 +102,11 @@ const state = {
   pendingPoll: null,
   accessPoll: null,
   scope: null,
+  glitch: localStorage.getItem("capri.glitch") || "show",
+  google: null,
+  clockTimer: null,
+  lastTime: null,
+  forgetArmed: false,
 };
 
 /* ---------------------------------------------------------------- api */
@@ -84,6 +119,7 @@ function apiUrl(url) {
 async function api(url, opts = {}) {
   const headers = new Headers(opts.headers || {});
   if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+  if (state.session) headers.set("X-Capri-Profile", state.session);
   const res = await fetch(apiUrl(url), { ...opts, headers });
   if (res.status === 401) {
     showPair("That link is dead. Pair this device again.");
@@ -106,6 +142,7 @@ function setPhase(phase) {
   el.body.dataset.state = phase;
   const p = PHASES[phase] || PHASES.idle;
   if (el.stateTag) el.stateTag.textContent = p.tag;
+  syncSpeakingGlitch();
 }
 
 function showHeard(text) {
@@ -117,6 +154,146 @@ function clearHeard() {
   el.heard.textContent = "";
   el.heard.classList.remove("show");
 }
+
+/* ---------------------------------------------------------------- glitch */
+
+const glitch = {
+  level: state.glitch,
+  burstUntil: 0,
+  raf: null,
+  idleTimer: null,
+  speakTimer: null,
+};
+
+function canvasSize() {
+  if (!el.arcCanvas) return null;
+  const rect = el.arcCanvas.getBoundingClientRect();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const w = Math.max(2, Math.round(rect.width * dpr));
+  const h = Math.max(2, Math.round(rect.height * dpr));
+  if (el.arcCanvas.width !== w || el.arcCanvas.height !== h) {
+    el.arcCanvas.width = w;
+    el.arcCanvas.height = h;
+  }
+  return { w, h, dpr, rect };
+}
+
+function bolt(ctx, x1, y1, x2, y2, color, width) {
+  const steps = 5 + Math.floor(Math.random() * 4);
+  const dx = (x2 - x1) / steps;
+  const dy = (y2 - y1) / steps;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  for (let i = 1; i <= steps; i++) {
+    const jitter = i === steps ? 0 : (Math.random() - 0.5) * 26;
+    ctx.lineTo(x1 + dx * i + jitter, y1 + dy * i + (Math.random() - 0.5) * 22);
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 12;
+  ctx.stroke();
+  // white-hot core
+  ctx.strokeStyle = "rgba(255,255,255,0.8)";
+  ctx.lineWidth = Math.max(0.5, width * 0.32);
+  ctx.shadowBlur = 4;
+  ctx.stroke();
+}
+
+function paintArcs(alpha = 1) {
+  const size = canvasSize();
+  if (!size) return;
+  const { w, h, dpr } = size;
+  const ctx = el.arcCanvas.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  ctx.globalAlpha = alpha;
+  const colors = ["#ff0b52", "#6dffbe", "#ff2d3f", "#fbf0f0"];
+  const count = glitch.level === "subtle" ? 2 : 5;
+  for (let i = 0; i < count; i++) {
+    const edge = Math.floor(Math.random() * 4);
+    let x1, y1;
+    if (edge === 0) { x1 = Math.random() * w; y1 = 0; }
+    else if (edge === 1) { x1 = w; y1 = Math.random() * h; }
+    else if (edge === 2) { x1 = Math.random() * w; y1 = h; }
+    else { x1 = 0; y1 = Math.random() * h; }
+    const x2 = w * (0.2 + Math.random() * 0.6);
+    const y2 = h * (0.15 + Math.random() * 0.7);
+    bolt(ctx, x1, y1, x2, y2, colors[i % colors.length], (1 + Math.random() * 2.2) * dpr);
+  }
+  if (glitch.level === "show" && Math.random() > 0.4) {
+    bolt(ctx, w * 0.08, h * 0.22, w * 0.92, h * 0.76, "#ff0b52", 1.4 * dpr);
+  }
+  ctx.globalAlpha = 1;
+  const fade = () => {
+    const left = glitch.burstUntil - performance.now();
+    if (left <= 0) {
+      ctx.clearRect(0, 0, w, h);
+      glitch.raf = null;
+      return;
+    }
+    ctx.globalAlpha = Math.max(0, left / 320);
+    glitch.raf = requestAnimationFrame(fade);
+  };
+  if (!glitch.raf) glitch.raf = requestAnimationFrame(fade);
+}
+
+function burstGlitch(strength = 1) {
+  if (glitch.level === "off") return;
+  if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+  glitch.burstUntil = performance.now() + 300;
+  el.portraitWrap?.classList.add("glitching");
+  document.body.classList.add("surge");
+  paintArcs(strength);
+  clearTimeout(burstGlitch._off);
+  burstGlitch._off = setTimeout(() => {
+    el.portraitWrap?.classList.remove("glitching");
+    document.body.classList.remove("surge");
+  }, 360);
+}
+
+function scheduleIdleGlitch() {
+  clearTimeout(glitch.idleTimer);
+  if (glitch.level === "off") return;
+  const wait = glitch.level === "subtle" ? 9000 + Math.random() * 9000 : 4500 + Math.random() * 7000;
+  glitch.idleTimer = setTimeout(() => {
+    if (state.phase !== "speaking") burstGlitch(0.7);
+    scheduleIdleGlitch();
+  }, wait);
+}
+
+function setGlitchLevel(level) {
+  glitch.level = ["off", "subtle", "show"].includes(level) ? level : "show";
+  state.glitch = glitch.level;
+  document.body.dataset.glitch = glitch.level;
+  localStorage.setItem("capri.glitch", glitch.level);
+  if (el.glitchLevel) el.glitchLevel.value = glitch.level;
+  if (glitch.raf) cancelAnimationFrame(glitch.raf);
+  glitch.raf = null;
+  scheduleIdleGlitch();
+}
+
+function syncSpeakingGlitch() {
+  clearTimeout(glitch.speakTimer);
+  if (state.phase !== "speaking" || glitch.level === "off") return;
+  glitch.speakTimer = setTimeout(() => {
+    if (state.phase !== "speaking") return;
+    burstGlitch(1);
+    syncSpeakingGlitch();
+  }, 1500 + Math.random() * 1700);
+}
+
+el.glitchLevel?.addEventListener("change", () => {
+  setGlitchLevel(el.glitchLevel.value);
+  saveProfile({ settings: { glitch: glitch.level } });
+});
+el.glitchTest?.addEventListener("click", () => {
+  unlockAudio();
+  burstGlitch(2);
+});
+document.body.dataset.glitch = glitch.level;
+scheduleIdleGlitch();
 
 /* ---------------------------------------------------------------- notice */
 
@@ -207,11 +384,16 @@ function cleanForSpeech(text) {
 }
 
 let currentAudio = null;
+let currentCtx = null;
 
 function stopAudio() {
   if (currentAudio) {
     try { currentAudio.pause(); } catch { /* noop */ }
     currentAudio = null;
+  }
+  if (currentCtx) {
+    try { currentCtx.close(); } catch { /* noop */ }
+    currentCtx = null;
   }
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
 }
@@ -258,17 +440,69 @@ const speech = {
   },
 };
 
-function playBlob(blob) {
-  return new Promise((resolve) => {
+function softClipCurve(amount = 0.15) {
+  const n = 1024;
+  const curve = new Float32Array(n);
+  const k = 1 + Math.max(0, Math.min(1, amount)) * 5;
+  for (let i = 0; i < n; i++) {
+    const x = (i * 2) / (n - 1) - 1;
+    curve[i] = Math.tanh(k * x) / Math.tanh(k);
+  }
+  return curve;
+}
+
+function playBlob(blob, { pitch = 0.96, grit = 0.14 } = {}) {
+  return new Promise(async (resolve) => {
     const url = URL.createObjectURL(blob);
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      URL.revokeObjectURL(url);
+      if (currentAudio) currentAudio = null;
+      resolve();
+    };
+
+    // WebAudio lets us drop the pitch and add a little chrome without changing the words
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (Ctx) {
+        const bytes = await blob.arrayBuffer();
+        const ctx = new Ctx();
+        currentCtx = ctx;
+        const buffer = await ctx.decodeAudioData(bytes.slice(0));
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.playbackRate.value = Math.max(0.8, Math.min(1.15, Number(pitch) || 0.96));
+        const shaper = ctx.createWaveShaper();
+        shaper.curve = softClipCurve(grit);
+        shaper.oversample = "2x";
+        const shelf = ctx.createBiquadFilter();
+        shelf.type = "highshelf";
+        shelf.frequency.value = 3400;
+        shelf.gain.value = 2.2;
+        const gain = ctx.createGain();
+        gain.gain.value = 0.92;
+        source.connect(shaper).connect(shelf).connect(gain).connect(ctx.destination);
+        source.onended = () => {
+          try { ctx.close(); } catch { /* noop */ }
+          if (currentCtx === ctx) currentCtx = null;
+          done();
+        };
+        source.start(0);
+        return;
+      }
+    } catch {
+      /* fall back to the plain audio element below */
+    }
+
     const audio = new Audio(url);
     currentAudio = audio;
     audio.volume = 0.95;
-    const done = () => {
-      URL.revokeObjectURL(url);
-      if (currentAudio === audio) currentAudio = null;
-      resolve();
-    };
+    audio.preservesPitch = false;
+    audio.mozPreservesPitch = false;
+    audio.webkitPreservesPitch = false;
+    audio.playbackRate = Math.max(0.8, Math.min(1.15, Number(pitch) || 0.96));
     audio.onended = done;
     audio.onerror = done;
     audio.play().catch(done);
@@ -278,33 +512,41 @@ function playBlob(blob) {
 async function speakOne(text) {
   if (!state.voiceOn) return;
 
-  if (state.orpheusAvailable) {
-    try {
-      const res = await api("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice: state.orpheusVoice }),
-      });
+  if (state.voicePreset === "system") {
+    await speakBrowser(text);
+    return;
+  }
 
-      const type = res.headers.get("content-type") || "";
-      if (res.ok && type.startsWith("audio")) {
-        await playBlob(await res.blob());
-        return;
-      }
+  try {
+    const res = await api("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, voice: state.voicePreset }),
+    });
 
-      const data = await res.json().catch(() => ({}));
-      if (data.error === "terms") {
-        state.orpheusAvailable = false;
-        refreshVoices();
-        showNotice(
-          "Neural voice needs a one-time terms click. On the system voice until then:",
-          data.fix?.match(/https?:\S+/)?.[0] || "https://console.groq.com/playground",
-          "accept Orpheus terms"
-        );
-      }
-    } catch {
-      /* fall through to the system voice */
+    const type = res.headers.get("content-type") || "";
+    if (res.ok && type.startsWith("audio")) {
+      const pitch = Number(res.headers.get("X-Capri-Pitch") || 0.96);
+      const grit = Number(res.headers.get("X-Capri-Grit") || 0.14);
+      const engine = res.headers.get("X-Capri-Engine") || "";
+      if (el.ttsEngine && engine) el.ttsEngine.textContent = engine;
+      burstGlitch(1);
+      await playBlob(await res.blob(), { pitch, grit });
+      return;
     }
+
+    const data = await res.json().catch(() => ({}));
+    if (data.error === "terms") {
+      showNotice(
+        "Neural voice needs a one-time terms click. On the system voice until then:",
+        data.fix?.match(/https?:\S+/)?.[0] || "https://console.groq.com/playground",
+        "accept Orpheus terms"
+      );
+    } else if (data.error === "tts_busy") {
+      showNotice("Voice quota is resting. System voice is covering this line.", null, null, 3500);
+    }
+  } catch {
+    /* fall through to the system voice */
   }
 
   await speakBrowser(text);
@@ -318,8 +560,8 @@ function speakBrowser(text) {
       state.browserVoice = pickBrowserVoice(window.speechSynthesis.getVoices());
     }
     if (state.browserVoice) utter.voice = state.browserVoice;
-    utter.rate = 1.02;
-    utter.pitch = 0.88;
+    utter.rate = 0.96;
+    utter.pitch = 0.82;
     utter.volume = 1;
     utter.onend = resolve;
     utter.onerror = resolve;
@@ -342,48 +584,93 @@ function pickBrowserVoice(voices) {
   return voices.find((v) => /^en/i.test(v.lang)) || voices[0] || null;
 }
 
+const FALLBACK_VOICES = [
+  { id: "capri", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous." },
+  { id: "capri-velvet", label: "CAPRI // velvet", note: "Lower, firmer, more deliberate." },
+  { id: "capri-static", label: "CAPRI // static", note: "Breezy and light with a jagged edge." },
+  { id: "capri-warm", label: "CAPRI // warm", note: "Warm and close." },
+  { id: "capri-mature", label: "CAPRI // older", note: "Mature and worn." },
+  { id: "capri-bright", label: "CAPRI // bright", note: "Bright and impish." },
+];
+
 function refreshVoices() {
-  if (state.orpheusAvailable) {
-    el.voiceSelect.innerHTML = "";
-    for (const v of state.orpheusVoices) {
-      const opt = document.createElement("option");
-      opt.value = v;
-      opt.textContent = v.toUpperCase();
-      el.voiceSelect.append(opt);
-    }
-    el.voiceSelect.value = state.orpheusVoice;
-    return;
-  }
-
-  const voices = "speechSynthesis" in window ? window.speechSynthesis.getVoices() : [];
-  if (!voices.length) return;
-  if (!state.browserVoice) state.browserVoice = pickBrowserVoice(voices);
-
+  const list = state.voices.length ? state.voices : FALLBACK_VOICES;
   el.voiceSelect.innerHTML = "";
-  for (const v of voices.filter((x) => /^en/i.test(x.lang)).slice(0, 24)) {
+  for (const v of list) {
     const opt = document.createElement("option");
-    opt.value = v.name;
-    opt.textContent = v.name.replace(/^Microsoft\s+|^Google\s+/i, "").slice(0, 24);
+    opt.value = v.id;
+    opt.textContent = v.label || v.id;
+    opt.title = v.note || "";
     el.voiceSelect.append(opt);
   }
-  if (state.browserVoice) el.voiceSelect.value = state.browserVoice.name;
+  const sys = document.createElement("option");
+  sys.value = "system";
+  sys.textContent = "SYSTEM // browser voice";
+  el.voiceSelect.append(sys);
+
+  if (![...el.voiceSelect.options].some((o) => o.value === state.voicePreset)) {
+    state.voicePreset = "capri";
+  }
+  el.voiceSelect.value = state.voicePreset;
+  paintVoiceHint();
+}
+
+function paintVoiceHint() {
+  if (!el.voiceHint) return;
+  const v = (state.voices.length ? state.voices : FALLBACK_VOICES).find((x) => x.id === state.voicePreset);
+  el.voiceHint.textContent = state.voicePreset === "system"
+    ? "Uses whatever voice your browser has. Always available, never quite her."
+    : v?.note || "Neural voice with a show-matched edge.";
+  if (el.prefName && state.profile) {
+    el.prefName.value = state.profile.preferredName || "";
+  }
+}
+
+function setVoicePreset(value) {
+  state.voicePreset = value;
+  state.orpheusVoice = value;
+  localStorage.setItem("capri.voicePreset", value);
+  localStorage.setItem("capri.voice", value);
+  paintVoiceHint();
+  saveProfile({ settings: { voice: value } });
+  speech.stop();
 }
 
 if ("speechSynthesis" in window) {
   window.speechSynthesis.onvoiceschanged = () => {
-    if (!state.orpheusAvailable) refreshVoices();
+    if (!state.browserVoice) state.browserVoice = pickBrowserVoice(window.speechSynthesis.getVoices());
   };
 }
 
-el.voiceSelect.addEventListener("change", () => {
-  if (state.orpheusAvailable) {
-    state.orpheusVoice = el.voiceSelect.value;
-    localStorage.setItem("capri.voice", state.orpheusVoice);
-  } else {
-    const voices = window.speechSynthesis?.getVoices() || [];
-    state.browserVoice = voices.find((v) => v.name === el.voiceSelect.value) || state.browserVoice;
-  }
+el.voiceSelect.addEventListener("change", () => setVoicePreset(el.voiceSelect.value));
+
+el.voicePreview.addEventListener("click", async () => {
+  unlockAudio();
   speech.stop();
+  const line = "Night City never sleeps, choom. Neither do I.";
+  el.voicePreview.textContent = "…";
+  el.voicePreview.disabled = true;
+  try {
+    const res = await api("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: line, voice: state.voicePreset }),
+    });
+    if (res.ok && (res.headers.get("content-type") || "").startsWith("audio")) {
+      burstGlitch(1);
+      await playBlob(await res.blob(), {
+        pitch: Number(res.headers.get("X-Capri-Pitch") || 0.96),
+        grit: Number(res.headers.get("X-Capri-Grit") || 0.14),
+      });
+    } else {
+      showNotice("That voice is not answering. Try another profile.", null, null, 4000);
+    }
+  } catch {
+    showNotice("Voice preview could not reach the PC.", null, null, 4000);
+  } finally {
+    el.voicePreview.textContent = "PREVIEW";
+    el.voicePreview.disabled = false;
+  }
 });
 
 function paintVoiceButton() {
@@ -577,8 +864,9 @@ let actTimer = null;
 
 function showAction(label) {
   clearTimeout(actTimer);
-  el.act.textContent = "› " + label;
+  el.act.textContent = "// " + label;
   el.act.classList.add("show");
+  burstGlitch(0.55);
 }
 
 function clearAction(delay = 1200) {
@@ -655,8 +943,16 @@ async function respond(userText) {
             showAction(evt.label || evt.name);
           } else if (evt.type === "tool") {
             if (!evt.ok) showAction(`${evt.name} failed`);
+          } else if (evt.type === "memory") {
+            if (evt.ok) {
+              showAction(evt.message || "remembered");
+              burstGlitch(1.2);
+            }
+          } else if (evt.type === "profile" && evt.profile) {
+            applyProfile(evt.profile);
           } else if (evt.type === "error") {
             failed = true;
+            burstGlitch(1.3);
             showNotice(evt.message || "relay error", null, null, 9000);
           }
         }
@@ -735,6 +1031,7 @@ el.settingsBtn.addEventListener("click", async () => {
   if (el.settings.classList.contains("hidden")) {
     openSheet(el.settings);
     await refreshSettings();
+    await refreshLive();
   } else {
     closeSheet(el.settings);
   }
@@ -789,6 +1086,311 @@ el.pairForm.addEventListener("submit", async (e) => {
   }
 });
 
+/* ---------------------------------------------------------------- profile */
+
+function applyProfile(profile) {
+  if (!profile) return;
+  state.profile = profile;
+  const settings = profile.settings || {};
+  if (settings.voice && settings.voice !== state.voicePreset) {
+    state.voicePreset = settings.voice;
+    state.orpheusVoice = settings.voice;
+    localStorage.setItem("capri.voicePreset", settings.voice);
+  }
+  if (settings.glitch && settings.glitch !== glitch.level) setGlitchLevel(settings.glitch);
+  if (settings.preferredName !== undefined && !el.prefName.matches(":focus")) {
+    el.prefName.value = settings.preferredName || profile.preferredName || "";
+  }
+  if (el.timeFormat) el.timeFormat.value = settings.timeFormat || "auto";
+
+  const signedIn = Boolean(profile.google);
+  el.accountName.textContent = signedIn ? (profile.email || profile.name || "google account") : "this pc";
+  el.accountHint.textContent = signedIn
+    ? `Signed in as ${profile.name || profile.email}. Memory follows this Google account to any device.`
+    : state.config?.google?.configured
+      ? "Sign in once and your memory follows you to any device."
+      : "Google sign-in is not configured yet. Open docs/GOOGLE_SIGNIN.md on the PC.";
+  el.signOutBtn.classList.toggle("hidden", !signedIn);
+  el.googleBtn.classList.toggle("hidden", signedIn || Boolean(state.googleReady));
+
+  const mem = profile.memory || {};
+  const memories = (mem.facts || 0) + (mem.favorites || 0) + (mem.music || 0) + (mem.notes || 0);
+  el.memoryCount.textContent = `${memories} ${memories === 1 ? "memory" : "memories"} · ${mem.saved || 0} ${mem.saved === 1 ? "turn" : "turns"}`;
+  if (el.ttsEngine && state.config) {
+    el.ttsEngine.textContent = state.config.hasGemini ? "neural" : "fallback";
+  }
+  if (el.ttsEngine && state.config?.ttsModel) el.ttsEngine.title = state.config.ttsModel;
+
+  refreshVoices();
+  applyClock();
+  renderPublishState(state.config?.publish || {});
+}
+
+async function refreshLive() {
+  try {
+    const me = await api("/api/me");
+    if (me.ok) {
+      const data = await me.json().catch(() => ({}));
+      if (data.profile) applyProfile(data.profile);
+    }
+  } catch {
+    /* the cached profile is good enough while the PC is away */
+  }
+  if (state.config?.local) {
+    try {
+      const res = await api("/api/publish/status");
+      if (res.ok) renderPublishState(await res.json());
+    } catch {
+      /* publish status is cosmetic */
+    }
+  }
+}
+
+async function saveProfile(payload) {  if (!state.profile) return;
+  try {
+    const res = await api("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.profile) applyProfile(data.profile);
+    else if (data.message) showNotice(data.message, null, null, 5000);
+  } catch {
+    showNotice("That setting did not stick. Is the PC still up?", null, null, 5000);
+  }
+}
+
+el.prefNameSave.addEventListener("click", async () => {
+  const name = el.prefName.value.trim();
+  if (!name) return;
+  await saveProfile({ preferredName: name });
+  showNotice(`She'll call you ${name}.`, null, null, 3000);
+  speech.enqueue(`Fine. ${name} it is.`);
+});
+
+el.prefName.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    el.prefNameSave.click();
+  }
+});
+
+el.timeFormat.addEventListener("change", () => {
+  saveProfile({ settings: { timeFormat: el.timeFormat.value } });
+  applyClock();
+});
+
+el.memoryForget.addEventListener("click", async () => {
+  if (!state.forgetArmed) {
+    state.forgetArmed = true;
+    el.memoryForget.classList.add("armed");
+    el.memoryForget.textContent = "SURE?";
+    setTimeout(() => {
+      if (!state.forgetArmed) return;
+      state.forgetArmed = false;
+      el.memoryForget.classList.remove("armed");
+      el.memoryForget.textContent = "FORGET IT ALL";
+    }, 4000);
+    return;
+  }
+  state.forgetArmed = false;
+  el.memoryForget.classList.remove("armed");
+  el.memoryForget.textContent = "FORGET IT ALL";
+  try {
+    const res = await api("/api/memory/clear", { method: "POST" });
+    const data = await res.json();
+    if (data.profile) applyProfile(data.profile);
+    showNotice("Wiped. I don't know you yet.", null, null, 4000);
+  } catch {
+    showNotice("Could not clear the profile.", null, null, 4000);
+  }
+});
+
+/* ---------------------------------------------------------------- clock */
+
+function applyClock() {
+  if (!el.clockNow) return;
+  const mode = state.profile?.settings?.timeFormat || "auto";
+  const hour12 = mode === "12" ? true : mode === "24" ? false : state.config?.time?.hour12 !== false;
+  const now = new Date();
+  el.clockNow.textContent = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12,
+  }).format(now);
+  el.clockNow.title = `${state.config?.time?.zone || ""} — follows ${mode === "auto" ? "the Windows clock" : "this setting"}`;
+}
+
+clearInterval(state.clockTimer);
+state.clockTimer = setInterval(applyClock, 1000);
+
+/* ---------------------------------------------------------------- publish */
+
+function renderPublishState(publish = {}) {
+  const on = publish.enabled !== false;
+  el.publishState.textContent = on ? "on" : "off";
+  el.publishState.dataset.on = on ? "1" : "0";
+  el.publishState.style.color = on ? "var(--mint)" : "var(--pink)";
+  el.publishState.style.cursor = "pointer";
+  el.publishState.title = "Click to turn auto-publish on or off";
+  const repo = publish.repo || state.config?.publish?.repo || "";
+  el.publishHint.innerHTML = "";
+  el.publishHint.append(document.createTextNode("Every tracked update is committed and pushed automatically."));
+  if (repo) {
+    const a = document.createElement("a");
+    a.href = repo;
+    a.target = "_blank";
+    a.rel = "noreferrer";
+    a.textContent = repo.replace(/^https?:\/\//, "");
+    el.publishHint.append(document.createTextNode(" "), a);
+  }
+  if (publish.lastCommit) {
+    el.publishHint.append(document.createTextNode(` Last: ${publish.lastCommit}`));
+  }
+}
+
+el.publishState.addEventListener("click", async () => {
+  const next = el.publishState.dataset.on !== "1";
+  try {
+    const res = await api("/api/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    const data = await res.json();
+    renderPublishState(data);
+    showNotice(next ? "Every update will publish itself." : "Auto-publish is off until you turn it back on.", null, null, 4000);
+    if (state.profile) {
+      state.profile.settings.autoPublish = next;
+    }
+  } catch {
+    showNotice("Could not change auto-publish.", null, null, 4000);
+  }
+});
+
+el.publishNow.addEventListener("click", async () => {
+  el.publishNow.textContent = "PUSHING…";
+  el.publishNow.disabled = true;
+  try {
+    const res = await api("/api/publish", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ now: true }),
+    });
+    const data = await res.json();
+    renderPublishState(data);
+    showNotice(data.last?.ok ? `Published ${data.last.commit || ""}.` : `Publish failed: ${data.last?.error || "see log"}`, null, null, 7000);
+  } catch {
+    showNotice("Publish failed. Check .capri-publish.log.", null, null, 7000);
+  } finally {
+    el.publishNow.textContent = "PUBLISH NOW";
+    el.publishNow.disabled = false;
+  }
+});
+
+/* ---------------------------------------------------------------- google */
+
+let googleLoader = null;
+
+function loadGoogleScript() {
+  if (window.google?.accounts?.id) return Promise.resolve(true);
+  if (googleLoader) return googleLoader;
+  googleLoader = new Promise((resolve) => {
+    const script = document.createElement("script");
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve(true);
+    script.onerror = () => resolve(false);
+    document.head.append(script);
+    setTimeout(() => resolve(Boolean(window.google?.accounts?.id)), 8000);
+  });
+  return googleLoader;
+}
+
+async function handleGoogleCredential(response) {
+  if (!response?.credential) return;
+  try {
+    const res = await api("/api/auth/google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ credential: response.credential }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      showNotice(data.message || "Google sign-in failed.", null, null, 7000);
+      return;
+    }
+    state.session = data.token;
+    localStorage.setItem(SESSION_KEY, data.token);
+    applyProfile(data.profile);
+    showNotice(`Signed in as ${data.profile.name || data.profile.email}. Memory is tied to this account now.`, null, null, 6000);
+    speech.enqueue("There you are. I remember you.");
+  } catch {
+    showNotice("Google sign-in could not reach the PC.", null, null, 6000);
+  }
+}
+
+async function renderGoogle(force = false) {
+  const google = state.config?.google;
+  if (!google?.configured) {
+    state.googleReady = false;
+    el.googleBtn.classList.toggle("hidden", Boolean(state.profile?.google));
+    return;
+  }
+  const ok = await loadGoogleScript();
+  if (!ok || !window.google?.accounts?.id) {
+    state.googleReady = false;
+    el.accountHint.textContent = "Google's script did not load. The PC needs internet access; the button below still tries.";
+    return;
+  }
+  state.googleReady = true;
+  el.googleBtn.classList.add("hidden");
+  window.google.accounts.id.initialize({
+    client_id: google.clientId,
+    callback: handleGoogleCredential,
+    auto_select: false,
+    cancel_on_tap_outside: true,
+    use_fedcm_for_prompt: true,
+  });
+  el.googleButton.innerHTML = "";
+  if (!state.profile?.google) {
+    window.google.accounts.id.renderButton(el.googleButton, {
+      type: "standard",
+      theme: "filled_black",
+      size: "large",
+      text: "continue_with",
+      shape: "pill",
+      width: 260,
+    });
+  }
+}
+
+el.googleBtn.addEventListener("click", async () => {
+  if (!state.config?.google?.configured) {
+    showNotice(
+      "Google sign-in needs a Web OAuth client id. On the PC open docs/GOOGLE_SIGNIN.md, create one, paste it into .env, restart.",
+      null, null, 12000
+    );
+    return;
+  }
+  await renderGoogle(true);
+  window.google?.accounts?.id?.prompt?.();
+});
+
+el.signOutBtn.addEventListener("click", async () => {
+  try {
+    await api("/api/auth/signout", { method: "POST" });
+  } catch {
+    /* clear locally anyway */
+  }
+  state.session = "";
+  localStorage.removeItem(SESSION_KEY);
+  showNotice("Signed out. This device is back on the local profile.", null, null, 5000);
+  await boot();
+});
+
 /* ---------------------------------------------------------------- settings */
 
 function setPcState() {
@@ -821,6 +1423,8 @@ async function refreshSettings() {
   if (!cfg) return;
 
   if (el.apiBase) el.apiBase.value = state.apiBase;
+  if (cfg.profile && !state.profile) applyProfile(cfg.profile);
+  applyClock();
 
   el.pairField.classList.toggle("hidden", !cfg.local);
   el.deviceField.classList.toggle("hidden", !cfg.local);
@@ -828,12 +1432,14 @@ async function refreshSettings() {
   el.copyPair.classList.toggle("hidden", !cfg.local);
 
   if (cfg.local) {
-    el.pairCodeText.textContent = cfg.pairCode || "······";
+    el.pairCodeText.textContent = cfg.pairCode || "------";
     const url = cfg.lanUrls?.[0] || location.origin;
     el.pairUrl.textContent = url;
     el.copyPair.dataset.url = url;
   }
 
+  renderPublishState(cfg.publish || {});
+  renderGoogle();
   setPcState();
   if (cfg.local) {
     renderDevices(cfg.devices || []);
@@ -892,7 +1498,9 @@ async function renderAudit() {
     for (const a of list) {
       const row = document.createElement("div");
       row.className = `audit-row ${a.ok ? "" : "bad"}`;
-      const time = new Date(a.at).toLocaleTimeString("en-GB", { hour12: false });
+      const mode = state.profile?.settings?.timeFormat || "auto";
+      const hour12 = mode === "12" ? true : mode === "24" ? false : state.config?.time?.hour12 !== false;
+      const time = new Date(a.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", hour12 });
       row.innerHTML = `<b>${time}</b> ${String(a.tool || "").replace(/[<>&]/g, "")} ${a.ok ? "ok" : "failed"}`;
       row.title = `${a.args || ""}\n${a.out || ""}`;
       el.auditList.append(row);
@@ -1142,18 +1750,43 @@ async function boot() {
     if (Array.isArray(cfg.orpheusVoices) && cfg.orpheusVoices.length) {
       state.orpheusVoices = cfg.orpheusVoices;
     }
+    if (Array.isArray(cfg.voices) && cfg.voices.length) {
+      state.voices = cfg.voices;
+    }
+    state.google = cfg.google || null;
     if (cfg.portrait) {
       state.portrait = cfg.portrait;
       el.portraitImg.src = cfg.portrait;
+      el.ghostA.src = cfg.portrait;
+      el.ghostB.src = cfg.portrait;
     }
-    if (!cfg.hasKey) showNotice("No Groq key loaded. Add GROQ_API_KEY to .env and restart.");
+    if (!cfg.hasKey && !cfg.hasGemini) showNotice("No chat key loaded. Add GROQ_API_KEY or GEMINI_API_KEY to .env and restart.");
 
+    if (cfg.profile) applyProfile(cfg.profile);
+
+    if (state.session) {
+      try {
+        const me = await api("/api/me");
+        const data = await me.json().catch(() => ({}));
+        if (me.ok && data.profile) applyProfile(data.profile);
+        else if (!me.ok) {
+          state.session = "";
+          localStorage.removeItem(SESSION_KEY);
+        }
+      } catch {
+        /* keep the cached session until the PC answers again */
+      }
+    }
+
+    setGlitchLevel(state.profile?.settings?.glitch || state.glitch);
+    renderGoogle();
+    renderPublishState(cfg.publish || {});
     setPcState();
     if (cfg.local) pollPending();
   }
 
   refreshVoices();
-  if ("speechSynthesis" in window) setTimeout(() => { if (!state.orpheusAvailable) refreshVoices(); }, 400);
+  if ("speechSynthesis" in window) setTimeout(() => refreshVoices(), 400);
 
   setPhase("idle");
   if (!state.history.length) {
