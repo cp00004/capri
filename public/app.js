@@ -1389,7 +1389,7 @@ async function handleGoogleCredential(response) {
     }
     state.session = data.token;
     localStorage.setItem(SESSION_KEY, data.token);
-    applyProfile(data.profile);
+    await boot();
     showNotice(`Signed in as ${data.profile.name || data.profile.email}. Memory is tied to this account now.`, null, null, 6000);
     speech.enqueue("There you are. I remember you.");
   } catch {
@@ -1846,7 +1846,7 @@ async function boot() {
     state.config = cfg;
     state.scope = cfg.scope;
 
-    if (!cfg.paired && !cfg.local && !cfg.profile?.google) {
+    if (!cfg.paired && !cfg.local && !cfg.profile?.google && !cfg.google?.configured) {
       showPair("This device is not paired. Read the code on the PC.");
     }
 

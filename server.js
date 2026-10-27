@@ -16,7 +16,9 @@ import {
   localProfile,
   upsertGoogleProfile,
   createSession,
+  sessionInfo,
   sessionProfile,
+  setSessionScope,
   dropSession,
   profileSummary,
   setPreferredName,
@@ -714,9 +716,15 @@ function profileFromRequest(req) {
 }
 
 function sessionCaller(req) {
-  const profile = profileFromRequest(req);
-  if (!profile) return null;
-  return { scope: "voice", name: profile.name || profile.email || "Google account", profile };
+  const token = String(req.headers["x-capri-profile"] || "");
+  const session = sessionInfo(token);
+  if (!session) return null;
+  return {
+    scope: session.scope,
+    name: session.profile.name || session.profile.email || "Google account",
+    profile: session.profile,
+    sessionToken: token,
+  };
 }
 
 function googleStatus() {
@@ -1120,9 +1128,10 @@ async function handlePair(req, res) {
 async function handleAccessRequest(req, res, who) {
   if (who.scope === "local") return json(res, 200, { already: true, scope: "full" });
   if (who.scope === "full") return json(res, 200, { already: true, scope: "full" });
-  if (!who.device) return json(res, 403, { error: "pair_required", message: "Pair this device before requesting PC access." });
+  if (!who.device && !who.sessionToken) return json(res, 403, { error: "sign_in_required", message: "Sign in with Google before requesting PC access." });
 
-  const existing = [...pendingAccess.values()].find((p) => p.deviceId === who.device?.id && Date.now() - p.at < 120_000);
+  const sessionHash = who.sessionToken ? sha(who.sessionToken) : "";
+  const existing = [...pendingAccess.values()].find((p) => (p.deviceId === who.device?.id || p.sessionHash === sessionHash) && Date.now() - p.at < 120_000);
   if (existing) return json(res, 200, { pending: true, id: existing.id });
 
   if (pendingAccess.size >= 4) {
@@ -1133,6 +1142,8 @@ async function handleAccessRequest(req, res, who) {
   pendingAccess.set(id, {
     id,
     deviceId: who.device?.id,
+    sessionHash,
+    sessionToken: who.sessionToken || "",
     name: who.name || "phone",
     ip: who.device?.ip || req.socket.remoteAddress,
     at: Date.now(),
@@ -1161,6 +1172,8 @@ async function handleAccessAnswer(req, res) {
       device.scope = "full";
       device.grantedAt = new Date().toISOString();
       saveDevices();
+    } else if (pending.sessionToken) {
+      setSessionScope(pending.sessionToken, "full");
     }
   }
   json(res, 200, { ok: true, allow: Boolean(body.allow) });
@@ -1240,7 +1253,7 @@ const handler = async (req, res) => {
       ],
       orpheusVoices: ["diana", "hannah", "autumn", "tara", "leah", "mia", "zoe"],
       user: HOST_USER,
-      paired: Boolean(device),
+      paired: Boolean(device || who?.sessionToken),
       scope: who?.scope || null,
       pcLocked,
       local,
