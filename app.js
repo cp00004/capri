@@ -789,7 +789,6 @@ function playListeningChime() {
     const ctx = new Ctx();
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
-    resumeWakeWord();
     const start = ctx.currentTime;
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(740, start);
@@ -805,27 +804,23 @@ function playListeningChime() {
     /* audio feedback is optional */
   }
 }
-    resumeWakeWord();
 
 async function startListening() {
   if (rec.active || rec.starting) return;
   if (state.phase === "thinking" || state.streaming) {
     rec.listenQueued = true;
     showNotice("I’ll listen as soon as I finish this reply.", null, null, 2500);
-      resumeWakeWord();
     return;
   }
   if (wakeWord.active || wakeWord.starting) {
     wakeWord.pendingStart = true;
     wakeWord.recognition?.stop();
-      resumeWakeWord();
     return;
   }
   rec.listenQueued = false;
   if (!window.isSecureContext) {
     showNotice(
       "Phone mics only unlock on a secure page. On the PC run npm run cert, reopen the https link, and trust Capri Local once. The keyboard still works.",
-    resumeWakeWord();
       null, null, 14000
     );
     return;
@@ -853,6 +848,7 @@ async function startListening() {
         : `Mic unavailable: ${err?.message || err}`,
       null, null, 9000
     );
+    resumeWakeWord();
     return;
   }
 
@@ -1045,6 +1041,7 @@ async function stopListening() {
 
   if (!blob || blob.size < 2500) {
     setPhase("idle");
+    resumeWakeWord();
     return;
   }
 
@@ -1067,12 +1064,14 @@ async function transcribe(blob) {
     if (!res.ok) {
       setPhase("idle");
       showNotice(data.message || "Transcription failed.", null, null, 8000);
+      resumeWakeWord();
       return;
     }
 
     const text = String(data.text || "").trim();
     if (!text) {
       setPhase("idle");
+      resumeWakeWord();
       return;
     }
 
@@ -1081,6 +1080,7 @@ async function transcribe(blob) {
   } catch (err) {
     setPhase("idle");
     if (err.message !== "unauthorized") showNotice(`No link: ${err.message}`, null, null, 8000);
+    resumeWakeWord();
   }
 }
 
