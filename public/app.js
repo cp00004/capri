@@ -1780,7 +1780,11 @@ async function boot() {
   }
 
   if (!cfg) {
-    showNotice("Server not reachable. Is `node server.js` running on the PC?", null, null, 10000);
+    if (!state.apiBase) {
+      showNotice("No backend set. Open Settings → PC address / backend and paste your Capri server URL (e.g. https://your-server.com).", null, null, 15000);
+    } else {
+      showNotice("Server not reachable. Is `node server.js` running? Check the PC address in Settings.", null, null, 10000);
+    }
   } else {
     state.config = cfg;
     state.scope = cfg.scope;
@@ -1854,11 +1858,13 @@ async function boot() {
             setTimeout(() => {
               profileBg.classList.add('hidden');
               // Trigger sign-in flow if not signed in
-              if (!state.profile?.google) {
+              if (!state.profile?.google && !state.session) {
                 openSheet(el.settings);
                 // Scroll to account section
                 const accountField = document.querySelector('#settings .field');
                 if (accountField) accountField.scrollIntoView({ behavior: 'smooth' });
+                // Show a notice
+                showNotice("Sign in with Google to save your memory across devices.", null, null, 8000);
               }
             }, 500);
           }
