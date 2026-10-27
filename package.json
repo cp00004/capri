@@ -27,5 +27,12 @@
   "bugs": {
     "url": "https://github.com/cp00004/capri/issues"
   },
-  "homepage": "https://github.com/cp00004/capri#readme"
+  "homepage": "https://github.com/cp00004/capri#readme",
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/splash-screen": "^8.0.2"
+  }
 }
