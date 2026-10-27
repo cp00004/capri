@@ -45,7 +45,8 @@ function loadEnv() {
     const key = m[1];
     let value = m[2].trim();
     if (/^".*"$/.test(value) || /^'.*'$/.test(value)) value = value.slice(1, -1);
-    if (process.env[key] === undefined) process.env[key] = value;
+    // Always update from .env (allows runtime changes without restart)
+    process.env[key] = value;
   }
 }
 loadEnv();
@@ -62,10 +63,12 @@ const GEMINI_TTS_MODEL = process.env.CAPRI_TTS_MODEL || "gemini-3.8-flash-tts";
 const CHAT_PROVIDER = (process.env.CAPRI_CHAT_PROVIDER || (GEMINI_KEY ? "gemini" : "groq")).toLowerCase();
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const HOST_USER = os.userInfo().username;
-const ALLOWED_ORIGINS = (process.env.CAPRI_ALLOW_ORIGINS || "")
-  .split(",")
-  .map((s) => s.trim().replace(/\/+$/, ""))
-  .filter(Boolean);
+function getAllowedOrigins() {
+  return (process.env.CAPRI_ALLOW_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+}
 
 const CAPRI_VOICES = [
   { id: "capri", name: "Leda", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous. The default." },
@@ -208,7 +211,7 @@ function auth(req) {
 function trustedOrigin(req) {
   const origin = req.headers.origin;
   if (!origin) return true;
-  if (ALLOWED_ORIGINS.includes(origin.replace(/\/+$/, ""))) return true;
+  if (getAllowedOrigins().includes(origin.replace(/\/+$/, ""))) return true;
   try {
     const u = new URL(origin);
     const port = Number(u.port || (u.protocol === "https:" ? 443 : 80));
@@ -1150,6 +1153,7 @@ async function handleRevoke(req, res) {
 
 // ---------------------------------------------------------------- routing
 const handler = async (req, res) => {
+  loadEnv(); // re-read .env on each request
   const url = new URL(req.url || "/", `${SCHEME}://localhost:${PORT}`);
   const { pathname } = url;
 
