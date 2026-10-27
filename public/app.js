@@ -624,6 +624,10 @@ function paintVoiceHint() {
   if (el.prefName && state.profile) {
     el.prefName.value = state.profile.preferredName || "";
   }
+  // app banter
+  const ab = state.profile?.settings?.app_banter;
+  if (ab === "off") { localStorage.setItem("capri.appBanter", "0"); window.capriAppBanter = false; }
+  else if (ab === "on") { localStorage.setItem("capri.appBanter", "1"); window.capriAppBanter = true; }
 }
 
 function setVoicePreset(value) {
@@ -684,6 +688,24 @@ el.voiceBtn.addEventListener("click", () => {
   localStorage.setItem("capri.voiceOn", state.voiceOn ? "1" : "0");
   paintVoiceButton();
   if (!state.voiceOn) speech.stop();
+});
+
+const appBanterBtn = document.getElementById('appBanterBtn');
+const appBanterLabel = document.getElementById('appBanterLabel');
+function paintAppBanter(){
+  const on = localStorage.getItem('capri.appBanter') !== '0';
+  window.capriAppBanter = on;
+  if(appBanterBtn){ appBanterBtn.classList.toggle('is-on', on); }
+  if(appBanterLabel){ appBanterLabel.textContent = on ? 'ON' : 'OFF'; }
+}
+paintAppBanter();
+appBanterBtn?.addEventListener('click', ()=>{
+  const on = localStorage.getItem('capri.appBanter') !== '0';
+  const next = !on;
+  localStorage.setItem('capri.appBanter', next ? '1' : '0');
+  window.capriAppBanter = next;
+  paintAppBanter();
+  toggleAppBanter(next);
 });
 
 /* ---------------------------------------------------------------- recorder */
@@ -1414,18 +1436,22 @@ function setPcState() {
         ? (locked ? "granted · locked out" : "full access · granted")
         : "voice only";
   }
-  el.pcHint.textContent = local
-    ? (state.config?.pcLocked
-        ? "You locked her out. Flip it back when you want her hands again."
-        : "She runs commands, touches files, opens apps and looks at your screen. Everything is logged.")
-    : full
-      ? (state.config?.pcLocked ? "The desktop has her locked out right now." : "She can touch this PC from this device. Everything is logged.")
-      : "Ask the desktop for her hands: files, commands, apps, screen.";
+  if (el.pcHint) {
+    el.pcHint.textContent = local
+      ? (state.config?.pcLocked
+          ? "You locked her out. Flip it back when you want her hands again."
+          : "She runs commands, touches files, opens apps and looks at your screen. Everything is logged.")
+      : full
+        ? (state.config?.pcLocked ? "The desktop has her locked out right now." : "She can touch this PC from this device. Everything is logged.")
+        : "Ask the desktop for her hands: files, commands, apps, screen.";
+  }
 
-  el.accessBtn.classList.toggle("hidden", local || full);
-  el.pcLockBtn.classList.toggle("hidden", !local);
-  el.pcLockBtn.textContent = state.config?.pcLocked ? "UNLOCK HER" : "LOCK HER OUT";
-  el.pcLockBtn.classList.toggle("is-on", Boolean(on && !state.config?.pcLocked));
+  if (el.accessBtn) el.accessBtn.classList.toggle("hidden", local || full);
+  if (el.pcLockBtn) {
+    el.pcLockBtn.classList.toggle("hidden", !local);
+    el.pcLockBtn.textContent = state.config?.pcLocked ? "UNLOCK HER" : "LOCK HER OUT";
+    el.pcLockBtn.classList.toggle("is-on", Boolean(on && !state.config?.pcLocked));
+  }
 }
 
 async function refreshSettings() {
@@ -1436,24 +1462,24 @@ async function refreshSettings() {
   if (cfg.profile && !state.profile) applyProfile(cfg.profile);
   applyClock();
 
-  el.pairField.classList.toggle("hidden", !cfg.local);
-  el.deviceField.classList.toggle("hidden", !cfg.local);
-  el.auditField.classList.toggle("hidden", !cfg.local);
-  el.copyPair.classList.toggle("hidden", !cfg.local);
+  if (el.pairField) el.pairField.classList.toggle("hidden", !cfg.local);
+  if (el.deviceField) el.deviceField.classList.toggle("hidden", !cfg.local);
+  if (el.auditField) el.auditField.classList.toggle("hidden", !cfg.local);
+  if (el.copyPair) el.copyPair.classList.toggle("hidden", !cfg.local);
 
-  if (cfg.local) {
+  if (cfg.local && el.pairCodeText) {
     el.pairCodeText.textContent = cfg.pairCode || "------";
     const url = cfg.lanUrls?.[0] || location.origin;
-    el.pairUrl.textContent = url;
-    el.copyPair.dataset.url = url;
+    if (el.pairUrl) el.pairUrl.textContent = url;
+    if (el.copyPair) el.copyPair.dataset.url = url;
   }
 
-  renderPublishState(cfg.publish || {});
+  if (el.publishState && el.publishHint) renderPublishState(cfg.publish || {});
   renderGoogle();
   setPcState();
-  if (cfg.local) {
+  if (cfg.local && el.deviceList) {
     renderDevices(cfg.devices || []);
-    renderAudit();
+    if (el.auditList) renderAudit();
   }
 }
 
@@ -1799,6 +1825,11 @@ async function boot() {
   if ("speechSynthesis" in window) setTimeout(() => refreshVoices(), 400);
 
   setPhase("idle");
+  const splash = document.getElementById('splash');
+  if (splash) {
+    setTimeout(() => splash.classList.add('hidden'), 900);
+    setTimeout(() => splash.remove(), 1600);
+  }
   if (!state.history.length) {
     typer.reset(cfg?.local ? "Capricorn is awake. Say the word." : "Capricorn is on the line.");
   }
