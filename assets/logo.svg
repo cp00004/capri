@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Capri emblem">
+  <defs>
+    <linearGradient id="lg-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#101a2e"/>
+      <stop offset="1" stop-color="#04060c"/>
+    </linearGradient>
+    <linearGradient id="lg-vis" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0b6f80"/>
+      <stop offset=".28" stop-color="#22e7ff"/>
+      <stop offset=".5" stop-color="#eafeff"/>
+      <stop offset=".72" stop-color="#22e7ff"/>
+      <stop offset="1" stop-color="#0b6f80"/>
+    </linearGradient>
+    <linearGradient id="lg-mag" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff2e88" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ff2e88"/>
+    </linearGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <clipPath id="hex">
+      <path d="M256 26 455 141v230L256 486 57 371V141Z"/>
+    </clipPath>
+    <pattern id="grid" width="26" height="26" patternUnits="userSpaceOnUse">
+      <path d="M26 0H0v26" fill="none" stroke="#22e7ff" stroke-opacity=".10" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <path d="M256 26 455 141v230L256 486 57 371V141Z" fill="url(#lg-bg)"/>
+  <g clip-path="url(#hex)">
+    <rect x="57" y="26" width="398" height="460" fill="url(#grid)"/>
+    <ellipse cx="256" cy="250" rx="190" ry="120" fill="#22e7ff" opacity=".13" filter="url(#soft)"/>
+    <path d="M57 372 455 300v70L57 442Z" fill="#ff2e88" opacity=".07"/>
+  </g>
+
+  <path d="M256 26 455 141v230L256 486 57 371V141Z" fill="none" stroke="#22e7ff" stroke-opacity=".55" stroke-width="3"/>
+  <path d="M256 47 437 153v206L256 465 76 359V153Z" fill="none" stroke="#22e7ff" stroke-opacity=".14" stroke-width="1.5"/>
+
+  <!-- visor -->
+  <g filter="url(#glow)">
+    <rect x="118" y="229" width="276" height="66" rx="33" fill="url(#lg-vis)" opacity=".92"/>
+  </g>
+  <rect x="118" y="229" width="276" height="66" rx="33" fill="none" stroke="#eafeff" stroke-opacity=".55" stroke-width="1.5"/>
+  <g clip-path="url(#hex)">
+    <g opacity=".5">
+      <path d="M120 240h272M120 252h272M120 264h272M120 276h272M120 288h272" stroke="#04070e" stroke-opacity=".5" stroke-width="2"/>
+    </g>
+  </g>
+
+  <!-- rift -->
+  <path d="M252 224h16l-6 76h-10Z" fill="#04060c" opacity=".92"/>
+  <path d="M250 224h2l-6 76h-2Z" fill="#ff2e88" opacity=".9"/>
+
+  <!-- tick marks -->
+  <g stroke="#22e7ff" stroke-opacity=".8" stroke-width="3">
+    <path d="M96 200v-34M96 178h12"/>
+    <path d="M416 200v-34M416 178h-12"/>
+    <path d="M96 344v34M96 366h12"/>
+    <path d="M416 344v34M416 366h-12"/>
+  </g>
+
+  <!-- magenta accent -->
+  <path d="M352 366 412 306v52l-30 40Z" fill="url(#lg-mag)" opacity=".9"/>
+  <path d="M100 386h34v6h-34Z" fill="#fcee0a" opacity=".85"/>
+  <path d="M100 400h18v6h-18Z" fill="#fcee0a" opacity=".55"/>
+</svg>
