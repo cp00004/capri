@@ -1832,9 +1832,39 @@ async function boot() {
 
   setPhase("idle");
   const splash = document.getElementById('splash');
+  const profileBg = document.getElementById('profileBg');
+  const profileBgBar = document.getElementById('profileBgBar');
   if (splash) {
     setTimeout(() => splash.classList.add('hidden'), 900);
-    setTimeout(() => splash.remove(), 1600);
+    setTimeout(() => { splash.remove(); }, 1600);
+  }
+  // Show profile background with loading bar after splash
+  if (profileBg) {
+    setTimeout(() => {
+      profileBg.classList.remove('hidden');
+      // Animate loading bar
+      if (profileBgBar) {
+        let progress = 0;
+        const interval = setInterval(() => {
+          progress += 2;
+          profileBgBar.style.width = Math.min(progress, 100) + '%';
+          if (progress >= 100) {
+            clearInterval(interval);
+            // After loading completes, hide profile bg and show sign-in if not signed in
+            setTimeout(() => {
+              profileBg.classList.add('hidden');
+              // Trigger sign-in flow if not signed in
+              if (!state.profile?.google) {
+                openSheet(el.settings);
+                // Scroll to account section
+                const accountField = document.querySelector('#settings .field');
+                if (accountField) accountField.scrollIntoView({ behavior: 'smooth' });
+              }
+            }, 500);
+          }
+        }, 30);
+      }
+    }, 1000);
   }
   if (!state.history.length) {
     typer.reset(cfg?.local ? "Capricorn is awake. Say the word." : "Capricorn is on the line.");
