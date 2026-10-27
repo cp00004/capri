@@ -1185,6 +1185,14 @@ function applyProfile(profile) {
   renderPublishState(state.config?.publish || {});
 }
 
+function restoreRecentHistory(profile) {
+  if (state.history.length || !Array.isArray(profile?.recentHistory)) return;
+  state.history = profile.recentHistory.flatMap((turn) => [
+    ...(turn.user ? [{ role: "user", content: turn.user }] : []),
+    ...(turn.assistant ? [{ role: "assistant", content: turn.assistant }] : []),
+  ]).slice(-16);
+}
+
 async function refreshLive() {
   try {
     const me = await api("/api/me");
@@ -1869,13 +1877,19 @@ async function boot() {
     }
     if (!cfg.hasKey && !cfg.hasGemini) showNotice("No chat key loaded. Add GROQ_API_KEY or GEMINI_API_KEY to .env and restart.");
 
-    if (cfg.profile) applyProfile(cfg.profile);
+    if (cfg.profile) {
+      applyProfile(cfg.profile);
+      restoreRecentHistory(cfg.profile);
+    }
 
     if (state.session) {
       try {
         const me = await api("/api/me");
         const data = await me.json().catch(() => ({}));
-        if (me.ok && data.profile) applyProfile(data.profile);
+        if (me.ok && data.profile) {
+          applyProfile(data.profile);
+          restoreRecentHistory(data.profile);
+        }
         else if (!me.ok) {
           state.session = "";
           localStorage.removeItem(SESSION_KEY);
