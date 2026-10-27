@@ -444,8 +444,10 @@ const speech = {
       this.prefetchNext();
       await speakOne(item.text, prepared);
     } finally {
-      this.playing = false;
-      if (!this.stopped) this.pump();
+      if (generation === this.generation) {
+        this.playing = false;
+        if (!this.stopped) this.pump();
+      }
     }
   },
 
