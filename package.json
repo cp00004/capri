@@ -12,5 +12,20 @@
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "directories": {
+    "doc": "docs",
+    "lib": "lib"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cp00004/capri.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/cp00004/capri/issues"
+  },
+  "homepage": "https://github.com/cp00004/capri#readme"
 }
