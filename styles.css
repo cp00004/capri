@@ -244,22 +244,21 @@ body[data-state="thinking"] .glow { background: radial-gradient(circle, rgba(251
 }
 .act.show { opacity: 0.92; }
 
-/* her words, over her */
+/* live dialogue above the mic */
 .subtitle {
-  position: absolute;
-  left: 10%;
-  right: 10%;
-  bottom: 10%;
+  position: relative;
+  z-index: 3;
+  width: min(640px, 90vw);
   text-align: center;
   font-size: clamp(12px, 1.05vw, 15px);
   line-height: 1.42;
   letter-spacing: 0.01em;
   color: #fff4f7;
   text-shadow: 0 1px 12px #000, 0 0 26px rgba(255, 11, 82, 0.4);
-  max-height: 52%;
+  max-height: 5.68em;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 9;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   mask-image: linear-gradient(180deg, #000 84%, transparent 100%);
   opacity: 0;
@@ -611,7 +610,7 @@ input.text::placeholder { color: var(--ink-faint); }
   .stage {
     padding: calc(52px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
   }
-  .subtitle { left: 13%; right: 13%; bottom: 17%; max-height: 46%; font-size: 13px; line-height: 1.4; }
+  .subtitle { width: min(92vw, 640px); max-height: 5.6em; font-size: 13px; line-height: 1.4; }
   .dock { gap: 12px; padding: 6px 20px calc(18px + var(--safe-b)); }
   .heard { min-height: 1.4em; font-size: 11px; max-width: 92vw; }
   .mic { width: 76px; min-width: 76px; }
