@@ -511,6 +511,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         signal: controller.signal,
       });
     } catch (err) {
+      const emsg = String(err.body || err.message || "");
       // quota, demand spike or a model that vanished: try the other provider once
       const alternate = switched ? null : otherProvider(provider.name);
       if (alternate && [401, 404, 429, 500, 503].includes(Number(err.status))) {
@@ -519,8 +520,14 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         step -= 1;
         continue;
       }
+      // Gemini thinking/signature issues - disable tools and retry
+      if (/thought_signature|functionCall/i.test(emsg) && useTools) {
+        useTools = false;
+        step -= 1;
+        continue;
+      }
       // provider may reject tool schemas; fall back to plain chat once
-      if (useTools && /tool|function/i.test(String(err.body || err.message))) {
+      if (useTools && /tool|function/i.test(emsg)) {
         useTools = false;
         step -= 1;
         continue;
