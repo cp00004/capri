@@ -606,11 +606,17 @@ input.text::placeholder { color: var(--ink-faint); }
 
 /* ---------------------------------------------------------------- small screens */
 @media (max-width: 700px), (max-height: 560px) {
-  :root { --hex-h: min(58dvh, calc(100dvh - 250px)); }
-  .stage { padding-top: 52px; }
+  :root { --hex-h: min(55dvh, calc(100dvh - 274px)); }
+  body { min-height: 100dvh; }
+  .stage {
+    padding: calc(52px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
+  }
   .subtitle { font-size: 13px; bottom: 8%; line-height: 1.4; }
-  .dock { gap: 8px; padding-bottom: calc(16px + var(--safe-b)); }
-  .mic { width: 68px; }
+  .dock { gap: 12px; padding: 6px 20px calc(18px + var(--safe-b)); }
+  .heard { min-height: 1.4em; font-size: 11px; max-width: 92vw; }
+  .mic { width: 76px; min-width: 76px; }
+  .dock-row .pill { min-height: 44px; padding-inline: 20px; }
+  .pill, select, input.text { min-height: 44px; }
   .sheet {
     left: 0;
     right: 0;
@@ -625,7 +631,8 @@ input.text::placeholder { color: var(--ink-faint); }
     border-bottom: 0;
     padding-bottom: var(--safe-b);
   }
-  .sheet-body { padding-bottom: 26px; }
+  .sheet-head { padding: 12px 20px; }
+  .sheet-body { gap: 16px; padding: 16px 20px calc(28px + var(--safe-b)); }
   .top { padding-top: max(10px, env(safe-area-inset-top)); }
   .toast { bottom: calc(96px + var(--safe-b)); }
 }
