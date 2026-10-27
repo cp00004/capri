@@ -103,3 +103,5 @@ Google Identity Services refuses to run on an insecure origin that is not `local
 ### Privacy
 
 The server verifies the ID token with `https://oauth2.googleapis.com/tokeninfo`. Google sees that a token was checked; it does not see your conversations. Chat and speech still go to Groq and Google AI Studio as described in the README.
+
+_Last verified against the Google Cloud console in October 2026._
