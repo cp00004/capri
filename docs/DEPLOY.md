@@ -1,43 +1,43 @@
-# Deploy Capri worldwide
+# Online deployment
 
-GitHub Pages only hosts the static UI. To make Capri work for anyone, anywhere, you must host the Node server (`server.js`) on a public HTTPS endpoint. The app (web or APK) then points to that endpoint.
+GitHub Pages hosts only the UI. The included deployment uses a Node service on Render and a Cloudflare Worker as its API gateway. Both run online; neither needs your PC to stay on. The Render origin is kept in Worker secrets, while the Worker URL is necessarily public because the app calls it.
 
-## 1. Host the backend
+The cloud backend does not control your home PC. This deployment disables PC tools, and Capri's shell, screen, and file tools are Windows-specific. Use the local server and a tunnel only when you want phone-to-home-PC control.
 
-Pick any Node-capable host that supports HTTPS and WebSockets-friendly HTTP:
+Render's Starter service and persistent disk are paid resources. Review current pricing in Render before creating the service. The disk keeps profiles, device pairings, settings, and audit logs across restarts.
 
-- **Render** (free tier): New Web Service → connect your GitHub repo → build command `npm install`, start command `node server.js`, add env vars.
-- **Railway**: New Project → Deploy from GitHub → add env vars.
-- **Fly.io**: `fly launch` then `fly secrets set ...`.
-- **VPS (DigitalOcean/Hetzner)**: clone repo, `npm install`, run with pm2 or systemd behind nginx + Let's Encrypt.
+## 1. Deploy the backend
 
-Required env vars on the host:
+1. In Render, create a Blueprint from this repository and select `render.yaml`.
+2. Set the prompted `GROQ_API_KEY`, `GEMINI_API_KEY`, and `CAPRI_PROXY_TOKEN` values in Render. Generate a long random value for `CAPRI_PROXY_TOKEN`; do not commit it.
+3. Wait for the service to deploy and copy its `onrender.com` origin. Do not put that origin in the app.
+
+The blueprint sets `CAPRI_PC=off`, disables auto-publishing, and mounts persistent storage at `/var/data`.
+
+## 2. Deploy the Cloudflare Worker
+
+From the project directory, authenticate Wrangler and set the two Worker secrets. Use the Render origin from step 1 and the exact same proxy token entered in Render:
+
+```powershell
+npx wrangler login
+npx wrangler secret put CAPRI_BACKEND_URL --config cloudflare/wrangler.toml
+npx wrangler secret put CAPRI_PROXY_TOKEN --config cloudflare/wrangler.toml
+npx wrangler deploy --config cloudflare/wrangler.toml
 ```
-GROQ_API_KEY=gsk_...
-GEMINI_API_KEY=AQ...
-CAPRI_CHAT_PROVIDER=groq
-GOOGLE_CLIENT_ID=your-web-oauth-client-id.apps.googleusercontent.com
-CAPRI_AUTOPUBLISH=0
-PORT=4173
-CAPRI_ALLOW_ORIGINS=https://cp00004.github.io,https://your-app-origin
-```
 
-Set `CAPRI_AUTOPUBLISH=0` on hosted environments (no git push from a container).
+Wrangler prints a public `workers.dev` URL. The Worker accepts only `/api/` requests and sends the private proxy token to the Node service. Direct API calls to the Render origin are rejected once the token is configured.
 
-## 2. Set up Google Sign-In (OAuth)
+## 3. Point the app at the Worker
 
-1. Go to https://console.cloud.google.com/ → APIs & Services → Credentials.
-2. Create an OAuth 2.0 Client ID → Application type: **Web application**.
-3. Authorized JavaScript origins: add your GitHub Pages URL (`https://cp00004.github.io`) and your hosted backend URL.
-4. Authorized redirect URIs: leave empty (GIS uses popup).
-5. Copy the Client ID (ends in `.apps.googleusercontent.com`).
-6. Paste it as `GOOGLE_CLIENT_ID` in your backend `.env` and restart.
+Set `DEFAULT_BACKEND` in both `app.js` and `public/app.js` to the `workers.dev` URL, then publish the static UI to GitHub Pages. The URL of the Worker is public; the Render origin and proxy token are not. Existing installed APKs need to be rebuilt with `npx cap sync android` before building the APK.
 
-## 3. Point the app at the backend
+## Google Sign-In
 
-In the app (web or APK): Settings → **PC address / backend** → paste your hosted URL (e.g. `https://capri.yourdomain.com`). Tap SAVE. The app reloads and connects.
+1. In Google Cloud Console, add `https://cp00004.github.io` to the OAuth client's authorized JavaScript origins.
+2. Set `GOOGLE_CLIENT_ID` in the Render service environment.
+3. Redeploy the service.
 
-## 4. Mobile app (APK)
+## Mobile app (APK)
 
 The Capacitor Android project is in `android/`. To build:
 ```
@@ -45,12 +45,12 @@ npm install
 npx cap sync android
 cd android && ./gradlew assembleDebug
 ```
-APK output: `android/app/build/outputs/apk/debug/app-debug.apk`
+APK output: `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 Install on any Android device. In Settings, set the backend URL. Sign in with Google — memory, preferences and history sync per Gmail account across devices.
 
 ## Notes
 
-- The backend holds all secret keys. The APK and GitHub Pages never contain keys.
-- PC control tools (`run_shell`, etc.) only work when the backend runs on a PC with those tools available. On a cloud host, those tools run on the host machine.
-- For true PC control from a phone, host the backend on the PC itself and expose it via a tunnel (Cloudflare Tunnel, Tailscale) instead of a cloud host.
+- Provider keys and the proxy token stay in Render/Cloudflare secrets, never in the app bundle.
+- The Worker URL is visible to users and is not a secret. The Render origin is protected by `CAPRI_PROXY_TOKEN`.
+- To enable home-PC control, run Capri on that PC and use a tunnel instead; that option requires the PC and tunnel process to remain online.

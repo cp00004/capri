@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: capri-backend
+    runtime: node
+    plan: starter
+    buildCommand: npm ci
+    startCommand: node server.js
+    disk:
+      name: capri-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: CAPRI_DATA_DIR
+        value: /var/data
+      - key: CAPRI_PC
+        value: "off"
+      - key: CAPRI_AUTOPUBLISH
+        value: "0"
+      - key: CAPRI_ALLOW_ORIGINS
+        value: https://cp00004.github.io,https://localhost,capacitor://localhost
+      - key: CAPRI_PROXY_TOKEN
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false

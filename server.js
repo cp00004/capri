@@ -33,7 +33,6 @@ import { createPublisher } from "./lib/publish.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
 const ENV_FILE = path.join(__dirname, ".env");
-const DEVICES_FILE = path.join(__dirname, ".capri-devices.json");
 
 // ---------------------------------------------------------------- env
 function loadEnv() {
@@ -50,6 +49,10 @@ function loadEnv() {
   }
 }
 loadEnv();
+
+const DATA_DIR = path.resolve(process.env.CAPRI_DATA_DIR || __dirname);
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const DEVICES_FILE = path.join(DATA_DIR, ".capri-devices.json");
 
 const PORT = Number(process.env.PORT || 4173);
 const MODEL = process.env.CAPRI_MODEL || "openai/gpt-oss-120b";
@@ -1156,6 +1159,14 @@ const handler = async (req, res) => {
   loadEnv(); // re-read .env on each request
   const url = new URL(req.url || "/", `${SCHEME}://localhost:${PORT}`);
   const { pathname } = url;
+
+  if (
+    process.env.CAPRI_PROXY_TOKEN &&
+    pathname.startsWith("/api/") &&
+    req.headers["x-capri-proxy-token"] !== process.env.CAPRI_PROXY_TOKEN
+  ) {
+    return json(res, 404, { error: "unknown endpoint" });
+  }
 
   // the app can be hosted elsewhere (a wrapper build, a tunnel) and still call this pc
   const origin = req.headers.origin;
