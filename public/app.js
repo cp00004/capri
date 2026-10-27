@@ -1243,7 +1243,38 @@ async function respond(userText) {
 /* ---------------------------------------------------------------- audio unlock */
 
 let unlocked = false;
-function unlockAudio() {
+function initGoogleButton() {
+  const googleBtn = document.getElementById('googleBtn');
+  if (!googleBtn) return;
+  // Remove previous listeners by cloning
+  const fresh = googleBtn.cloneNode(true);
+  googleBtn.parentNode.replaceChild(fresh, googleBtn);
+  const btn = document.getElementById('googleBtn');
+  btn.addEventListener('click', async () => {
+    try {
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SocialLogin) {
+        const result = await window.Capacitor.Plugins.SocialLogin.login({
+          provider: 'google',
+          options: { scopes: ['profile', 'email'] }
+        });
+        state.google = result;
+        el.googleBtn.classList.add('hidden');
+        el.signOutBtn.classList.remove('hidden');
+      } else {
+        // fallback opens Google OAuth URL (replace with your actual client id if needed)
+        const clientId = '240583618801-6l8bpgneim3nfker6kbbbj4brt2gjrg2.apps.googleusercontent.com';
+        const redirectUri = encodeURIComponent(window.location.origin);
+        const scope = encodeURIComponent('profile email');
+        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=token&scope=${scope}`;
+        window.open(authUrl, '_blank');
+      }
+    } catch (e) {
+      console.error('Google sign‑in failed', e);
+      alert('Google sign‑in could not start.');
+    }
+  });
+}
+ {
   if (unlocked) return;
   unlocked = true;
   try {
