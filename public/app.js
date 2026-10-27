@@ -82,11 +82,14 @@ const el = {
   voiceHint: $("#voiceHint"),
 };
 
-const DEFAULT_BACKEND = "https://ripe-ducks-itch.loca.lt";
+const STALE_TUNNEL = "https://ripe-ducks-itch.loca.lt";
+const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
+const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
+const DEFAULT_BACKEND = LOCAL_HOST ? "" : STALE_TUNNEL;
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
   session: localStorage.getItem(SESSION_KEY) || "",
-  apiBase: normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || DEFAULT_BACKEND),
+  apiBase: LOCAL_HOST && SAVED_BACKEND === STALE_TUNNEL ? "" : SAVED_BACKEND || DEFAULT_BACKEND,
   config: null,
   profile: null,
   voices: [],
@@ -1807,7 +1810,7 @@ async function fetchConfig() {
 
 async function boot() {
   // Save default backend to localStorage if not already set
-  if (!localStorage.getItem(API_KEY) && !localStorage.getItem(SERVER_KEY)) {
+  if (DEFAULT_BACKEND && !localStorage.getItem(API_KEY) && !localStorage.getItem(SERVER_KEY)) {
     localStorage.setItem(API_KEY, DEFAULT_BACKEND);
     localStorage.setItem(SERVER_KEY, DEFAULT_BACKEND);
   }
