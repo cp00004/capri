@@ -750,6 +750,7 @@ appBanterBtn?.addEventListener('click', ()=>{
 const rec = {
   active: false,
   starting: false,
+  cancelStart: false,
   listenQueued: false,
   stream: null,
   recorder: null,
@@ -831,6 +832,7 @@ async function startListening() {
   }
 
   rec.starting = true;
+  rec.cancelStart = false;
   speech.stop();
   setPhase("listening");
   clearHeard();
@@ -839,8 +841,18 @@ async function startListening() {
     rec.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
+    if (rec.cancelStart) {
+      rec.stream.getTracks().forEach((track) => track.stop());
+      rec.stream = null;
+      rec.starting = false;
+      rec.cancelStart = false;
+      setPhase("idle");
+      resumeWakeWord();
+      return;
+    }
   } catch (err) {
     rec.starting = false;
+    rec.cancelStart = false;
     setPhase("idle");
     showNotice(
       err?.name === "NotAllowedError"
@@ -1958,7 +1970,8 @@ el.accessDeny.addEventListener("click", () => answerAccess(false));
 
 el.micBtn.addEventListener("click", () => {
   unlockAudio();
-  if (rec.active || rec.starting) stopListening();
+  if (rec.starting) rec.cancelStart = true;
+  else if (rec.active) stopListening();
   else startListening();
 });
 
