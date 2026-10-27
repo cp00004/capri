@@ -371,7 +371,7 @@ async function chatCompletion({ provider, messages, tools, signal }) {
   if (provider.name === "gemini") {
     // thinking causes thought_signature requirements; turn it off to avoid multi-turn signature issues
     payload.reasoning_effort = "none";
-    payload.thinking_config = { thinking_budget: 0 };
+    // Some endpoints don't accept thinking_config; try without first, rely on reasoning_effort
   }
   if (tools) {
     payload.tools = tools;
