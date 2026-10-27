@@ -410,28 +410,39 @@ const speech = {
   queue: [],
   playing: false,
   stopped: false,
+  generation: 0,
   onDrain: null,
 
   enqueue(text) {
     const clean = cleanForSpeech(text);
     if (!clean || !state.voiceOn) return;
-    this.queue.push(clean);
+    this.queue.push({ text: clean, prepared: null });
+    if (this.playing) this.prefetchNext();
     this.pump();
   },
 
   get busy() { return this.playing || this.queue.length > 0; },
 
+  prefetchNext() {
+    const next = this.queue[0];
+    if (next && !next.prepared) next.prepared = prepareSpeech(next.text);
+  },
+
   async pump() {
     if (this.playing || this.stopped) return;
-    const next = this.queue.shift();
-    if (!next) {
+    const item = this.queue.shift();
+    if (!item) {
       this.onDrain?.();
       return;
     }
+    const generation = this.generation;
     this.playing = true;
     if (state.phase !== "speaking") setPhase("speaking");
     try {
-      await speakOne(next);
+      const prepared = await (item.prepared || prepareSpeech(item.text));
+      if (generation !== this.generation || this.stopped) return;
+      this.prefetchNext();
+      await speakOne(item.text, prepared);
     } finally {
       this.playing = false;
       if (!this.stopped) this.pump();
@@ -439,11 +450,12 @@ const speech = {
   },
 
   stop() {
+    this.generation += 1;
     this.queue = [];
     this.stopped = true;
     this.playing = false;
     stopAudio();
-    if (state.voiceOn) setTimeout(() => { this.stopped = false; }, 60);
+    if (state.voiceOn) setTimeout(() => { this.stopped = false; this.pump(); }, 60);
     if (state.phase === "speaking") setPhase("idle");
   },
 };
@@ -517,14 +529,8 @@ function playBlob(blob, { pitch = 0.96, grit = 0.14 } = {}) {
   });
 }
 
-async function speakOne(text) {
-  if (!state.voiceOn) return;
-
-  if (state.voicePreset === "system") {
-    await speakBrowser(text);
-    return;
-  }
-
+async function prepareSpeech(text) {
+  if (!state.voiceOn || state.voicePreset === "system") return null;
   try {
     const res = await api("/api/tts", {
       method: "POST",
@@ -534,13 +540,12 @@ async function speakOne(text) {
 
     const type = res.headers.get("content-type") || "";
     if (res.ok && type.startsWith("audio")) {
-      const pitch = Number(res.headers.get("X-Capri-Pitch") || 0.96);
-      const grit = Number(res.headers.get("X-Capri-Grit") || 0.14);
-      const engine = res.headers.get("X-Capri-Engine") || "";
-      if (el.ttsEngine && engine) el.ttsEngine.textContent = engine;
-      burstGlitch(1);
-      await playBlob(await res.blob(), { pitch, grit });
-      return;
+      return {
+        blob: await res.blob(),
+        pitch: Number(res.headers.get("X-Capri-Pitch") || 0.96),
+        grit: Number(res.headers.get("X-Capri-Grit") || 0.14),
+        engine: res.headers.get("X-Capri-Engine") || "",
+      };
     }
 
     const data = await res.json().catch(() => ({}));
@@ -556,7 +561,17 @@ async function speakOne(text) {
   } catch {
     /* fall through to the system voice */
   }
+  return null;
+}
 
+async function speakOne(text, prepared) {
+  if (!state.voiceOn) return;
+  if (prepared?.blob) {
+    if (el.ttsEngine && prepared.engine) el.ttsEngine.textContent = prepared.engine;
+    burstGlitch(1);
+    await playBlob(prepared.blob, prepared);
+    return;
+  }
   await speakBrowser(text);
 }
 
