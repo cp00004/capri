@@ -620,7 +620,15 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         ? executeMemoryTool(call.function.name, args, profile, res)
         : pcLocked
           ? { ok: false, error: "her hands are locked on this PC" }
-          : await executeTool(call.function.name, args);
+          : await executeTool(call.function.name, args).catch(async (e) => {
+              // if tool missing, try extra
+              try {
+                const { executeExtraTool } = await import("./lib/pc.js");
+                return await executeExtraTool(call.function.name, args);
+              } catch (ex) {
+                return { ok: false, error: e?.message || String(e) };
+              }
+            });
       const payload = JSON.stringify(result).slice(0, 8000);
       sse(res, {
         type: "tool",
