@@ -1,5 +1,11 @@
 {
   "appId": "com.capri.app",
   "appName": "Capri",
-  "webDir": "public"
+  "webDir": "public",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
 }
