@@ -1487,7 +1487,7 @@ function setPcState() {
         : "Ask the desktop for her hands: files, commands, apps, screen.";
   }
 
-  if (el.accessBtn) el.accessBtn.classList.toggle("hidden", local || full);
+  if (el.accessBtn) el.accessBtn.classList.toggle("hidden", local || full || !state.config?.paired);
   if (el.pcLockBtn) {
     el.pcLockBtn.classList.toggle("hidden", !local);
     el.pcLockBtn.textContent = state.config?.pcLocked ? "UNLOCK HER" : "LOCK HER OUT";

@@ -691,6 +691,12 @@ function profileFromRequest(req) {
   return sessionProfile(String(req.headers["x-capri-profile"] || ""));
 }
 
+function sessionCaller(req) {
+  const profile = profileFromRequest(req);
+  if (!profile) return null;
+  return { scope: "voice", name: profile.name || profile.email || "Google account", profile };
+}
+
 function googleStatus() {
   return {
     configured: Boolean(GOOGLE_CLIENT_ID),
@@ -1092,6 +1098,7 @@ async function handlePair(req, res) {
 async function handleAccessRequest(req, res, who) {
   if (who.scope === "local") return json(res, 200, { already: true, scope: "full" });
   if (who.scope === "full") return json(res, 200, { already: true, scope: "full" });
+  if (!who.device) return json(res, 403, { error: "pair_required", message: "Pair this device before requesting PC access." });
 
   const existing = [...pendingAccess.values()].find((p) => p.deviceId === who.device?.id && Date.now() - p.at < 120_000);
   if (existing) return json(res, 200, { pending: true, id: existing.id });
@@ -1189,7 +1196,8 @@ const handler = async (req, res) => {
 
   // static shell is public; the API is not
   if (req.method === "GET" && pathname === "/api/config") {
-    const who = auth(req);
+    const device = auth(req);
+    const who = device || sessionCaller(req);
     const pngPortrait = path.join(PUBLIC_DIR, "assets", "capri.png");
     const local = who?.scope === "local";
     const session = profileFromRequest(req);
@@ -1210,7 +1218,7 @@ const handler = async (req, res) => {
       ],
       orpheusVoices: ["diana", "hannah", "autumn", "tara", "leah", "mia", "zoe"],
       user: HOST_USER,
-      paired: Boolean(who),
+      paired: Boolean(device),
       scope: who?.scope || null,
       pcLocked,
       local,
@@ -1266,7 +1274,8 @@ const handler = async (req, res) => {
 
   // every /api route below needs a local or paired caller
   if (pathname.startsWith("/api/")) {
-    const who = auth(req);
+    const device = auth(req);
+    const who = device || sessionCaller(req);
     if (!who) return json(res, 401, { error: "unauthorized", message: "Pair this device first." });
 
     const session = profileFromRequest(req);
