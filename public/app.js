@@ -777,6 +777,10 @@ function pickMime() {
   return PREFERRED_MIME.find((m) => MediaRecorder.isTypeSupported(m)) || "";
 }
 
+function resumeWakeWord() {
+  if (wakeWord.enabled && !document.hidden) setTimeout(startWakeWord, 250);
+}
+
 function playListeningChime() {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -784,6 +788,7 @@ function playListeningChime() {
     const ctx = new Ctx();
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
+    resumeWakeWord();
     const start = ctx.currentTime;
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(740, start);
@@ -799,23 +804,27 @@ function playListeningChime() {
     /* audio feedback is optional */
   }
 }
+    resumeWakeWord();
 
 async function startListening() {
   if (rec.active || rec.starting) return;
   if (state.phase === "thinking" || state.streaming) {
     rec.listenQueued = true;
     showNotice("I’ll listen as soon as I finish this reply.", null, null, 2500);
+      resumeWakeWord();
     return;
   }
   if (wakeWord.active || wakeWord.starting) {
     wakeWord.pendingStart = true;
     wakeWord.recognition?.stop();
+      resumeWakeWord();
     return;
   }
   rec.listenQueued = false;
   if (!window.isSecureContext) {
     showNotice(
       "Phone mics only unlock on a secure page. On the PC run npm run cert, reopen the https link, and trust Capri Local once. The keyboard still works.",
+    resumeWakeWord();
       null, null, 14000
     );
     return;
