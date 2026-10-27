@@ -135,7 +135,11 @@ async function api(url, opts = {}) {
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
   const res = await fetch(apiUrl(url), { ...opts, headers });
   if (res.status === 401) {
-    showPair("That link is dead. Pair this device again.");
+    if (state.token) showPair("That device link expired. Connect again with Google.");
+    if (state.session) {
+      state.session = "";
+      localStorage.removeItem(SESSION_KEY);
+    }
     throw new Error("unauthorized");
   }
   return res;
