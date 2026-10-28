@@ -1653,7 +1653,7 @@ async function renderGoogle(force = false) {
     return;
   }
   state.googleReady = true;
-  el.googleBtn.classList.add("hidden");
+  el.googleBtn.classList.toggle("hidden", Boolean(state.profile?.google));
   if (googleInitializedClientId !== google.clientId) {
     window.google.accounts.id.initialize({
       client_id: google.clientId,
