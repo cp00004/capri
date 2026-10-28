@@ -85,7 +85,7 @@ const el = {
   voiceHint: $("#voiceHint"),
 };
 
-const DEFAULT_TUNNEL = "https://capri-api.koyeb.app";
+const DEFAULT_TUNNEL = "https://proud-moments-enter.loca.lt";
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
@@ -140,7 +140,14 @@ async function api(url, opts = {}) {
   if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
   if (state.session) headers.set("X-Capri-Profile", state.session);
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
-  const res = await fetch(apiUrl(url), { ...opts, headers });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  let res;
+  try {
+    res = await fetch(apiUrl(url), { ...opts, headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (res.status === 401) {
     if (state.token) showPair("That device link expired. Connect again with Google.");
     if (state.session) {
