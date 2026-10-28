@@ -1695,6 +1695,14 @@ async function renderGoogle(force = false) {
       }
     }
   }
+  // Google silently refuses origins that are not registered on the OAuth
+  // client. If no button iframe appears, say why instead of failing quietly.
+  setTimeout(() => {
+    if (state.profile?.google) return;
+    if (!el.googleButton || el.googleButton.querySelector("iframe")) return;
+    el.accountHint.textContent =
+      "Google has not approved this web address for sign-in yet. In Google Cloud Console -> Credentials -> your Web OAuth client, add this site under Authorized JavaScript origins (redirect URIs stay empty), then reload.";
+  }, 2500);
 }
 
 el.googleBtn.addEventListener("click", async () => {
