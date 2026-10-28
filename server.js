@@ -336,6 +336,102 @@ function sse(res, obj) {
   res.write(`data: ${JSON.stringify(obj)}\n\n`);
 }
 
+/* ---------------------------------------------------------------- hands
+   A hosted copy of Capri has no access to the user's PC. When
+   CAPRI_HANDS_TOKEN is set the server stops running tools in its own
+   container and instead parks them in a queue for a small agent running on
+   the PC (agent.js). The agent long-polls, executes, and posts the result
+   back with the same token. */
+
+const HANDS_TOKEN = process.env.CAPRI_HANDS_TOKEN || "";
+const HANDS_TIMEOUT = 25_000;
+const handsQueue = [];
+const handsWaiting = new Map(); // call id -> resolve(result)
+let handsPoll = null; // pending long-poll responder
+let handsSeenAt = 0;
+
+function handsAuthorized(req) {
+  if (!HANDS_TOKEN) return false;
+  const token = bearer(req);
+  if (!token || token.length !== HANDS_TOKEN.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(HANDS_TOKEN));
+  } catch {
+    return false;
+  }
+}
+
+function handsOnline() {
+  return Boolean(HANDS_TOKEN) && Date.now() - handsSeenAt < 60_000;
+}
+
+function handsWake() {
+  if (!handsPoll || !handsQueue.length) return;
+  const respond = handsPoll;
+  handsPoll = null;
+  respond({ call: handsQueue.shift() });
+}
+
+async function handleHandsNext(req, res) {
+  if (!handsAuthorized(req)) return json(res, 401, { error: "unauthorized" });
+  handsSeenAt = Date.now();
+  if (handsQueue.length) return json(res, 200, { call: handsQueue.shift() });
+
+  let settled = false;
+  const finish = (payload) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    if (handsPoll === finish) handsPoll = null;
+    json(res, 200, payload);
+  };
+  const timer = setTimeout(() => finish({ idle: true }), 20_000);
+  handsPoll = finish;
+  req.on("close", () => {
+    settled = true;
+    clearTimeout(timer);
+    if (handsPoll === finish) handsPoll = null;
+  });
+}
+
+async function handleHandsResult(req, res) {
+  if (!handsAuthorized(req)) return json(res, 401, { error: "unauthorized" });
+  handsSeenAt = Date.now();
+  let body;
+  try {
+    body = await readBody(req, 200_000);
+  } catch (err) {
+    return json(res, 400, { error: err.message });
+  }
+  const waiter = handsWaiting.get(String(body.id || ""));
+  if (!waiter) return json(res, 404, { error: "unknown_call" });
+  waiter(body.result);
+  json(res, 200, { ok: true });
+}
+
+function runHandsTool(name, args) {
+  return new Promise((resolve) => {
+    if (!handsOnline()) {
+      return resolve({
+        ok: false,
+        error: "My hands are offline. Turn the PC on and start the Capri agent, then ask me again.",
+      });
+    }
+    const id = "h_" + crypto.randomBytes(6).toString("hex");
+    const finish = (result) => {
+      if (!handsWaiting.has(id)) return;
+      clearTimeout(timer);
+      handsWaiting.delete(id);
+      const clean = result && typeof result === "object" ? result : { ok: true, output: String(result ?? "") };
+      resolve(clean);
+    };
+    const timer = setTimeout(() => finish({ ok: false, error: "The PC did not answer in time." }), HANDS_TIMEOUT);
+    handsWaiting.set(id, finish);
+    handsQueue.push({ id, name, args });
+    handsWake();
+  });
+}
+
 function friendlyError(status, raw, provider = "groq") {
   let message = raw;
   try {
@@ -685,7 +781,9 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         ? executeMemoryTool(call.function.name, args, profile, res)
         : pcLocked
           ? { ok: false, error: "her hands are locked on this PC" }
-          : await executeTool(call.function.name, args).catch(async (e) => {
+          : HANDS_TOKEN
+            ? await runHandsTool(call.function.name, args)
+            : await executeTool(call.function.name, args).catch(async (e) => {
               // if tool missing, try extra
               try {
                 const { executeExtraTool } = await import("./lib/pc.js");
@@ -1320,6 +1418,10 @@ const handler = async (req, res) => {
   }
 
   if (req.method === "POST" && pathname === "/api/pair") return handlePair(req, res);
+
+  // the PC agent: authenticated by CAPRI_HANDS_TOKEN, not by pairing
+  if (req.method === "GET" && pathname === "/api/hands/next") return handleHandsNext(req, res);
+  if (req.method === "POST" && pathname === "/api/hands/result") return handleHandsResult(req, res);
 
   // every /api route below needs a local or paired caller
   if (pathname.startsWith("/api/")) {
