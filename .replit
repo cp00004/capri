@@ -1,0 +1,4 @@
+run = "cd capri-desktop && node server.js"
+
+[env]
+PORT = "8000"
