@@ -4431,17 +4431,10 @@ initSplash();
 boot();
 checkRemoteVersion();
 
-
-// Also add CSS class removal in case body has loading class
-setTimeout(() => {
-  document.body.classList.remove(" loading\);
- if (!document.body.classList.contains(\ready\)) {
- document.body.classList.add(\ready\);
- }
+/* failsafe: never let the splash screen hang */
+setTimeout(function () {
+  var s = document.getElementById("splash");
+  if (s) { s.style.display = "none"; }
+  document.body.classList.remove("loading");
+  document.body.classList.add("ready");
 }, 4500);
-
-setTimeout(function(){var s=document.getElementById(" splash);if(s){s.style.display=
-one;}document.body.classList.remove(loading);document.body.classList.add(eady);},4500);
-
-setTimeout(function(){var s=document.getElementById(" splash);if(s){s.style.display=
-one;}document.body.classList.remove(loading);document.body.classList.add(eady);},4500);
