@@ -37,7 +37,23 @@ const http  = require("http");
 const ROOT    = path.join(__dirname, "..");
 const SERVER  = path.join(ROOT, "server.js");
 const ICON    = path.join(ROOT, "public", "assets", "icon-512.png");
-const PORT    = Number(process.env.PORT || 4173);
+const net = require('net');
+// Determine a free port – fallback if default is occupied
+function isPortFree(p) {
+  try {
+    const tester = net.createServer().listen(p);
+    tester.once('listening', () => tester.close());
+    return true;
+  } catch {
+    return false;
+  }
+}
+let effectivePort = Number(process.env.PORT || 4173);
+if (!isPortFree(effectivePort)) {
+  effectivePort = effectivePort + 1; // simple fallback to next port
+}
+const PORT = effectivePort;
+
 const APP_URL = `http://localhost:${PORT}`;
 
 // Find the bundled node binary (same one running Electron)
