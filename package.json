@@ -44,7 +44,7 @@
                   "appId":  "com.capricorn.capri",
                   "productName":  "Capri",
                   "copyright":  "Project Capricorn",
-                  "asar":  true,
+                  "asar":  false,
     "asarIntegrity": false,
                   "files":  [
                                 "electron/**/*",
