@@ -2219,3 +2219,6 @@ setTimeout(() => {
 
 setTimeout(function(){var s=document.getElementById(" splash);if(s){s.style.display=
 one;}document.body.classList.remove(loading);document.body.classList.add(eady);},4500);
+
+setTimeout(function(){var s=document.getElementById(" splash);if(s){s.style.display=
+one;}document.body.classList.remove(loading);document.body.classList.add(eady);},4500);
