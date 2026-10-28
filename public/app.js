@@ -2085,6 +2085,38 @@ async function fetchConfig() {
   }
 }
 
+
+function initSplash() {
+  const splash = document.getElementById('splash');
+  const profileBg = document.getElementById('profileBg');
+  const profileBgBar = document.getElementById('profileBgBar');
+  if (splash) {
+    setTimeout(() => splash.classList.add('hidden'), 900);
+    setTimeout(() => { splash.remove(); }, 1600);
+  }
+  // Show profile background with loading bar after splash
+  if (profileBg) {
+    setTimeout(() => {
+      profileBg.classList.remove('hidden');
+      // Animate loading bar
+      if (profileBgBar) {
+        let progress = 0;
+        const interval = setInterval(() => {
+          progress += 2;
+          profileBgBar.style.width = Math.min(progress, 100) + '%';
+          if (progress >= 100) {
+            clearInterval(interval);
+            // After loading completes, hide profile bg
+            setTimeout(() => {
+              profileBg.classList.add('hidden');
+            }, 500);
+          }
+        }, 30);
+      }
+    }, 1000);
+  }
+}
+
 async function boot() {
   // Save default backend to localStorage if not already set
   if (DEFAULT_BACKEND && !localStorage.getItem(API_KEY) && !localStorage.getItem(SERVER_KEY)) {
@@ -2160,34 +2192,7 @@ async function boot() {
   if ("speechSynthesis" in window) setTimeout(() => refreshVoices(), 400);
 
   setPhase("idle");
-  const splash = document.getElementById('splash');
-  const profileBg = document.getElementById('profileBg');
-  const profileBgBar = document.getElementById('profileBgBar');
-  if (splash) {
-    setTimeout(() => splash.classList.add('hidden'), 900);
-    setTimeout(() => { splash.remove(); }, 1600);
-  }
-  // Show profile background with loading bar after splash
-  if (profileBg) {
-    setTimeout(() => {
-      profileBg.classList.remove('hidden');
-      // Animate loading bar
-      if (profileBgBar) {
-        let progress = 0;
-        const interval = setInterval(() => {
-          progress += 2;
-          profileBgBar.style.width = Math.min(progress, 100) + '%';
-          if (progress >= 100) {
-            clearInterval(interval);
-            // After loading completes, hide profile bg
-            setTimeout(() => {
-              profileBg.classList.add('hidden');
-            }, 500);
-          }
-        }, 30);
-      }
-    }, 1000);
-  }
+
   if (!state.history.length) {
     typer.reset(cfg?.local ? "Capricorn is awake. Say the word." : "Capricorn is on the line.");
   }
@@ -2199,5 +2204,6 @@ async function boot() {
 window.addEventListener("online", () => { if (!state.config) boot();
 checkRemoteVersion(); });
 
+initSplash();
 boot();
 checkRemoteVersion();

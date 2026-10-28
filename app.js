@@ -85,7 +85,7 @@ const el = {
   voiceHint: $("#voiceHint"),
 };
 
-const DEFAULT_TUNNEL = "https://capri-api.koyeb.app";
+const DEFAULT_TUNNEL = "https://proud-moments-enter.loca.lt";
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
@@ -140,7 +140,14 @@ async function api(url, opts = {}) {
   if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
   if (state.session) headers.set("X-Capri-Profile", state.session);
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
-  const res = await fetch(apiUrl(url), { ...opts, headers });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  let res;
+  try {
+    res = await fetch(apiUrl(url), { ...opts, headers, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
   if (res.status === 401) {
     if (state.token) showPair("That device link expired. Connect again with Google.");
     if (state.session) {
@@ -1365,6 +1372,8 @@ el.pairForm.addEventListener("submit", async (e) => {
     localStorage.setItem("capri.name", data.name || name);
     closeSheet(el.pairPanel);
     await boot();
+    const splashBar = document.getElementById('splashBar');
+    if (splashBar) splashBar.classList.add('hidden');
 checkRemoteVersion();
     if (state.scope === "full") {
       typer.reset("Locked on. I have your chrome.");
@@ -1635,6 +1644,8 @@ async function handleGoogleCredential(response) {
     state.session = data.token;
     localStorage.setItem(SESSION_KEY, data.token);
     await boot();
+    const splashBar = document.getElementById('splashBar');
+    if (splashBar) splashBar.classList.add('hidden');
 checkRemoteVersion();
     showNotice(`Signed in as ${data.profile.name || data.profile.email}. Memory is tied to this account now.`, null, null, 6000);
     speech.enqueue("There you are. I remember you.");
@@ -1718,6 +1729,8 @@ el.signOutBtn.addEventListener("click", async () => {
   localStorage.removeItem(SESSION_KEY);
   showNotice("Signed out. This device is back on the local profile.", null, null, 5000);
   await boot();
+    const splashBar = document.getElementById('splashBar');
+    if (splashBar) splashBar.classList.add('hidden');
 checkRemoteVersion();
 });
 
@@ -2072,6 +2085,38 @@ async function fetchConfig() {
   }
 }
 
+
+function initSplash() {
+  const splash = document.getElementById('splash');
+  const profileBg = document.getElementById('profileBg');
+  const profileBgBar = document.getElementById('profileBgBar');
+  if (splash) {
+    setTimeout(() => splash.classList.add('hidden'), 900);
+    setTimeout(() => { splash.remove(); }, 1600);
+  }
+  // Show profile background with loading bar after splash
+  if (profileBg) {
+    setTimeout(() => {
+      profileBg.classList.remove('hidden');
+      // Animate loading bar
+      if (profileBgBar) {
+        let progress = 0;
+        const interval = setInterval(() => {
+          progress += 2;
+          profileBgBar.style.width = Math.min(progress, 100) + '%';
+          if (progress >= 100) {
+            clearInterval(interval);
+            // After loading completes, hide profile bg
+            setTimeout(() => {
+              profileBg.classList.add('hidden');
+            }, 500);
+          }
+        }, 30);
+      }
+    }, 1000);
+  }
+}
+
 async function boot() {
   // Save default backend to localStorage if not already set
   if (DEFAULT_BACKEND && !localStorage.getItem(API_KEY) && !localStorage.getItem(SERVER_KEY)) {
@@ -2147,34 +2192,7 @@ async function boot() {
   if ("speechSynthesis" in window) setTimeout(() => refreshVoices(), 400);
 
   setPhase("idle");
-  const splash = document.getElementById('splash');
-  const profileBg = document.getElementById('profileBg');
-  const profileBgBar = document.getElementById('profileBgBar');
-  if (splash) {
-    setTimeout(() => splash.classList.add('hidden'), 900);
-    setTimeout(() => { splash.remove(); }, 1600);
-  }
-  // Show profile background with loading bar after splash
-  if (profileBg) {
-    setTimeout(() => {
-      profileBg.classList.remove('hidden');
-      // Animate loading bar
-      if (profileBgBar) {
-        let progress = 0;
-        const interval = setInterval(() => {
-          progress += 2;
-          profileBgBar.style.width = Math.min(progress, 100) + '%';
-          if (progress >= 100) {
-            clearInterval(interval);
-            // After loading completes, hide profile bg
-            setTimeout(() => {
-              profileBg.classList.add('hidden');
-            }, 500);
-          }
-        }, 30);
-      }
-    }, 1000);
-  }
+
   if (!state.history.length) {
     typer.reset(cfg?.local ? "Capricorn is awake. Say the word." : "Capricorn is on the line.");
   }
@@ -2186,5 +2204,6 @@ async function boot() {
 window.addEventListener("online", () => { if (!state.config) boot();
 checkRemoteVersion(); });
 
+initSplash();
 boot();
 checkRemoteVersion();
