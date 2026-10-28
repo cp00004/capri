@@ -34,6 +34,51 @@ body[data-state="speaking"]  { --accent: var(--pink); --accent-soft: rgba(255, 1
 
 * { box-sizing: border-box; }
 
+/* Electron frameless titlebar */
+.electron-bar {
+  display: none;
+  -webkit-app-region: drag;
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 32px;
+  background: rgba(7,0,12,0.92);
+  border-bottom: 1px solid #2a0820;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 8px 0 12px;
+  z-index: 9999;
+  user-select: none;
+}
+.electron-title {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  color: #ff0b52;
+  opacity: 0.8;
+}
+.electron-controls {
+  -webkit-app-region: no-drag;
+  display: flex;
+  gap: 4px;
+}
+.electron-controls button {
+  background: none;
+  border: 1px solid #2a0820;
+  color: #a98fa4;
+  width: 24px; height: 20px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.electron-controls button:hover { background: #2a0820; color: #fff; }
+.electron-controls .close-btn:hover { background: #ff0b52; color: #fff; border-color: #ff0b52; }
+/* Push body content down when bar is visible */
+body:has(.electron-bar[style*='flex']) .top { margin-top: 32px; }
+
 html, body {
   height: 100%;
   margin: 0;

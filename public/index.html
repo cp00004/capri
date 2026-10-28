@@ -49,6 +49,21 @@
 <link rel="stylesheet" href="styles.css?v=20261027-1723" />
 </head>
 <body data-state="idle">
+<!-- Electron frameless window drag bar (hidden on web) -->
+<div id="electronBar" class="electron-bar" style="display:none">
+  <span class="electron-title">CAPRI // CAPRICORN</span>
+  <div class="electron-controls">
+    <button onclick="window.capriNative?.minimize()" title="Minimise">&#x2212;</button>
+    <button onclick="window.capriNative?.maximize()" title="Maximise">&#x25A1;</button>
+    <button onclick="window.capriNative?.close()" title="Hide to tray" class="close-btn">&#x2715;</button>
+  </div>
+</div>
+<script>
+  if (window.capriNative?.isElectron) {
+    var eb = document.getElementById("electronBar");
+    if (eb) eb.style.display = "flex";
+  }
+</script>
 <div id="splash" class="splash">
   <div class="splash-inner">
     <img src="assets/splash.png" alt="Capri" class="splash-logo" onerror="this.src='assets/capri.svg'" />
@@ -310,6 +325,6 @@
     document.body.classList.add("ready");
   }, 4500);
 </script>
-<script src="app.js?v=20261028-fix8"></script>
+<script src="app.js?v=20261028-fix9"></script>
 </body>
 </html>

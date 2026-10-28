@@ -1,0 +1,51 @@
+﻿{
+  "appId": "com.capricorn.capri",
+  "productName": "Capri",
+  "copyright": "Project Capricorn",
+  "asar": false,
+  "files": [
+    "electron/**/*",
+    "public/**/*",
+    "lib/**/*",
+    "server.js",
+    "agent.js",
+    "package.json",
+    "node_modules/**/*",
+    "!node_modules/**/test/**",
+    "!node_modules/**/*.md",
+    "!node_modules/**/.bin/**",
+    "!**/.git/**",
+    "!dist-electron/**"
+  ],
+  "win": {
+    "target": [
+      { "target": "nsis", "arch": ["x64"] }
+    ],
+    "icon": "public/assets/favicon.png",
+    "requestedExecutionLevel": "requireAdministrator"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": true,
+    "allowElevation": true,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Capri",
+    "installerIcon": "public/assets/favicon.png",
+    "uninstallerIcon": "public/assets/favicon.png",
+    "include": "electron/installer.nsh"
+  },
+  "mac": {
+    "target": "dmg",
+    "icon": "public/assets/favicon.png",
+    "category": "public.app-category.productivity",
+    "entitlements": "electron/entitlements.mac.plist",
+    "entitlementsInherit": "electron/entitlements.mac.plist"
+  },
+  "linux": {
+    "target": "AppImage",
+    "icon": "public/assets/favicon.png"
+  }
+}
+

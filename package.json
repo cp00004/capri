@@ -1,38 +1,87 @@
 {
-  "name": "capri",
-  "version": "2.1.0",
-  "private": true,
-  "type": "module",
-  "description": "Capri - a voice-first personality construct with hands on your PC",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js",
-    "cert": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-cert.ps1"
-  },
-  "engines": {
-    "node": ">=20"
-  },
-  "directories": {
-    "doc": "docs",
-    "lib": "lib"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/cp00004/capri.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/cp00004/capri/issues"
-  },
-  "homepage": "https://github.com/cp00004/capri#readme",
-  "dependencies": {
-    "@capacitor/android": "^8.5.3",
-    "@capacitor/app": "^8.1.2",
-    "@capacitor/cli": "^8.5.3",
-    "@capacitor/core": "^8.5.3",
-    "@capacitor/splash-screen": "^8.0.2"
-  }
+    "name":  "capri",
+    "version":  "2.1.0",
+    "private":  true,
+    "type":  "module",
+    "description":  "Capri - a voice-first personality construct with hands on your PC",
+    "scripts":  {
+                    "start":  "node server.js",
+                    "dev":  "node --watch server.js",
+                    "cert":  "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-cert.ps1",
+                    "electron":  "electron electron/main.cjs",
+                    "build:exe":  "electron-builder",
+                    "server":  "node server.js"
+                },
+    "engines":  {
+                    "node":  "\u003e=20"
+                },
+    "repository":  {
+                       "type":  "git",
+                       "url":  "git+https://github.com/cp00004/capri.git"
+                   },
+    "keywords":  [
+
+                 ],
+    "license":  "ISC",
+    "bugs":  {
+                 "url":  "https://github.com/cp00004/capri/issues"
+             },
+    "homepage":  "https://github.com/cp00004/capri#readme",
+    "dependencies":  {
+                         "@capacitor/android":  "^8.5.3",
+                         "@capacitor/app":  "^8.1.2",
+                         "@capacitor/cli":  "^8.5.3",
+                         "@capacitor/core":  "^8.5.3",
+                         "@capacitor/splash-screen":  "^8.0.2"
+                     },
+    "devDependencies":  {
+                            "electron":  "^45.1.0",
+                            "electron-builder":  "^26.18.0"
+                        },
+    "main":  "electron/main.cjs",
+    "author":  "Project Capricorn",
+    "build":  {
+                  "appId":  "com.capricorn.capri",
+                  "productName":  "Capri",
+                  "copyright":  "Project Capricorn",
+                  "asar":  false,
+                  "files":  [
+                                "electron/**/*",
+                                "public/**/*",
+                                "lib/**/*",
+                                "server.js",
+                                "agent.js",
+                                "package.json",
+                                "node_modules/**/*",
+                                "!node_modules/**/test/**",
+                                "!node_modules/**/*.md",
+                                "!**/.git/**",
+                                "!dist-electron/**"
+                            ],
+                  "win":  {
+                              "target":  [
+                                             {
+                                                 "target":  "nsis",
+                                                 "arch":  [
+                                                              "x64"
+                                                          ]
+                                             }
+                                         ],
+                              "icon":  "public/assets/icon-512.png",
+                              "requestedExecutionLevel":  "requireAdministrator"
+                          },
+                  "nsis":  {
+                               "oneClick":  false,
+                               "perMachine":  true,
+                               "allowElevation":  true,
+                               "allowToChangeInstallationDirectory":  true,
+                               "createDesktopShortcut":  true,
+                               "createStartMenuShortcut":  true,
+                               "shortcutName":  "Capri",
+                               "include":  "electron/installer.nsh"
+                           },
+                  "directories":  {
+                                      "output":  "dist-electron"
+                                  }
+              }
 }
