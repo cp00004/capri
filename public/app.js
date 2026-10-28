@@ -2120,6 +2120,7 @@ async function boot() {
     localStorage.setItem(API_KEY, DEFAULT_BACKEND);
     localStorage.setItem(SERVER_KEY, DEFAULT_BACKEND);
   }
+  if (!state.config) showNotice("Connecting to Capri…", null, null, 0);
   let cfg = null;
   try {
     cfg = await fetchConfig();
@@ -2132,6 +2133,7 @@ async function boot() {
     // tell the user anything is broken
     state.bootRetries = (state.bootRetries || 0) + 1;
     if (state.bootRetries <= 3) {
+      showNotice("Waking Capri up… her server is slow to answer. Hang on.", null, null, 0);
       setTimeout(boot, 3000 * state.bootRetries);
       return;
     }
@@ -2143,6 +2145,7 @@ async function boot() {
     }
   } else {
     state.bootRetries = 0;
+    if (el.notice) el.notice.classList.add("hidden");
     state.config = cfg;
     state.scope = cfg.scope;
 
