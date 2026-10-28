@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -170,7 +170,7 @@
         <button id="wakeWordBtn" class="pill" type="button" aria-pressed="false">OFF</button>
         <span class="value" id="wakeWordState">tap to enable</span>
       </div>
-      <p class="hint" id="wakeWordHint">When enabled, say “Capri” while this page is open and visible. Background listening needs native app support.</p>
+      <p class="hint" id="wakeWordHint">When enabled, say â€œCapriâ€ while this page is open and visible. Background listening needs native app support.</p>
     </div>
 
     <div class="field">
@@ -234,19 +234,6 @@
       </div>
       <p class="hint" id="pcHint">PC control is off for this device.</p>
     </div>
-
-    <div class="field" id="pairField">
-      <span class="label">pair a device</span>
-      <div class="row">
-        <span class="value code" id="pairCode">------</span>
-        <button class="pill" type="button" id="copyPair">COPY LINK</button>
-      </div>
-      <p class="hint" id="pairUrl">open the link on your phone, enter the code</p>
-    </div>
-
-    <div class="field" id="deviceField">
-      <span class="label">paired devices</span>
-      <div id="deviceList" class="devices"><p class="hint">nothing paired yet</p></div>
     </div>
 
     <div class="field">
@@ -273,21 +260,7 @@
   </div>
 </section>
 
-<!-- ================================================= pairing -->
-<!-- Pair panel removed per user request -->
-  <div class="sheet-head">
-    <h2>PAIR THIS PHONE</h2>
-  </div>
-  <div class="sheet-body">
-    <p class="hint">On the PC, open Settings and read the six-digit code. Then give her a name.</p>
-    <form id="pairForm" class="stack">
-      <input id="pairName" type="text" placeholder="device name" maxlength="24" value="" />
-      <input id="pairCodeInput" type="tel" inputmode="numeric" placeholder="000000" maxlength="6" autocomplete="one-time-code" />
-      <button class="pill accent" type="submit">LINK ME</button>
-    </form>
-    <p class="hint" id="pairError"></p>
-  </div>
-</section>
+
 
 <!-- ================================================= desktop approval -->
 <section id="accessPrompt" class="sheet center prompt hidden" aria-label="Access request">
@@ -310,10 +283,10 @@
     <button class="icon" type="button" data-close="downloadSidebar" aria-label="Close">&times;</button>
   </div>
   <div class="sheet-body">
-    <p>Get the latest CAPRI Android build (v2):</p>
-    <a href="https://github.com/cp00004/capri/releases/download/v2/app-debug.apk" class="pill accent" download>
+    <p>Get the C.A.P.R.I Android app:</p>
+    <a href="assets/C.A.P.R.Iv1.apk" class="pill accent" download>
       <img src="assets/update-icon.png" alt="download" style="width:24px;height:24px;vertical-align:middle;margin-right:4px;" />
-      Download CAPRI v2 APK
+      Download C.A.P.R.I v1 APK
     </a>
   </div>
 </section>
@@ -334,6 +307,6 @@
     document.body.classList.add("ready");
   }, 4500);
 </script>
-<script src="app.js?v=20261028-fix2"></script>
+<script src="app.js?v=20261028-fix3"></script>
 </body>
 </html>

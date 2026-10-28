@@ -1,4 +1,4 @@
-services:
+﻿services:
   - type: web
     name: capri-backend
     runtime: node
@@ -20,9 +20,15 @@ services:
         value: "0"
       - key: CAPRI_ALLOW_ORIGINS
         value: https://cp00004.github.io,https://capricorn.de.deplexo.com,capacitor://localhost,http://localhost
-      - key: CAPRI_PROXY_TOKEN
-        sync: false
+      - key: CAPRI_CHAT_PROVIDER
+        value: groq
+      - key: CAPRI_MODEL
+        value: llama-3.3-70b-versatile
       - key: GROQ_API_KEY
         sync: false
       - key: GEMINI_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: CAPRI_PROXY_TOKEN
         sync: false
