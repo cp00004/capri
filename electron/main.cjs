@@ -14,6 +14,21 @@ const {
 } = require("electron");
 
 const { spawn } = require("child_process");
+
+// ----- Single instance lock -----
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+  process.exit(0);
+} else {
+  app.on('second-instance', () => {
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.focus();
+    }
+  });
+}
+
 const path  = require("path");
 const fs    = require("fs");
 const http  = require("http");
@@ -21,7 +36,7 @@ const http  = require("http");
 // ── Paths ────────────────────────────────────────────────────────────────────
 const ROOT    = path.join(__dirname, "..");
 const SERVER  = path.join(ROOT, "server.js");
-const ICON    = path.join(ROOT, "public", "assets", "favicon.png");
+const ICON    = path.join(ROOT, "public", "assets", "icon-512.png");
 const PORT    = Number(process.env.PORT || 4173);
 const APP_URL = `http://localhost:${PORT}`;
 
