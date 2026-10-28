@@ -87,12 +87,7 @@ function getAllowedOrigins() {
 }
 
 const CAPRI_VOICES = [
-  { id: "capri", name: "Leda", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous. The default." },
-  { id: "capri-velvet", name: "Kore", label: "CAPRI // velvet", note: "Lower, firmer, more deliberate. Good for threats." },
-  { id: "capri-static", name: "Aoede", label: "CAPRI // static", note: "Breezy and light with a jagged edge." },
-  { id: "capri-warm", name: "Sulafat", label: "CAPRI // warm", note: "Warm and close, like she is right behind you." },
-  { id: "capri-mature", name: "Gacrux", label: "CAPRI // older", note: "Mature and worn; one of the older voices in the chorus." },
-  { id: "capri-bright", name: "Zephyr", label: "CAPRI // bright", note: "Bright and impish. Maximum chaos." },
+  { id: "capri", name: "Leda", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous. The one and only." },
 ];
 const VOICE_BY_ID = new Map(CAPRI_VOICES.map((v) => [v.id, v]));
 

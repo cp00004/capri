@@ -385,10 +385,19 @@ const typer = (() => {
     },
     push(chunk) {
       target += chunk;
+      if (this.held) return; // buffer silently until audio starts
       el.subtitle.classList.add("show");
       if (!timer) {
         timer = setInterval(tick, 16);
         paint();
+      }
+    },
+    release() {
+      if (!this.held) return;
+      this.held = false;
+      if (target) {
+        el.subtitle.classList.add("show");
+        if (!timer) { timer = setInterval(tick, 16); paint(); }
       }
     },
     finish() {
@@ -590,13 +599,15 @@ async function prepareSpeech(text) {
 }
 
 async function speakOne(text, prepared) {
-  if (!state.voiceOn) return;
+  if (!state.voiceOn) { typer.release(); return; }
   if (prepared?.blob) {
     if (el.ttsEngine && prepared.engine) el.ttsEngine.textContent = prepared.engine;
+    typer.release(); // show text as audio starts
     burstGlitch(1);
     await playBlob(prepared.blob, prepared);
     return;
   }
+  typer.release(); // show text as browser TTS starts
   await speakBrowser(text);
 }
 
@@ -633,12 +644,7 @@ function pickBrowserVoice(voices) {
 }
 
 const FALLBACK_VOICES = [
-  { id: "capri", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous." },
-  { id: "capri-velvet", label: "CAPRI // velvet", note: "Lower, firmer, more deliberate." },
-  { id: "capri-static", label: "CAPRI // static", note: "Breezy and light with a jagged edge." },
-  { id: "capri-warm", label: "CAPRI // warm", note: "Warm and close." },
-  { id: "capri-mature", label: "CAPRI // older", note: "Mature and worn." },
-  { id: "capri-bright", label: "CAPRI // bright", note: "Bright and impish." },
+  { id: "capri", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous. The one and only." },
 ];
 
 function refreshVoices() {
@@ -1135,6 +1141,7 @@ async function respond(userText) {
   state.history = state.history.slice(-16);
 
   typer.reset("");
+  typer.held = true; // hold text until audio starts
   setPhase("thinking");
 
   let speechBuf = "";
@@ -1225,6 +1232,7 @@ async function respond(userText) {
     if (speechBuf.length > spokenUpTo) {
       speech.enqueue(speechBuf.slice(spokenUpTo).trim());
     }
+    if (!state.voiceOn) typer.release(); // voice off — show text immediately
 
     const finalText = typer.text.trim();
     if (finalText && !failed) {
