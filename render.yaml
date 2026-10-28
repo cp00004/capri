@@ -1,4 +1,4 @@
-﻿services:
+services:
   - type: web
     name: capri-backend
     runtime: node
@@ -19,7 +19,7 @@
       - key: CAPRI_PC
         value: "off"
       - key: CAPRI_AUTOPUBLISH
-        value: "0"
+        value: "1"
       - key: CAPRI_ALLOW_ORIGINS
         value: https://cp00004.github.io,https://capricorn.de.deplexo.com,capacitor://localhost,http://localhost
       - key: CAPRI_CHAT_PROVIDER
