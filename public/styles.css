@@ -449,6 +449,33 @@ body[data-state="speaking"] .mic { animation: pulse 0.7s ease-in-out infinite; }
 }
 .sheet.center { width: min(440px, 92vw); }
 
+/* ---------------------------------------------------------------- download sidebar */
+#downloadSidebar.sheet {
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: min(420px, 92vw);
+  max-height: 80dvh;
+}
+#downloadSidebar .sheet-body {
+  gap: 20px;
+}
+#downloadSidebar .pill.accent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+  padding: 14px 22px;
+  width: 100%;
+  justify-content: center;
+}
+#downloadSidebar p {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
 .sheet-head {
   display: flex;
   align-items: center;
