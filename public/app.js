@@ -83,6 +83,8 @@ const el = {
   ttsEngine: $("#ttsEngine"),
   voicePreview: $("#voicePreview"),
   voiceHint: $("#voiceHint"),
+  downloadBtn: $("#downloadBtn"),
+  downloadSidebar: $("#downloadSidebar"),
 };
 
 const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
@@ -1336,7 +1338,18 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const target = btn.getAttribute("data-close");
     if (target === "settings") closeSheet(el.settings);
+    else if (target === "downloadSidebar") closeSheet(el.downloadSidebar);
+    else if (target) { const n = document.getElementById(target); if (n) closeSheet(n); }
   });
+});
+
+/* ---------------------------------------------------------------- download */
+el.downloadBtn?.addEventListener("click", () => {
+  if (el.downloadSidebar.classList.contains("hidden")) {
+    openSheet(el.downloadSidebar);
+  } else {
+    closeSheet(el.downloadSidebar);
+  }
 });
 
 function showPair(message) {
