@@ -775,7 +775,7 @@ const rec = {
 };
 
 const wakeWord = {
-  enabled: localStorage.getItem("capri.wakeWord") === "1",
+  enabled: localStorage.getItem("capri.wakeWord") !== "0",
   active: false,
   starting: false,
   pendingStart: false,
@@ -968,7 +968,7 @@ function startWakeWord() {
   recognition.onstart = () => {
     wakeWord.starting = false;
     wakeWord.active = true;
-    setPhase("listening");
+    setPhase("idle");  // stay idle while waiting for wake word
     paintWakeWord();
     if (wakeWord.chimePending) {
       wakeWord.chimePending = false;
@@ -1725,6 +1725,10 @@ el.googleBtn.addEventListener("click", async () => {
     return;
   }
   await renderGoogle(true);
+  // Immediately trigger the One Tap / popup after rendering
+  if (window.google?.accounts?.id) {
+    window.google.accounts.id.prompt();
+  }
 });
 
 const googleFallbackBtn = document.getElementById("googleFallbackBtn");
@@ -2045,9 +2049,17 @@ el.accessDeny.addEventListener("click", () => answerAccess(false));
 
 el.micBtn.addEventListener("click", () => {
   unlockAudio();
-  if (rec.starting) rec.cancelStart = true;
-  else if (rec.active) stopListening();
-  else startListening();
+  if (rec.starting) {
+    rec.cancelStart = true;
+  } else if (rec.active) {
+    stopListening();
+  } else if (wakeWord.active || wakeWord.starting) {
+    // Wake-word is running — stop it and capture voice immediately
+    wakeWord.pendingStart = true;
+    try { wakeWord.recognition?.stop(); } catch { /* onend will call startListening */ }
+  } else {
+    startListening();
+  }
 });
 
 el.kbBtn.addEventListener("click", () => {
