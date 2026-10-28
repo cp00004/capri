@@ -352,10 +352,25 @@ el.noticeClose.addEventListener("click", () => el.notice.classList.add("hidden")
 const caret = document.createElement("span");
 caret.className = "caret";
 
+/* Cipher chars used during the encrypted-scramble phase */
+const CIPHER_CHARS = "アイウエオカキクケコ#@%&!?/\\<>[]{}|01█▓▒░╬╪╫▲▼◆●○□■═╗╔╚╝";
+
+function randCipher(len) {
+  let s = "";
+  for (let i = 0; i < len; i++) s += CIPHER_CHARS[Math.floor(Math.random() * CIPHER_CHARS.length)];
+  return s;
+}
+
 const typer = (() => {
   let target = "";
   let shown = 0;
   let timer = null;
+  let cipherTimer = null;
+
+  const stopCipher = () => {
+    if (cipherTimer) { clearInterval(cipherTimer); cipherTimer = null; }
+    el.subtitle.classList.remove("cipher-mode");
+  };
 
   const paint = () => {
     el.subtitle.textContent = target.slice(0, shown);
@@ -375,38 +390,53 @@ const typer = (() => {
   };
 
   return {
+    held: false,
+
     reset(text = "") {
-      clearInterval(timer);
-      timer = null;
+      clearInterval(timer); timer = null;
+      stopCipher();
       target = text;
       shown = text.length;
       el.subtitle.textContent = text;
       el.subtitle.classList.toggle("show", Boolean(text));
     },
+
     push(chunk) {
       target += chunk;
-      if (this.held) return; // buffer silently until audio starts
-      el.subtitle.classList.add("show");
-      if (!timer) {
-        timer = setInterval(tick, 16);
-        paint();
+      if (this.held) {
+        /* Show scrambled cipher text in her color while audio is loading */
+        el.subtitle.classList.add("show", "cipher-mode");
+        if (!cipherTimer) {
+          cipherTimer = setInterval(() => {
+            const disp = randCipher(Math.max(8, Math.min(target.length, 32)));
+            el.subtitle.textContent = disp;
+          }, 55);
+        }
+        return;
       }
+      el.subtitle.classList.add("show");
+      if (!timer) { timer = setInterval(tick, 16); paint(); }
     },
+
     release() {
       if (!this.held) return;
       this.held = false;
+      stopCipher();
       if (target) {
         el.subtitle.classList.add("show");
+        shown = 0;
         if (!timer) { timer = setInterval(tick, 16); paint(); }
       }
     },
+
     finish() {
-      clearInterval(timer);
-      timer = null;
+      clearInterval(timer); timer = null;
+      stopCipher();
       shown = target.length;
       el.subtitle.textContent = target;
       el.subtitle.classList.add("show");
     },
+
     get text() { return target; },
   };
 })();
@@ -1000,10 +1030,13 @@ function startWakeWord() {
     }
   };
   recognition.onend = () => {
-    if (wakeWord.recognition === recognition) wakeWord.recognition = null;
+    const owned = wakeWord.recognition === recognition;
+    if (owned) wakeWord.recognition = null;
     wakeWord.active = false;
     wakeWord.starting = false;
     paintWakeWord();
+    // If mic button already took over, don't interfere
+    if (!owned) return;
     if (wakeWord.pendingStart && wakeWord.enabled && !document.hidden) {
       wakeWord.pendingStart = false;
       setTimeout(() => startListening(), 180);
@@ -2062,9 +2095,19 @@ el.micBtn.addEventListener("click", () => {
   } else if (rec.active) {
     stopListening();
   } else if (wakeWord.active || wakeWord.starting) {
-    // Wake-word is running — stop it and capture voice immediately
-    wakeWord.pendingStart = true;
-    try { wakeWord.recognition?.stop(); } catch { /* onend will call startListening */ }
+    // Stop wake-word recognition and go straight into voice capture
+    const recognition = wakeWord.recognition;
+    wakeWord.recognition = null;
+    wakeWord.active = false;
+    wakeWord.starting = false;
+    wakeWord.pendingStart = false;
+    try { recognition?.stop(); } catch { /* ignore */ }
+    // Small delay so recognition.onend doesn't fight us
+    setTimeout(() => startListening(), 80);
+  } else if (state.phase === "thinking" || state.streaming || speech.busy) {
+    // Capri is busy — queue the listen for when she finishes
+    rec.listenQueued = true;
+    showNotice("I'll listen the moment I'm done, choom.", null, null, 2500);
   } else {
     startListening();
   }

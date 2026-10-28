@@ -267,6 +267,22 @@ body[data-state="thinking"] .glow { background: radial-gradient(circle, rgba(251
 }
 .subtitle.show { opacity: 1; transform: none; }
 
+/* cipher scramble mode */
+.subtitle.cipher-mode {
+  font-family: var(--mono);
+  color: #6dffbe;
+  text-shadow: 0 0 8px #6dffbe, 0 0 22px rgba(109,255,190,0.55), 0 1px 12px #000;
+  letter-spacing: 0.08em;
+  animation: cipher-flicker 0.12s steps(1) infinite;
+}
+@keyframes cipher-flicker {
+  0%   { opacity: 1; }
+  35%  { opacity: 0.82; }
+  60%  { opacity: 1; }
+  80%  { opacity: 0.92; }
+  100% { opacity: 1; }
+}
+
 .caret {
   display: inline-block;
   width: 6px;
