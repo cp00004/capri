@@ -65,14 +65,44 @@
     if (btn) {
       google.accounts.id.renderButton(btn, { theme: 'outline', size: 'large' });
     }
-    // Fix download button – trigger APK download (placeholder path)
+    // Open download modal on click
     const dl = document.getElementById('downloadBtn');
     if (dl) {
       dl.addEventListener('click', () => {
+        const modal = document.getElementById('downloadModal');
+        if (modal) {
+          modal.classList.remove('hidden');
+          modal.classList.add('flex');
+        }
+      });
+    }
+    // Modal button handlers
+    const apkBtn = document.getElementById('downloadApkBtn');
+    const pcBtn = document.getElementById('downloadPcBtn');
+    const closeBtn = document.getElementById('closeModalBtn');
+    if (apkBtn) {
+      apkBtn.addEventListener('click', () => {
         const a = document.createElement('a');
-        a.href = 'assets/capri.apk';
-        a.download = 'capri.apk';
+        a.href = 'assets/C.A.P.R.Iv1.apk';
+        a.download = 'Capri.apk';
         a.click();
+      });
+    }
+    if (pcBtn) {
+      pcBtn.addEventListener('click', () => {
+        const a = document.createElement('a');
+        a.href = 'https://github.com/cp00004/capri/releases/latest/download/Capri%20Setup%202.1.1.exe';
+        a.download = 'Capri Setup.exe';
+        a.click();
+      });
+    }
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        const modal = document.getElementById('downloadModal');
+        if (modal) {
+          modal.classList.remove('flex');
+          modal.classList.add('hidden');
+        }
       });
     }
   });
