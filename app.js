@@ -1374,7 +1374,6 @@ el.pairForm.addEventListener("submit", async (e) => {
     await boot();
     const splashBar = document.getElementById('splashBar');
     if (splashBar) splashBar.classList.add('hidden');
-checkRemoteVersion();
     if (state.scope === "full") {
       typer.reset("Locked on. I have your chrome.");
       speech.enqueue("Locked on. I have your chrome.");
@@ -1646,7 +1645,6 @@ async function handleGoogleCredential(response) {
     await boot();
     const splashBar = document.getElementById('splashBar');
     if (splashBar) splashBar.classList.add('hidden');
-checkRemoteVersion();
     showNotice(`Signed in as ${data.profile.name || data.profile.email}. Memory is tied to this account now.`, null, null, 6000);
     speech.enqueue("There you are. I remember you.");
   } catch {
@@ -1729,9 +1727,8 @@ el.signOutBtn.addEventListener("click", async () => {
   localStorage.removeItem(SESSION_KEY);
   showNotice("Signed out. This device is back on the local profile.", null, null, 5000);
   await boot();
-    const splashBar = document.getElementById('splashBar');
-    if (splashBar) splashBar.classList.add('hidden');
-checkRemoteVersion();
+  const splashBar = document.getElementById('splashBar');
+  if (splashBar) splashBar.classList.add('hidden');
 });
 
 /* ---------------------------------------------------------------- settings */
@@ -2134,7 +2131,7 @@ async function boot() {
     if (!state.apiBase) {
       showNotice("No backend set. Open Settings → PC address / backend and paste your Capri server URL (e.g. https://your-server.com).", null, null, 15000);
     } else {
-      showNotice("Server not reachable. Is `node server.js` running? Check the PC address in Settings.", null, null, 10000);
+      showNotice("Capri's server is not answering. If the host went to sleep, give it a minute and reload.", null, null, 10000);
     }
   } else {
     state.config = cfg;
@@ -2157,7 +2154,7 @@ async function boot() {
       el.ghostA.src = cfg.portrait;
       el.ghostB.src = cfg.portrait;
     }
-    if (!cfg.hasKey && !cfg.hasGemini) showNotice("No chat key loaded. Add GROQ_API_KEY or GEMINI_API_KEY to .env and restart.");
+    if (!cfg.hasKey && !cfg.hasGemini) showNotice("Capri's server has no API key yet, so she cannot think. Add GROQ_API_KEY (or GEMINI_API_KEY) in the hosting panel, then redeploy.", null, null, 20000);
 
     if (cfg.profile) {
       applyProfile(cfg.profile);

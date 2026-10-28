@@ -2131,7 +2131,7 @@ async function boot() {
     if (!state.apiBase) {
       showNotice("No backend set. Open Settings → PC address / backend and paste your Capri server URL (e.g. https://your-server.com).", null, null, 15000);
     } else {
-      showNotice("Server not reachable. Is `node server.js` running? Check the PC address in Settings.", null, null, 10000);
+      showNotice("Capri's server is not answering. If the host went to sleep, give it a minute and reload.", null, null, 10000);
     }
   } else {
     state.config = cfg;
@@ -2154,7 +2154,7 @@ async function boot() {
       el.ghostA.src = cfg.portrait;
       el.ghostB.src = cfg.portrait;
     }
-    if (!cfg.hasKey && !cfg.hasGemini) showNotice("No chat key loaded. Add GROQ_API_KEY or GEMINI_API_KEY to .env and restart.");
+    if (!cfg.hasKey && !cfg.hasGemini) showNotice("Capri's server has no API key yet, so she cannot think. Add GROQ_API_KEY (or GEMINI_API_KEY) in the hosting panel, then redeploy.", null, null, 20000);
 
     if (cfg.profile) {
       applyProfile(cfg.profile);
