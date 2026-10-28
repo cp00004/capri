@@ -85,12 +85,16 @@ const el = {
   voiceHint: $("#voiceHint"),
 };
 
-const DEFAULT_TUNNEL = "https://oregon-efforts-thats-licence.trycloudflare.com";
+const DEFAULT_TUNNEL = "https://proud-moments-enter.loca.lt";
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
 const DEFAULT_BACKEND = LOCAL_HOST ? "" : DEFAULT_TUNNEL;
-if (!LOCAL_HOST && SAVED_TUNNEL && SAVED_BACKEND !== DEFAULT_TUNNEL) {
+// Always force to current tunnel on non-local hosts and save it privately
+if (!LOCAL_HOST) {
+  localStorage.setItem(API_KEY, DEFAULT_TUNNEL);
+  localStorage.setItem(SERVER_KEY, DEFAULT_TUNNEL);
+} else if (!LOCAL_HOST && SAVED_TUNNEL && SAVED_BACKEND !== DEFAULT_TUNNEL) {
   localStorage.setItem(API_KEY, DEFAULT_TUNNEL);
   localStorage.setItem(SERVER_KEY, DEFAULT_TUNNEL);
 }
@@ -1243,7 +1247,38 @@ async function respond(userText) {
 /* ---------------------------------------------------------------- audio unlock */
 
 let unlocked = false;
-function unlockAudio() {
+function initGoogleButton() {
+  const googleBtn = document.getElementById('googleBtn');
+  if (!googleBtn) return;
+  // Remove previous listeners by cloning
+  const fresh = googleBtn.cloneNode(true);
+  googleBtn.parentNode.replaceChild(fresh, googleBtn);
+  const btn = document.getElementById('googleBtn');
+  btn.addEventListener('click', async () => {
+    try {
+      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SocialLogin) {
+        const result = await window.Capacitor.Plugins.SocialLogin.login({
+          provider: 'google',
+          options: { scopes: ['profile', 'email'] }
+        });
+        state.google = result;
+        el.googleBtn.classList.add('hidden');
+        el.signOutBtn.classList.remove('hidden');
+      } else {
+        // fallback opens Google OAuth URL (replace with your actual client id if needed)
+        const clientId = '240583618801-6l8bpgneim3nfker6kbbbj4brt2gjrg2.apps.googleusercontent.com';
+        const redirectUri = encodeURIComponent(window.location.origin);
+        const scope = encodeURIComponent('profile email');
+        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=token&scope=${scope}`;
+        window.open(authUrl, '_blank');
+      }
+    } catch (e) {
+      console.error('Google sign‑in failed', e);
+      alert('Google sign‑in could not start.');
+    }
+  });
+}
+ {
   if (unlocked) return;
   unlocked = true;
   try {
@@ -1330,6 +1365,7 @@ el.pairForm.addEventListener("submit", async (e) => {
     localStorage.setItem("capri.name", data.name || name);
     closeSheet(el.pairPanel);
     await boot();
+checkRemoteVersion();
     if (state.scope === "full") {
       typer.reset("Locked on. I have your chrome.");
       speech.enqueue("Locked on. I have your chrome.");
@@ -1599,6 +1635,7 @@ async function handleGoogleCredential(response) {
     state.session = data.token;
     localStorage.setItem(SESSION_KEY, data.token);
     await boot();
+checkRemoteVersion();
     showNotice(`Signed in as ${data.profile.name || data.profile.email}. Memory is tied to this account now.`, null, null, 6000);
     speech.enqueue("There you are. I remember you.");
   } catch {
@@ -1681,6 +1718,7 @@ el.signOutBtn.addEventListener("click", async () => {
   localStorage.removeItem(SESSION_KEY);
   showNotice("Signed out. This device is back on the local profile.", null, null, 5000);
   await boot();
+checkRemoteVersion();
 });
 
 /* ---------------------------------------------------------------- settings */
@@ -2145,6 +2183,8 @@ async function boot() {
 
 /* ---------------------------------------------------------------- lost link */
 
-window.addEventListener("online", () => { if (!state.config) boot(); });
+window.addEventListener("online", () => { if (!state.config) boot();
+checkRemoteVersion(); });
 
 boot();
+checkRemoteVersion();
