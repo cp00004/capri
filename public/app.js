@@ -548,7 +548,7 @@ function playBlob(blob, { pitch = 0.96, grit = 0.14 } = {}) {
     audio.mozPreservesPitch = false;
     audio.webkitPreservesPitch = false;
     audio.playbackRate = Math.max(0.8, Math.min(1.15, Number(pitch) || 0.96));
-    audio.onended = done;
+    audio.onended = d" none;
     audio.onerror = done;
     audio.play().catch(done);
   });
@@ -1412,7 +1412,7 @@ function applyProfile(profile) {
       ? "Sign in once and your memory follows you to any device."
       : "Google sign-in is not configured yet. Open docs/GOOGLE_SIGNIN.md on the PC.";
   el.signOutBtn.classList.toggle("hidden", !signedIn);
-  el.googleBtn.classList.toggle("hidden", signedIn || Boolean(state.googleReady));
+  el.googleBtn.classList.toggle("hidden", signedIn || Boolean(state.googleReady));
 
   const mem = profile.memory || {};
   const memories = (mem.facts || 0) + (mem.favorites || 0) + (mem.music || 0) + (mem.notes || 0);
@@ -2220,7 +2220,7 @@ setTimeout(() => {
 setTimeout(function(){var s=document.getElementById(splash);if(s){s.style.display=
 one;}document.body.classList.remove(loading);document.body.classList.add(eady);},4500);
 
-setTimeout(function(){var s=document.getElementById(" splash);if(s){s.style.display=
+setTimeout(function(){var s=document.getElementById(splash);if(s){s.style.display=
 one;}document.body.classList.remove(loading);document.body.classList.add(eady);},4500); ============================================================
    CAPRI // Project Capricorn — client
    tap mic -> whisper -> gpt-oss (+ local tools) -> orpheus voice
