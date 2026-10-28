@@ -1365,6 +1365,8 @@ el.pairForm.addEventListener("submit", async (e) => {
     localStorage.setItem("capri.name", data.name || name);
     closeSheet(el.pairPanel);
     await boot();
+    const splashBar = document.getElementById('splashBar');
+    if (splashBar) splashBar.classList.add('hidden');
 checkRemoteVersion();
     if (state.scope === "full") {
       typer.reset("Locked on. I have your chrome.");
@@ -1635,6 +1637,8 @@ async function handleGoogleCredential(response) {
     state.session = data.token;
     localStorage.setItem(SESSION_KEY, data.token);
     await boot();
+    const splashBar = document.getElementById('splashBar');
+    if (splashBar) splashBar.classList.add('hidden');
 checkRemoteVersion();
     showNotice(`Signed in as ${data.profile.name || data.profile.email}. Memory is tied to this account now.`, null, null, 6000);
     speech.enqueue("There you are. I remember you.");
@@ -1718,6 +1722,8 @@ el.signOutBtn.addEventListener("click", async () => {
   localStorage.removeItem(SESSION_KEY);
   showNotice("Signed out. This device is back on the local profile.", null, null, 5000);
   await boot();
+    const splashBar = document.getElementById('splashBar');
+    if (splashBar) splashBar.classList.add('hidden');
 checkRemoteVersion();
 });
 
