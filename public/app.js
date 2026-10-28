@@ -1747,12 +1747,16 @@ function setPcState() {
   const on = (local || full) && !state.config?.pcLocked;
 
   const locked = Boolean(state.config?.pcLocked);
+  const bridge = Boolean(state.config?.hands?.bridge);
+  const handsUp = Boolean(state.config?.hands?.online);
   if (el.pcState) {
     el.pcState.textContent = local
       ? (locked ? "locked out · this pc" : "full access · this pc")
       : full
         ? (locked ? "granted · locked out" : "full access · granted")
-        : "voice only";
+        : bridge
+          ? (handsUp ? "hands live · via your pc" : "hands offline")
+          : "voice only";
   }
   if (el.pcHint) {
     el.pcHint.textContent = local
@@ -1761,7 +1765,11 @@ function setPcState() {
           : "She runs commands, touches files, opens apps and looks at your screen. Everything is logged.")
       : full
         ? (state.config?.pcLocked ? "The desktop has her locked out right now." : "She can touch this PC from this device. Everything is logged.")
-        : "Ask the desktop for her hands: files, commands, apps, screen.";
+        : bridge && !handsUp
+          ? "Your PC is off, so she can talk but not touch it. Start the Capri agent on the PC to give her hands back."
+          : bridge
+            ? "Her hands are on your PC through the agent. Files, commands, apps and screen all work."
+            : "Ask the desktop for her hands: files, commands, apps, screen.";
   }
 
   if (el.accessBtn) el.accessBtn.classList.toggle("hidden", local || full || !state.config?.paired);

@@ -1369,6 +1369,7 @@ const handler = async (req, res) => {
       scope: who?.scope || null,
       pcLocked,
       local,
+      hands: { bridge: Boolean(HANDS_TOKEN), online: handsOnline() },
       pairCode: local && pairCodeVisible ? PAIR_CODE : null,
       lanUrls: local ? lanUrls() : [],
       devices: local ? devices.map((d) => ({ id: d.id, name: d.name, scope: d.scope, ip: d.ip, pairedAt: d.pairedAt })) : [],
