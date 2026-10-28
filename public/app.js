@@ -1278,7 +1278,7 @@ function initGoogleButton() {
     }
   });
 }
- {
+function unlockAudio() {
   if (unlocked) return;
   unlocked = true;
   try {
