@@ -103,9 +103,9 @@ if (!LOCAL_HOST) {
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
   session: localStorage.getItem(SESSION_KEY) || "",
-  apiBase: LOCAL_HOST
-    ? (SAVED_TUNNEL ? "" : SAVED_BACKEND)
-    : (SAVED_TUNNEL && SAVED_BACKEND !== DEFAULT_TUNNEL ? DEFAULT_TUNNEL : SAVED_BACKEND || DEFAULT_BACKEND),
+  apiBase: LOCAL_HOST && SAVED_BACKEND && !SAVED_BACKEND.startsWith("https")
+    ? SAVED_BACKEND
+    : DEFAULT_TUNNEL,
   config: null,
   profile: null,
   voices: [],
