@@ -4,7 +4,22 @@
    ============================================================ */
 
 :root {
-  --bg: #07000c;
+  --bg: #0a0a0a;
+  --panel: #151515;
+  --line: #1e001e;
+  --line-2: #2a0820;
+
+  --pink: #ff0b52;
+  --mint: #6dffbe;
+  --cyan: #00fff9;
+  --white: #fbf0f0;
+  --ink: #e0e0e0;
+  --ink-dim: #a98fa4;
+  --ink-faint: #6d4a63;
+
+  --accent: var(--pink);
+  --accent-soft: rgba(255, 11, 82, 0.16);
+
   --panel: #0e0214;
   --line: #2a0820;
   --line-2: #451130;
