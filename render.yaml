@@ -4,7 +4,7 @@
     runtime: node
     plan: starter
     buildCommand: npm install
-    startCommand: exec node server.js
+    startCommand: node server.js
     disk:
       name: capri-data
       mountPath: /var/data
@@ -12,6 +12,8 @@
     envVars:
       - key: NODE_VERSION
         value: "20"
+      - key: PORT
+        value: "3000"
       - key: CAPRI_DATA_DIR
         value: /var/data
       - key: CAPRI_PC
