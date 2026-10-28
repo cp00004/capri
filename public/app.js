@@ -855,11 +855,7 @@ function playListeningChime() {
 
 async function startListening() {
   if (rec.active || rec.starting) return;
-  if (state.phase === "thinking" || state.streaming) {
-    rec.listenQueued = true;
-    showNotice("I’ll listen as soon as I finish this reply.", null, null, 2500);
-    return;
-  }
+  if (state.phase === "thinking" || state.streaming) return;
   if (wakeWord.active || wakeWord.starting) {
     wakeWord.pendingStart = true;
     wakeWord.recognition?.stop();
@@ -1149,9 +1145,14 @@ async function transcribe(blob) {
 /* ---------------------------------------------------------------- chat */
 
 function lastSentenceEnd(text) {
-  const m = text.match(/[.!?…]["')\]]?\s/g);
-  if (!m) return 0;
-  return text.lastIndexOf(m[m.length - 1]) + m[m.length - 1].length;
+  const hard = text.match(/[.!?]["')\\]]?\s/g);
+  const hardIdx = hard ? text.lastIndexOf(hard[hard.length - 1]) + hard[hard.length - 1].length : 0;
+  if (hardIdx > 0) return hardIdx;
+  if (text.length >= 45) {
+    const soft = text.match(/[,;:]["')\\]]?\s/g);
+    if (soft) return text.lastIndexOf(soft[soft.length - 1]) + soft[soft.length - 1].length;
+  }
+  return 0;
 }
 
 let activeAbort = null;
@@ -2104,10 +2105,18 @@ el.micBtn.addEventListener("click", () => {
     try { recognition?.stop(); } catch { /* ignore */ }
     // Small delay so recognition.onend doesn't fight us
     setTimeout(() => startListening(), 80);
-  } else if (state.phase === "thinking" || state.streaming || speech.busy) {
-    // Capri is busy — queue the listen for when she finishes
-    rec.listenQueued = true;
-    showNotice("I'll listen the moment I'm done, choom.", null, null, 2500);
+  } else if (state.phase === "thinking" || state.streaming) {
+    // Capri is thinking — abort and go straight to listening
+    activeAbort?.abort();
+    speech.stop();
+    state.streaming = false;
+    rec.listenQueued = false;
+    setTimeout(() => startListening(), 120);
+  } else if (speech.busy) {
+    // Capri is speaking — cut her off and listen
+    speech.stop();
+    rec.listenQueued = false;
+    setTimeout(() => startListening(), 80);
   } else {
     startListening();
   }
