@@ -323,6 +323,17 @@
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
-<script src="app.js?v=20261028-fix"></script>
+<!-- belt and braces: the splash clears even if app.js fails to load at all -->
+<script>
+  setTimeout(function () {
+    var s = document.getElementById("splash");
+    if (s) { s.style.display = "none"; }
+    var p = document.getElementById("profileBg");
+    if (p) { p.classList.add("hidden"); }
+    document.body.classList.remove("loading");
+    document.body.classList.add("ready");
+  }, 4500);
+</script>
+<script src="app.js?v=20261028-fix2"></script>
 </body>
 </html>
