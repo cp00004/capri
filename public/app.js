@@ -2209,17 +2209,6 @@ boot();
 checkRemoteVersion();
 
 
-// Failsafe: never let splash get stuck
-setTimeout(() => {
-  const splash = document.getElementById(" splash\);
- if (splash && splash.style.display !== \none\) {
- splash.style.display = \none\;
- }
- document.body.classList.remove(\loading\);
- document.body.classList.add(\ready\);
-}, 4500);
-
-
 // Also add CSS class removal in case body has loading class
 setTimeout(() => {
   document.body.classList.remove(" loading\);
@@ -2228,3 +2217,5 @@ setTimeout(() => {
  }
 }, 4500);
 
+setTimeout(function(){var s=document.getElementById(" splash);if(s){s.style.display=
+one;}document.body.classList.remove(loading);document.body.classList.add(eady);},4500);
