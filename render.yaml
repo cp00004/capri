@@ -3,7 +3,7 @@ services:
     name: capri-backend
     runtime: node
     plan: starter
-    buildCommand: npm ci
+    buildCommand: npm install --omit=dev
     startCommand: node server.js
     disk:
       name: capri-data
@@ -19,7 +19,7 @@ services:
       - key: CAPRI_AUTOPUBLISH
         value: "0"
       - key: CAPRI_ALLOW_ORIGINS
-        value: https://cp00004.github.io,https://localhost,capacitor://localhost
+        value: https://cp00004.github.io,https://capricorn.de.deplexo.com,capacitor://localhost,http://localhost
       - key: CAPRI_PROXY_TOKEN
         sync: false
       - key: GROQ_API_KEY
