@@ -85,7 +85,7 @@ const el = {
   voiceHint: $("#voiceHint"),
 };
 
-const DEFAULT_TUNNEL = "https://angry-pig-50.loca.lt";
+const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
@@ -2207,3 +2207,11 @@ checkRemoteVersion(); });
 initSplash();
 boot();
 checkRemoteVersion();
+
+/* failsafe: the splash must never be able to hang the app */
+setTimeout(function () {
+  var s = document.getElementById("splash");
+  if (s) s.style.display = "none";
+  document.body.classList.remove("loading");
+  document.body.classList.add("ready");
+}, 4500);

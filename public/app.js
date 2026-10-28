@@ -2207,3 +2207,11 @@ checkRemoteVersion(); });
 initSplash();
 boot();
 checkRemoteVersion();
+
+/* failsafe: the splash must never be able to hang the app */
+setTimeout(function () {
+  var s = document.getElementById("splash");
+  if (s) s.style.display = "none";
+  document.body.classList.remove("loading");
+  document.body.classList.add("ready");
+}, 4500);
