@@ -2128,12 +2128,21 @@ async function boot() {
   }
 
   if (!cfg) {
+    // free hosts can cold-start, so a miss is worth another try before we
+    // tell the user anything is broken
+    state.bootRetries = (state.bootRetries || 0) + 1;
+    if (state.bootRetries <= 3) {
+      setTimeout(boot, 3000 * state.bootRetries);
+      return;
+    }
+    state.bootRetries = 0;
     if (!state.apiBase) {
       showNotice("No backend set. Open Settings → PC address / backend and paste your Capri server URL (e.g. https://your-server.com).", null, null, 15000);
     } else {
       showNotice("Capri's server is not answering. If the host went to sleep, give it a minute and reload.", null, null, 10000);
     }
   } else {
+    state.bootRetries = 0;
     state.config = cfg;
     state.scope = cfg.scope;
 
