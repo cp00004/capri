@@ -20,3 +20,6 @@ voice-samples/
 
 # scratch screenshots from testing
 shots/
+
+dist-electron/
+
