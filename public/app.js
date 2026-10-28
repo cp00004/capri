@@ -548,7 +548,7 @@ function playBlob(blob, { pitch = 0.96, grit = 0.14 } = {}) {
     audio.mozPreservesPitch = false;
     audio.webkitPreservesPitch = false;
     audio.playbackRate = Math.max(0.8, Math.min(1.15, Number(pitch) || 0.96));
-    audio.onended = d" none;
+    audio.onended = done;
     audio.onerror = done;
     audio.play().catch(done);
   });
@@ -1412,7 +1412,7 @@ function applyProfile(profile) {
       ? "Sign in once and your memory follows you to any device."
       : "Google sign-in is not configured yet. Open docs/GOOGLE_SIGNIN.md on the PC.";
   el.signOutBtn.classList.toggle("hidden", !signedIn);
-  el.googleBtn.classList.toggle("hidden", signedIn || Boolean(state.googleReady));
+  el.googleBtn.classList.toggle("hidden", signedIn || Boolean(state.googleReady));
 
   const mem = profile.memory || {};
   const memories = (mem.facts || 0) + (mem.favorites || 0) + (mem.music || 0) + (mem.notes || 0);
@@ -2207,11 +2207,3 @@ checkRemoteVersion(); });
 initSplash();
 boot();
 checkRemoteVersion();
-
-/* failsafe: never let the splash screen hang */
-setTimeout(function () {
-  var s = document.getElementById("splash");
-  if (s) { s.style.display = "none"; }
-  document.body.classList.remove("loading");
-  document.body.classList.add("ready");
-}, 4500);
