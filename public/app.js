@@ -85,7 +85,7 @@ const el = {
   voiceHint: $("#voiceHint"),
 };
 
-const DEFAULT_TUNNEL = "https://capriai.loca.lt";
+const DEFAULT_TUNNEL = "https://angry-pig-50.loca.lt";
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
