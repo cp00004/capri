@@ -735,7 +735,18 @@ input.text::placeholder { color: var(--ink-faint); }
   }
   .sheet-head { padding: 12px 20px; }
   .sheet-body { gap: 16px; padding: 16px 20px calc(28px + var(--safe-b)); }
-  .top { padding-top: max(10px, env(safe-area-inset-top)); }
+  .top {
+    background: var(--panel);
+    border-bottom: 1px solid var(--line-2);
+    color: var(--white);
+    padding: 14px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 3;
+  } padding-top: max(10px, env(safe-area-inset-top)); }
   .toast { bottom: calc(96px + var(--safe-b)); }
 }
 

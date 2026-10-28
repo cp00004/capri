@@ -45,6 +45,7 @@
                   "productName":  "Capri",
                   "copyright":  "Project Capricorn",
                   "asar":  true,
+    "asarIntegrity": false,
                   "files":  [
                                 "electron/**/*",
                                 "public/**/*",
