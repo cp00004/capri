@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Privacy Policy — CAPRI // Project Capricorn</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; color: #e0e0e0; background: #07000c; line-height: 1.7; }
+  h1, h2 { color: #00ffe7; }
+  a { color: #00ffe7; }
+  p, li { color: #c0c0c8; }
+  hr { border-color: #222; }
+</style>
+</head>
+<body>
+<h1>Privacy Policy</h1>
+<p><strong>App name:</strong> CAPRI // Project Capricorn<br>
+<strong>Effective date:</strong> October 28, 2026<br>
+<strong>Contact:</strong> <a href="mailto:cp00004@github">Project Capricorn GitHub</a></p>
+
+<hr>
+
+<h2>1. What this app does</h2>
+<p>CAPRI is a personal AI assistant that runs on your own device and your own server. It lets you talk to an AI persona via voice or text. The app can optionally control a linked Windows PC on your local network.</p>
+
+<h2>2. Data we collect</h2>
+<p>CAPRI collects only the minimum data required to work:</p>
+<ul>
+  <li><strong>Voice audio:</strong> When you tap the mic button or use the wake word, your microphone captures a short audio clip. This clip is sent over HTTPS to your own Capri backend server (which you host), and from there to a speech-to-text API (Groq Whisper or Gemini). Audio is never stored permanently.</li>
+  <li><strong>Text messages:</strong> Messages you type or that are transcribed from your voice are sent to your backend server to generate a reply. Conversation history is stored locally on the server you control.</li>
+  <li><strong>Google account (optional):</strong> If you choose to sign in with Google, we receive your Google name, email address, and profile picture via Google OAuth. This information is stored only on your own backend server and is used solely to link your preferences and conversation memory across devices. We do not share this with any third party.</li>
+  <li><strong>Preferences and memory:</strong> Facts you ask Capri to remember (your name, preferences, etc.) are stored on your backend server under your profile.</li>
+  <li><strong>Local storage:</strong> Session tokens and UI preferences are stored in your browser's localStorage. No tracking cookies are set.</li>
+</ul>
+
+<h2>3. Data we do NOT collect</h2>
+<ul>
+  <li>We do not collect analytics, advertising IDs, or device fingerprints.</li>
+  <li>We do not sell or share your data with advertisers or data brokers.</li>
+  <li>We do not store raw audio recordings.</li>
+  <li>We do not access your microphone in the background without your explicit action (tap or wake word).</li>
+</ul>
+
+<h2>4. Third-party services</h2>
+<p>Depending on your configuration, your text and audio may be processed by:</p>
+<ul>
+  <li><strong>Groq API</strong> — speech-to-text and language model inference (<a href="https://groq.com/privacy/" target="_blank">Groq Privacy Policy</a>)</li>
+  <li><strong>Google Gemini API</strong> — language model and text-to-speech (<a href="https://policies.google.com/privacy" target="_blank">Google Privacy Policy</a>)</li>
+  <li><strong>Google Sign-In (OAuth 2.0)</strong> — optional account linking (<a href="https://policies.google.com/privacy" target="_blank">Google Privacy Policy</a>)</li>
+</ul>
+<p>All API calls are made from your own backend server, which you control. No data is routed through our servers.</p>
+
+<h2>5. Microphone access</h2>
+<p>The app requests microphone permission only when you interact with the mic button or enable the wake-word feature. You can revoke this permission at any time in your browser or device settings.</p>
+
+<h2>6. Data retention and deletion</h2>
+<p>All data is stored on the server you host. You can delete your profile data at any time using the "Forget It All" button in the app's settings panel, or by deleting the data directory on your server.</p>
+
+<h2>7. Children's privacy</h2>
+<p>CAPRI is not directed at children under 13. We do not knowingly collect personal information from children.</p>
+
+<h2>8. Changes to this policy</h2>
+<p>We may update this policy. The effective date above will be updated when changes are made.</p>
+
+<h2>9. Contact</h2>
+<p>Questions? Open an issue at <a href="https://github.com/cp00004/capri" target="_blank">github.com/cp00004/capri</a>.</p>
+</body>
+</html>
