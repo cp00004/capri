@@ -121,3 +121,20 @@
 <!-- ================================================= settings -->
     <!-- Download APK Section -->
     
+<!-- ---------------------------------------------------- download sidebar -->
+<section id="downloadSidebar" class="sheet hidden">
+  <header class="sheet-header">
+    <h2>Download APK</h2>
+    <button class="icon close-sheet" aria-label="Close" onclick="closeSheet(this.parentElement.parentElement)">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </header>
+  <div class="sheet-body">
+    <a class="download-link" href="assets/Capri.apk" download>
+      <svg viewBox="0 0 24 24" aria-hidden="true" class="download-icon"><path d="M12 3v10M8 9l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Download Capri.apk</span>
+    </a>
+    <p class="note">If the download does not start, right‑click and choose “Save link as…”.</p>
+  </div>
+</section>
+<script src="app.js"></script>
