@@ -47,7 +47,36 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css?v=20261027-1723" />
-</head>
+<!-- Google Identity Services -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+  function handleGoogleCredential(response) {
+    console.log('Google credential:', response.credential);
+    // TODO: send token to backend for verification
+  }
+  window.addEventListener('DOMContentLoaded', () => {
+    // Initialize Google Sign‑In button
+    google.accounts.id.initialize({
+      client_id: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com',
+      callback: handleGoogleCredential,
+    });
+    // Render button inside the existing #googleBtn container if present
+    const btn = document.getElementById('googleBtn');
+    if (btn) {
+      google.accounts.id.renderButton(btn, { theme: 'outline', size: 'large' });
+    }
+    // Fix download button – trigger APK download (placeholder path)
+    const dl = document.getElementById('downloadBtn');
+    if (dl) {
+      dl.addEventListener('click', () => {
+        const a = document.createElement('a');
+        a.href = 'assets/capri.apk';
+        a.download = 'capri.apk';
+        a.click();
+      });
+    }
+  });
+</script>
 <body data-state="idle">
 <!-- Electron frameless window drag bar (hidden on web) -->
 <div id="electronBar" class="electron-bar" style="display:none">
