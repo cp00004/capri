@@ -68,11 +68,22 @@ const GEMINI_TTS_MODEL = process.env.CAPRI_TTS_MODEL || "gemini-3.8-flash-tts";
 const CHAT_PROVIDER = (process.env.CAPRI_CHAT_PROVIDER || (GEMINI_KEY ? "gemini" : "groq")).toLowerCase();
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
 const HOST_USER = os.userInfo().username;
+// Frontends that are allowed to call this backend from another origin.
+// CAPRI_ALLOW_ORIGINS overrides this list; it is only a safety net so a fresh
+// deploy still works when that variable was not filled in.
+const DEFAULT_ALLOW_ORIGINS = [
+  "https://cp00004.github.io",
+  "https://capricorn.de.deplexo.com",
+  "capacitor://localhost",
+  "https://localhost",
+  "http://localhost",
+];
 function getAllowedOrigins() {
-  return (process.env.CAPRI_ALLOW_ORIGINS || "")
+  const fromEnv = (process.env.CAPRI_ALLOW_ORIGINS || "")
     .split(",")
     .map((s) => s.trim().replace(/\/+$/, ""))
     .filter(Boolean);
+  return fromEnv.length ? fromEnv : DEFAULT_ALLOW_ORIGINS;
 }
 
 const CAPRI_VOICES = [
