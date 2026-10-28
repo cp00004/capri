@@ -2198,12 +2198,10 @@ async function boot() {
 
 /* ---------------------------------------------------------------- lost link */
 
-window.addEventListener("online", () => { if (!state.config) boot();
-checkRemoteVersion(); });
+window.addEventListener("online", () => { if (!state.config) boot(); });
 
 initSplash();
 boot();
-checkRemoteVersion();
 
 /* failsafe: the splash must never be able to hang the app */
 setTimeout(function () {
