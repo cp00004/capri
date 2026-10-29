@@ -1905,7 +1905,13 @@ function syncUserKeyHint() {
     el.userKeyHint.textContent = "Optional. Bring your own free key — console.groq.com/keys or aistudio.google.com/apikey — and your questions stop sharing this server's quota. Kept on this device only.";
     return;
   }
-  const who = saved.startsWith("gsk_") ? "Groq" : saved.startsWith("sk-or-") ? "OpenRouter" : "Gemini";
+  const who = saved.startsWith("gsk_")
+    ? "Groq"
+    : saved.startsWith("sk-or-")
+      ? "OpenRouter"
+      : saved.startsWith("ftai_")
+        ? "FreeTheAI"
+        : "Gemini";
   el.userKeyHint.textContent = `Using your own ${who} key (${saved.slice(0, 3)}…${saved.slice(-4)}). Saved on this device only. Tap SAVE with an empty box to remove it.`;
 }
 syncUserKeyHint();
@@ -1919,7 +1925,7 @@ el.userKeySave.addEventListener("click", () => {
     showNotice("Own key removed. Capri is back on the server key.", null, null, 4000);
     return;
   }
-  const known = /^(gsk_|AIza|AQ\.|sk-or-)/.test(typed) && typed.length >= 20;
+  const known = /^(gsk_|AIza|AQ\.|sk-or-|ftai_)/.test(typed) && typed.length >= 20;
   if (!known) {
     showNotice("That doesn't look like a Groq, Gemini or OpenRouter key.", null, null, 6000);
     return;
