@@ -1183,6 +1183,114 @@ async function transcribe(blob) {
   }
 }
 
+/* ---------------------------------------------------------------- phone hands */
+
+const PHONE_APPS = {
+  youtube: { pkg: "com.google.android.youtube", url: "https://www.youtube.com", ios: "youtube://" },
+  yt: { pkg: "com.google.android.youtube", url: "https://www.youtube.com", ios: "youtube://" },
+  discord: { pkg: "com.discord", url: "https://discord.com/app", ios: "discord://" },
+  spotify: { pkg: "com.spotify.music", url: "https://open.spotify.com", ios: "spotify://" },
+  instagram: { pkg: "com.instagram.android", url: "https://www.instagram.com", ios: "instagram://" },
+  insta: { pkg: "com.instagram.android", url: "https://www.instagram.com", ios: "instagram://" },
+  facebook: { pkg: "com.facebook.katana", url: "https://www.facebook.com", ios: "fb://" },
+  tiktok: { pkg: "com.zhiliaoapp.musically", url: "https://www.tiktok.com", ios: "https://www.tiktok.com" },
+  twitter: { pkg: "com.twitter.android", url: "https://x.com", ios: "twitter://" },
+  x: { pkg: "com.twitter.android", url: "https://x.com", ios: "twitter://" },
+  reddit: { pkg: "com.reddit.frontpage", url: "https://www.reddit.com", ios: "reddit://" },
+  twitch: { pkg: "tv.twitch.android.app", url: "https://www.twitch.tv", ios: "twitch://" },
+  netflix: { pkg: "com.netflix.mediaclient", url: "https://www.netflix.com", ios: "nflx://" },
+  whatsapp: { pkg: "com.whatsapp", url: "https://web.whatsapp.com", ios: "whatsapp://" },
+  telegram: { pkg: "org.telegram.messenger", url: "https://web.telegram.org", ios: "tg://" },
+  snapchat: { pkg: "com.snapchat.android", url: "https://web.snapchat.com", ios: "snapchat://" },
+  gmail: { pkg: "com.google.android.gm", url: "https://mail.google.com", ios: "googlegmail://" },
+  maps: { pkg: "com.google.android.apps.maps", url: "https://maps.google.com", ios: "maps://" },
+  chrome: { pkg: "com.android.chrome", url: "https://www.google.com", ios: "googlechrome://" },
+  browser: { pkg: "com.android.chrome", url: "https://www.google.com", ios: "https://www.google.com" },
+  photos: { pkg: "com.google.android.apps.photos", url: "https://photos.google.com", ios: "photos-redirect://" },
+  drive: { pkg: "com.google.android.apps.docs", url: "https://drive.google.com", ios: "googledrive://" },
+  calendar: { pkg: "com.google.android.calendar", url: "https://calendar.google.com", ios: "calshow://" },
+  clock: { pkg: "com.google.android.deskclock", url: null, action: "android.intent.action.SHOW_ALARMS" },
+  alarm: { pkg: "com.google.android.deskclock", url: null, action: "android.intent.action.SHOW_ALARMS" },
+  calculator: { pkg: "com.google.android.calculator", url: null },
+  camera: { pkg: "com.android.camera2", url: null, action: "android.media.action.STILL_IMAGE_CAMERA" },
+  settings: { pkg: "com.android.settings", url: null, action: "android.settings.SETTINGS" },
+  store: { pkg: "com.android.vending", url: "https://play.google.com/store", ios: "https://play.google.com/store" },
+  "play store": { pkg: "com.android.vending", url: "https://play.google.com/store", ios: "https://play.google.com/store" },
+  phone: { url: "tel:", ios: "tel:" },
+  dialer: { url: "tel:", ios: "tel:" },
+  call: { url: "tel:", ios: "tel:" },
+  messages: { url: "sms:", ios: "sms:" },
+  sms: { url: "sms:", ios: "sms:" },
+  text: { url: "sms:", ios: "sms:" },
+  email: { url: "mailto:", ios: "mailto:" },
+  mail: { url: "mailto:", ios: "mailto:" },
+};
+
+function phoneAppFor(target) {
+  const clean = String(target || "").toLowerCase().replace(/[^a-z0-9 .:/-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!clean) return null;
+  if (PHONE_APPS[clean]) return PHONE_APPS[clean];
+  for (const token of clean.split(" ")) {
+    if (PHONE_APPS[token]) return PHONE_APPS[token];
+  }
+  return null;
+}
+
+function openOnPhone(args = {}) {
+  const target = String(args.target ?? args.name ?? args.app ?? args.query ?? "").trim();
+  if (!target) return false;
+  showAction(`phone: ${target}`);
+
+  if (window.CapriDevice && typeof window.CapriDevice.open === "function") {
+    try {
+      const reply = String(window.CapriDevice.open(target) || "");
+      if (reply.startsWith("ok")) return true;
+    } catch { /* fall through to browser intents */ }
+  }
+
+  if (/^(https?:|tel:|sms:|mailto:)/i.test(target)) {
+    location.href = target;
+    return true;
+  }
+
+  const app = phoneAppFor(target);
+  const ua = navigator.userAgent;
+  const android = /android/i.test(ua);
+
+  if (app && /^(tel|sms|mailto):/i.test(app.url || "")) {
+    location.href = app.url;
+    return true;
+  }
+
+  if (app && android && app.pkg) {
+    if (app.action) {
+      location.href = `intent:#Intent;action=${app.action};end`;
+      return true;
+    }
+    const fallback = app.url || `https://play.google.com/store/apps/details?id=${app.pkg}`;
+    const path = app.url ? app.url.replace(/^https?:\/\//, "") : "";
+    const scheme = app.url ? app.url.split(":")[0] : "https";
+    location.href = `intent://${path}#Intent;scheme=${scheme};package=${app.pkg};S.browser_fallback_url=${encodeURIComponent(fallback)};end`;
+    return true;
+  }
+
+  if (app && /iphone|ipad|ipod/i.test(ua) && app.ios) {
+    location.href = app.ios;
+    return true;
+  }
+  if (app && app.url) {
+    window.open(app.url, "_blank", "noopener");
+    return true;
+  }
+  if (app && app.pkg) {
+    location.href = `https://play.google.com/store/apps/details?id=${app.pkg}`;
+    return true;
+  }
+
+  location.href = `https://www.google.com/search?q=${encodeURIComponent(`${target} app`)}`;
+  return true;
+}
+
 /* ---------------------------------------------------------------- chat */
 
 function lastSentenceEnd(text) {
@@ -1281,6 +1389,8 @@ async function respond(userText) {
               speech.enqueue(speechBuf.slice(spokenUpTo, boundary).trim());
               spokenUpTo = boundary;
             }
+          } else if (evt.type === "device_call" && evt.name === "open_on_phone") {
+            openOnPhone(evt.args || {});
           } else if (evt.type === "action") {
             showAction(evt.label || evt.name);
           } else if (evt.type === "tool") {
