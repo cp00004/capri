@@ -167,11 +167,11 @@ async function api(url, opts = {}) {
 
 /* ---------------------------------------------------------------- phase */
 
-// A hosted page has no paired-device token, so a Google session is the only key
-// to chat and memory. Say that once instead of failing silently.
+// Pages and the native shell have no paired-device token, so a Google session
+// is the only key to chat and memory. Say that once instead of failing silently.
 let authNudged = false;
 function nudgeSignIn() {
-  if (!IS_HOSTED_WEB || authNudged || state.session) return;
+  if (!REMOTE_ONLY || authNudged || state.session) return;
   authNudged = true;
   showNotice("Sign in with Google so she can reach her memory.", null, null, 9000);
   if (el.settings?.classList.contains("hidden")) openSheet(el.settings);
