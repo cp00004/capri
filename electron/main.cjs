@@ -194,29 +194,58 @@ function fetchJson(url) {
 }
 
 function downloadFile(url, dest, onProgress) {
+  const part = `${dest}.part`;
   return new Promise((resolve, reject) => {
+    let settled = false;
+    let lastData = Date.now();
+    let out = null;
+    let watchdog = null;
+
+    const finish = (err, value) => {
+      if (settled) return;
+      settled = true;
+      if (watchdog) clearInterval(watchdog);
+      if (err) {
+        try { out?.destroy(); } catch { /* ignore */ }
+        try { fs.unlinkSync(part); } catch { /* ignore */ }
+        reject(err);
+        return;
+      }
+      resolve(value);
+    };
+
+    // A stalled transfer used to leave the progress bar frozen forever.
+    watchdog = setInterval(() => {
+      if (Date.now() - lastData > 90000) finish(new Error("download stalled"));
+    }, 15000);
+
     const request = electronNet.request({ url, redirect: "follow" });
     request.on("response", (response) => {
       if (response.statusCode !== 200) {
         response.resume();
-        reject(new Error(`HTTP ${response.statusCode}`));
+        finish(new Error(`HTTP ${response.statusCode}`));
         return;
       }
       const rawTotal = response.headers["content-length"];
       const total = Number(Array.isArray(rawTotal) ? rawTotal[0] : rawTotal) || 0;
       let received = 0;
-      const out = fs.createWriteStream(dest);
+      out = fs.createWriteStream(part);
       response.on("data", (chunk) => {
+        lastData = Date.now();
         received += chunk.length;
         out.write(chunk);
         if (total) onProgress(Math.min(99, Math.round((received / total) * 100)));
       });
       response.on("end", () => {
-        out.end(() => resolve({ bytes: received, total }));
+        out.end(() => {
+          if (settled) return;
+          try { fs.renameSync(part, dest); } catch (err) { finish(err); return; }
+          finish(null, { bytes: received, total });
+        });
       });
-      response.on("error", (err) => { out.destroy(); reject(err); });
+      response.on("error", (err) => finish(err));
     });
-    request.on("error", reject);
+    request.on("error", (err) => finish(err));
     request.end();
   });
 }
