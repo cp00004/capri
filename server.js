@@ -1014,7 +1014,9 @@ async function handleChat(req, res, who) {
     try { if (trimmed) setPreferredName(profile, trimmed); } catch { /* keep old name */ }
   }
 
-  const device = String(req.headers["x-capri-device"] || "").toLowerCase();
+  let deviceQuery = "";
+  try { deviceQuery = new URL(String(req.url || "/"), "http://capri.local").searchParams.get("device") || ""; } catch { /* no query */ }
+  const device = String(deviceQuery || req.headers["x-capri-device"] || "").toLowerCase();
   const mobile = /mobile|android|iphone/.test(device);
   const web = !mobile && /web/.test(device);
   const toolsOn = !pcLocked;
