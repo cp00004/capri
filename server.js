@@ -822,6 +822,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
 
       // A capped or broken bucket: cool it and hand the turn to the next one.
       if (transient && attempts < maxAttempts) {
+        console.warn(`[capri] relay ${provider.name}/${provider.model} failed (${status || err.message}) — trying the next one`);
         if (status === 429) {
           coolDown(provider, Number(err.retryAfter) || 20);
         } else if (status === 401 || status === 403) {
