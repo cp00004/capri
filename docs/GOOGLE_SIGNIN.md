@@ -34,6 +34,7 @@
    - `http://localhost:4173`
    - `https://localhost:4174`
    - `https://cp00004.github.io`
+   - `https://capricorn.de.deplexo.com` (the hosted app)
    - Your hosted backend URL (if different)
 6. **Authorized redirect URIs** — leave empty (GIS uses popup)
 7. Click **Create**

@@ -23,11 +23,6 @@ const el = {
   kbInput: $("#kbInput"),
   settingsBtn: $("#settingsBtn"),
   settings: $("#settings"),
-  pairPanel: $("#pairPanel"),
-  pairForm: $("#pairForm"),
-  pairName: $("#pairName"),
-  pairCode: $("#pairCodeInput"),
-  pairError: $("#pairError"),
   voiceSelect: $("#voiceSelect"),
   voiceBtn: $("#voiceBtn"),
   voiceLabel: $("#voiceLabel"),
@@ -38,12 +33,6 @@ const el = {
   pcHint: $("#pcHint"),
   accessBtn: $("#accessBtn"),
   pcLockBtn: $("#pcLockBtn"),
-  pairField: $("#pairField"),
-  pairCodeText: $("#pairCode"),
-  pairUrl: $("#pairUrl"),
-  copyPair: $("#copyPair"),
-  deviceField: $("#deviceField"),
-  deviceList: $("#deviceList"),
   auditField: $("#auditField"),
   auditList: $("#auditList"),
   stopBtn: $("#stopBtn"),
@@ -83,27 +72,30 @@ const el = {
   ttsEngine: $("#ttsEngine"),
   voicePreview: $("#voicePreview"),
   voiceHint: $("#voiceHint"),
+  downloadBtn: $("#downloadBtn"),
+  downloadSidebar: $("#downloadSidebar"),
 };
 
+// Where the API lives. The Node build serves this page, so it can use its own
+// origin. Static builds (GitHub Pages) and the native shell need the tunnel.
+const IS_GITHUB_PAGES = location.hostname.includes("github.io");
+const IS_NATIVE = location.protocol === "capacitor:" || (Boolean(window.Capacitor) && location.hostname === "localhost");
 const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
-const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
+const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
+
+const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
-const DEFAULT_BACKEND = LOCAL_HOST ? "" : DEFAULT_TUNNEL;
-// Always force to current tunnel on non-local hosts and save it privately
-if (!LOCAL_HOST) {
-  localStorage.setItem(API_KEY, DEFAULT_TUNNEL);
-  localStorage.setItem(SERVER_KEY, DEFAULT_TUNNEL);
-} else if (!LOCAL_HOST && SAVED_TUNNEL && SAVED_BACKEND !== DEFAULT_TUNNEL) {
+const DEFAULT_BACKEND = REMOTE_ONLY ? DEFAULT_TUNNEL : "";
+// Keep static/native builds pointed at the live tunnel.
+if (REMOTE_ONLY) {
   localStorage.setItem(API_KEY, DEFAULT_TUNNEL);
   localStorage.setItem(SERVER_KEY, DEFAULT_TUNNEL);
 }
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
   session: localStorage.getItem(SESSION_KEY) || "",
-  apiBase: LOCAL_HOST
-    ? (SAVED_TUNNEL ? "" : SAVED_BACKEND)
-    : (SAVED_TUNNEL && SAVED_BACKEND !== DEFAULT_TUNNEL ? DEFAULT_TUNNEL : SAVED_BACKEND || DEFAULT_BACKEND),
+  apiBase: REMOTE_ONLY ? DEFAULT_TUNNEL : (SAVED_BACKEND || ""),
   config: null,
   profile: null,
   voices: [],
@@ -149,7 +141,7 @@ async function api(url, opts = {}) {
     clearTimeout(timeoutId);
   }
   if (res.status === 401) {
-    if (state.token) showPair("That device link expired. Connect again with Google.");
+    if (state.token) showNotice("That link expired. Sign in with Google again.", null, null, 8000);
     if (state.session) {
       state.session = "";
       localStorage.removeItem(SESSION_KEY);
@@ -352,10 +344,25 @@ el.noticeClose.addEventListener("click", () => el.notice.classList.add("hidden")
 const caret = document.createElement("span");
 caret.className = "caret";
 
+/* Cipher chars used during the encrypted-scramble phase */
+const CIPHER_CHARS = "アイウエオカキクケコ#@%&!?/\\<>[]{}|01█▓▒░╬╪╫▲▼◆●○□■═╗╔╚╝";
+
+function randCipher(len) {
+  let s = "";
+  for (let i = 0; i < len; i++) s += CIPHER_CHARS[Math.floor(Math.random() * CIPHER_CHARS.length)];
+  return s;
+}
+
 const typer = (() => {
   let target = "";
   let shown = 0;
   let timer = null;
+  let cipherTimer = null;
+
+  const stopCipher = () => {
+    if (cipherTimer) { clearInterval(cipherTimer); cipherTimer = null; }
+    el.subtitle.classList.remove("cipher-mode");
+  };
 
   const paint = () => {
     el.subtitle.textContent = target.slice(0, shown);
@@ -375,29 +382,53 @@ const typer = (() => {
   };
 
   return {
+    held: false,
+
     reset(text = "") {
-      clearInterval(timer);
-      timer = null;
+      clearInterval(timer); timer = null;
+      stopCipher();
       target = text;
       shown = text.length;
       el.subtitle.textContent = text;
       el.subtitle.classList.toggle("show", Boolean(text));
     },
+
     push(chunk) {
       target += chunk;
+      if (this.held) {
+        /* Show scrambled cipher text in her color while audio is loading */
+        el.subtitle.classList.add("show", "cipher-mode");
+        if (!cipherTimer) {
+          cipherTimer = setInterval(() => {
+            const disp = randCipher(Math.max(8, Math.min(target.length, 32)));
+            el.subtitle.textContent = disp;
+          }, 55);
+        }
+        return;
+      }
       el.subtitle.classList.add("show");
-      if (!timer) {
-        timer = setInterval(tick, 16);
-        paint();
+      if (!timer) { timer = setInterval(tick, 16); paint(); }
+    },
+
+    release() {
+      if (!this.held) return;
+      this.held = false;
+      stopCipher();
+      if (target) {
+        el.subtitle.classList.add("show");
+        shown = 0;
+        if (!timer) { timer = setInterval(tick, 16); paint(); }
       }
     },
+
     finish() {
-      clearInterval(timer);
-      timer = null;
+      clearInterval(timer); timer = null;
+      stopCipher();
       shown = target.length;
       el.subtitle.textContent = target;
       el.subtitle.classList.add("show");
     },
+
     get text() { return target; },
   };
 })();
@@ -590,13 +621,15 @@ async function prepareSpeech(text) {
 }
 
 async function speakOne(text, prepared) {
-  if (!state.voiceOn) return;
+  if (!state.voiceOn) { typer.release(); return; }
   if (prepared?.blob) {
     if (el.ttsEngine && prepared.engine) el.ttsEngine.textContent = prepared.engine;
+    typer.release(); // show text as audio starts
     burstGlitch(1);
     await playBlob(prepared.blob, prepared);
     return;
   }
+  typer.release(); // show text as browser TTS starts
   await speakBrowser(text);
 }
 
@@ -633,16 +666,12 @@ function pickBrowserVoice(voices) {
 }
 
 const FALLBACK_VOICES = [
-  { id: "capri", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous." },
-  { id: "capri-velvet", label: "CAPRI // velvet", note: "Lower, firmer, more deliberate." },
-  { id: "capri-static", label: "CAPRI // static", note: "Breezy and light with a jagged edge." },
-  { id: "capri-warm", label: "CAPRI // warm", note: "Warm and close." },
-  { id: "capri-mature", label: "CAPRI // older", note: "Mature and worn." },
-  { id: "capri-bright", label: "CAPRI // bright", note: "Bright and impish." },
+  { id: "capri", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous. The one and only." },
 ];
 
 function refreshVoices() {
-  const list = state.voices.length ? state.voices : FALLBACK_VOICES;
+  // Keep only the first voice (or fallback) to enforce a single voice
+  const list = (state.voices.length ? state.voices : FALLBACK_VOICES).slice(0, 1);
   el.voiceSelect.innerHTML = "";
   for (const v of list) {
     const opt = document.createElement("option");
@@ -775,7 +804,7 @@ const rec = {
 };
 
 const wakeWord = {
-  enabled: localStorage.getItem("capri.wakeWord") === "1",
+  enabled: localStorage.getItem("capri.wakeWord") !== "0",
   active: false,
   starting: false,
   pendingStart: false,
@@ -819,11 +848,7 @@ function playListeningChime() {
 
 async function startListening() {
   if (rec.active || rec.starting) return;
-  if (state.phase === "thinking" || state.streaming) {
-    rec.listenQueued = true;
-    showNotice("I’ll listen as soon as I finish this reply.", null, null, 2500);
-    return;
-  }
+  if (state.phase === "thinking" || state.streaming) return;
   if (wakeWord.active || wakeWord.starting) {
     wakeWord.pendingStart = true;
     wakeWord.recognition?.stop();
@@ -968,7 +993,7 @@ function startWakeWord() {
   recognition.onstart = () => {
     wakeWord.starting = false;
     wakeWord.active = true;
-    setPhase("listening");
+    setPhase("idle");  // stay idle while waiting for wake word
     paintWakeWord();
     if (wakeWord.chimePending) {
       wakeWord.chimePending = false;
@@ -994,10 +1019,13 @@ function startWakeWord() {
     }
   };
   recognition.onend = () => {
-    if (wakeWord.recognition === recognition) wakeWord.recognition = null;
+    const owned = wakeWord.recognition === recognition;
+    if (owned) wakeWord.recognition = null;
     wakeWord.active = false;
     wakeWord.starting = false;
     paintWakeWord();
+    // If mic button already took over, don't interfere
+    if (!owned) return;
     if (wakeWord.pendingStart && wakeWord.enabled && !document.hidden) {
       wakeWord.pendingStart = false;
       setTimeout(() => startListening(), 180);
@@ -1110,9 +1138,14 @@ async function transcribe(blob) {
 /* ---------------------------------------------------------------- chat */
 
 function lastSentenceEnd(text) {
-  const m = text.match(/[.!?…]["')\]]?\s/g);
-  if (!m) return 0;
-  return text.lastIndexOf(m[m.length - 1]) + m[m.length - 1].length;
+  const hard = text.match(/[.!?]["')\\]]?\s/g);
+  const hardIdx = hard ? text.lastIndexOf(hard[hard.length - 1]) + hard[hard.length - 1].length : 0;
+  if (hardIdx > 0) return hardIdx;
+  if (text.length >= 45) {
+    const soft = text.match(/[,;:]["')\\]]?\s/g);
+    if (soft) return text.lastIndexOf(soft[soft.length - 1]) + soft[soft.length - 1].length;
+  }
+  return 0;
 }
 
 let activeAbort = null;
@@ -1135,6 +1168,7 @@ async function respond(userText) {
   state.history = state.history.slice(-16);
 
   typer.reset("");
+  typer.held = true; // hold text until audio starts
   setPhase("thinking");
 
   let speechBuf = "";
@@ -1225,6 +1259,7 @@ async function respond(userText) {
     if (speechBuf.length > spokenUpTo) {
       speech.enqueue(speechBuf.slice(spokenUpTo).trim());
     }
+    if (!state.voiceOn) typer.release(); // voice off — show text immediately
 
     const finalText = typer.text.trim();
     if (finalText && !failed) {
@@ -1254,37 +1289,6 @@ async function respond(userText) {
 /* ---------------------------------------------------------------- audio unlock */
 
 let unlocked = false;
-function initGoogleButton() {
-  const googleBtn = document.getElementById('googleBtn');
-  if (!googleBtn) return;
-  // Remove previous listeners by cloning
-  const fresh = googleBtn.cloneNode(true);
-  googleBtn.parentNode.replaceChild(fresh, googleBtn);
-  const btn = document.getElementById('googleBtn');
-  btn.addEventListener('click', async () => {
-    try {
-      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SocialLogin) {
-        const result = await window.Capacitor.Plugins.SocialLogin.login({
-          provider: 'google',
-          options: { scopes: ['profile', 'email'] }
-        });
-        state.google = result;
-        el.googleBtn.classList.add('hidden');
-        el.signOutBtn.classList.remove('hidden');
-      } else {
-        // fallback opens Google OAuth URL (replace with your actual client id if needed)
-        const clientId = '240583618801-6l8bpgneim3nfker6kbbbj4brt2gjrg2.apps.googleusercontent.com';
-        const redirectUri = encodeURIComponent(window.location.origin);
-        const scope = encodeURIComponent('profile email');
-        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=token&scope=${scope}`;
-        window.open(authUrl, '_blank');
-      }
-    } catch (e) {
-      console.error('Google sign‑in failed', e);
-      alert('Google sign‑in could not start.');
-    }
-  });
-}
 function unlockAudio() {
   if (unlocked) return;
   unlocked = true;
@@ -1336,55 +1340,18 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const target = btn.getAttribute("data-close");
     if (target === "settings") closeSheet(el.settings);
+    else if (target === "downloadSidebar") closeSheet(el.downloadSidebar);
+    else if (target) { const n = document.getElementById(target); if (n) closeSheet(n); }
   });
 });
 
-function showPair(message) {
-  if (message) el.pairError.textContent = message;
-  openSheet(el.pairPanel);
+/* ---------------------------------------------------------------- download */
+function toggleDownloadSheet() {
+  if (!el.downloadSidebar) return;
+  if (el.downloadSidebar.classList.contains("hidden")) openSheet(el.downloadSidebar);
+  else closeSheet(el.downloadSidebar);
 }
-
-el.pairForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const code = el.pairCode.value.replace(/\D/g, "").slice(0, 6);
-  const name = el.pairName.value.trim() || "phone";
-  if (code.length !== 6) {
-    el.pairError.textContent = "Six digits, like the one on the PC screen.";
-    return;
-  }
-  el.pairError.textContent = "linking…";
-  try {
-    const res = await fetch(apiUrl("/api/pair"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(state.apiBase.includes(".loca.lt") ? { "Bypass-Tunnel-Reminder": "1" } : {}),
-      },
-      body: JSON.stringify({ code, name }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      el.pairError.textContent = data.message || "That did not work.";
-      return;
-    }
-    state.token = data.token;
-    localStorage.setItem(TOKEN_KEY, data.token);
-    localStorage.setItem("capri.name", data.name || name);
-    closeSheet(el.pairPanel);
-    await boot();
-    const splashBar = document.getElementById('splashBar');
-    if (splashBar) splashBar.classList.add('hidden');
-    if (state.scope === "full") {
-      typer.reset("Locked on. I have your chrome.");
-      speech.enqueue("Locked on. I have your chrome.");
-    } else {
-      typer.reset("Paired. Voice only for now.");
-      speech.enqueue("Paired. Voice only for now.");
-    }
-  } catch (err) {
-    el.pairError.textContent = `No link: ${err.message}`;
-  }
-});
+el.downloadBtn?.addEventListener("click", toggleDownloadSheet);
 
 /* ---------------------------------------------------------------- profile */
 
@@ -1410,8 +1377,7 @@ function applyProfile(profile) {
     : state.config?.google?.configured
       ? "Sign in once and your memory follows you to any device."
       : "Google sign-in is not configured yet. Open docs/GOOGLE_SIGNIN.md on the PC.";
-  el.signOutBtn.classList.toggle("hidden", !signedIn);
-  el.googleBtn.classList.toggle("hidden", signedIn || Boolean(state.googleReady));
+  syncGoogleUi();
 
   const mem = profile.memory || {};
   const memories = (mem.facts || 0) + (mem.favorites || 0) + (mem.music || 0) + (mem.notes || 0);
@@ -1652,21 +1618,21 @@ async function handleGoogleCredential(response) {
   }
 }
 
-async function renderGoogle(force = false) {
+async function renderGoogle() {
   const google = state.config?.google;
   if (!google?.configured) {
     state.googleReady = false;
-    el.googleBtn.classList.toggle("hidden", Boolean(state.profile?.google));
+    syncGoogleUi();
     return;
   }
   const ok = await loadGoogleScript();
   if (!ok || !window.google?.accounts?.id) {
     state.googleReady = false;
-    el.accountHint.textContent = "Google's script did not load. The PC needs internet access; the button below still tries.";
+    syncGoogleUi();
+    el.accountHint.textContent = "Google's sign-in script did not load. Check your connection and reload.";
     return;
   }
   state.googleReady = true;
-  el.googleBtn.classList.toggle("hidden", Boolean(state.profile?.google));
   if (googleInitializedClientId !== google.clientId) {
     window.google.accounts.id.initialize({
       client_id: google.clientId,
@@ -1676,6 +1642,7 @@ async function renderGoogle(force = false) {
       use_fedcm_for_prompt: true,
     });
     googleInitializedClientId = google.clientId;
+    googleButtonClientId = "";
   }
   if (!state.profile?.google) {
     if (googleButtonClientId !== google.clientId) {
@@ -1694,18 +1661,36 @@ async function renderGoogle(force = false) {
         console.error("[capri] Failed to render Google button:", e);
       }
     }
+    el.googleButton.classList.remove("hidden");
   }
-  // Google silently refuses origins that are not registered on the OAuth
-  // client. If no button iframe appears, say why instead of failing quietly.
+  syncGoogleUi();
+  // If Google refuses to render (origin not registered), don't leave a dead button.
   setTimeout(() => {
-    if (state.profile?.google) return;
-    if (!el.googleButton || el.googleButton.querySelector("iframe")) return;
+    if (state.profile?.google || googleButtonRendered()) return;
     el.accountHint.textContent =
       "Google has not approved this web address for sign-in yet. In Google Cloud Console -> Credentials -> your Web OAuth client, add this site under Authorized JavaScript origins (redirect URIs stay empty), then reload.";
+    syncGoogleUi();
   }, 2500);
 }
 
-el.googleBtn.addEventListener("click", async () => {
+const googleFallbackBtn = document.getElementById("googleFallbackBtn");
+
+function googleButtonRendered() {
+  const slot = el.googleButton;
+  if (!slot || slot.classList.contains("hidden")) return false;
+  return Boolean(slot.querySelector('div[role="button"], iframe'));
+}
+
+function syncGoogleUi() {
+  const signedIn = Boolean(state.profile?.google);
+  const rendered = !signedIn && googleButtonRendered();
+  if (el.googleBtn) el.googleBtn.classList.toggle("hidden", signedIn || rendered);
+  if (el.googleButton) el.googleButton.classList.toggle("hidden", signedIn);
+  if (el.signOutBtn) el.signOutBtn.classList.toggle("hidden", !signedIn);
+  if (googleFallbackBtn) googleFallbackBtn.classList.toggle("hidden", signedIn || rendered);
+}
+
+el.googleBtn?.addEventListener("click", async () => {
   if (!state.config?.google?.configured) {
     showNotice(
       "Google sign-in needs a Web OAuth client id. On the PC open docs/GOOGLE_SIGNIN.md, create one, paste it into .env, restart.",
@@ -1713,12 +1698,23 @@ el.googleBtn.addEventListener("click", async () => {
     );
     return;
   }
-  await renderGoogle(true);
+  await renderGoogle();
+  if (googleButtonRendered()) {
+    el.googleButton.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    el.googleButton.classList.add("google-pulse");
+    setTimeout(() => el.googleButton.classList.remove("google-pulse"), 1600);
+    el.googleButton.querySelector('div[role="button"]')?.click();
+    return;
+  }
+  if (window.google?.accounts?.id) {
+    window.google.accounts.id.prompt();
+  }
 });
 
-const googleFallbackBtn = document.getElementById("googleFallbackBtn");
 googleFallbackBtn?.addEventListener("click", () => {
-  if (window.google?.accounts?.id) {
+  if (googleButtonRendered()) {
+    el.googleButton.querySelector('div[role="button"]')?.click();
+  } else if (window.google?.accounts?.id) {
     window.google.accounts.id.prompt();
   } else {
     showNotice("Google's script didn't load. Check your internet connection.", null, null, 8000);
@@ -1726,6 +1722,11 @@ googleFallbackBtn?.addEventListener("click", () => {
 });
 
 el.signOutBtn.addEventListener("click", async () => {
+  try {
+    window.google?.accounts?.id?.disableAutoSelect();
+  } catch {
+    /* older clients */
+  }
   try {
     await api("/api/auth/signout", { method: "POST" });
   } catch {
@@ -1747,12 +1748,16 @@ function setPcState() {
   const on = (local || full) && !state.config?.pcLocked;
 
   const locked = Boolean(state.config?.pcLocked);
+  const bridge = Boolean(state.config?.hands?.bridge);
+  const handsUp = Boolean(state.config?.hands?.online);
   if (el.pcState) {
     el.pcState.textContent = local
       ? (locked ? "locked out · this pc" : "full access · this pc")
       : full
         ? (locked ? "granted · locked out" : "full access · granted")
-        : "voice only";
+        : bridge
+          ? (handsUp ? "hands live · via your pc" : "hands offline")
+          : "voice only";
   }
   if (el.pcHint) {
     el.pcHint.textContent = local
@@ -1761,7 +1766,11 @@ function setPcState() {
           : "She runs commands, touches files, opens apps and looks at your screen. Everything is logged.")
       : full
         ? (state.config?.pcLocked ? "The desktop has her locked out right now." : "She can touch this PC from this device. Everything is logged.")
-        : "Ask the desktop for her hands: files, commands, apps, screen.";
+        : bridge && !handsUp
+          ? "Your PC is off, so she can talk but not touch it. Start the Capri agent on the PC to give her hands back."
+          : bridge
+            ? "Her hands are on your PC through the agent. Files, commands, apps and screen all work."
+            : "Ask the desktop for her hands: files, commands, apps, screen.";
   }
 
   if (el.accessBtn) el.accessBtn.classList.toggle("hidden", local || full || !state.config?.paired);
@@ -1780,60 +1789,12 @@ async function refreshSettings() {
   if (cfg.profile && !state.profile) applyProfile(cfg.profile);
   applyClock();
 
-  if (el.pairField) el.pairField.classList.toggle("hidden", !cfg.local);
-  if (el.deviceField) el.deviceField.classList.toggle("hidden", !cfg.local);
   if (el.auditField) el.auditField.classList.toggle("hidden", !cfg.local);
-  if (el.copyPair) el.copyPair.classList.toggle("hidden", !cfg.local);
-
-  if (cfg.local && el.pairCodeText) {
-    el.pairCodeText.textContent = cfg.pairCode || "------";
-    const url = cfg.lanUrls?.[0] || location.origin;
-    if (el.pairUrl) el.pairUrl.textContent = url;
-    if (el.copyPair) el.copyPair.dataset.url = url;
-  }
 
   if (el.publishState && el.publishHint) renderPublishState(cfg.publish || {});
   renderGoogle();
   setPcState();
-  if (cfg.local && el.deviceList) {
-    renderDevices(cfg.devices || []);
-    if (el.auditList) renderAudit();
-  }
-}
-
-function renderDevices(list) {
-  el.deviceList.innerHTML = "";
-  if (!list.length) {
-    const p = document.createElement("p");
-    p.className = "hint";
-    p.textContent = "nothing paired yet";
-    el.deviceList.append(p);
-    return;
-  }
-  for (const d of list) {
-    const row = document.createElement("div");
-    row.className = "device-row";
-    const name = document.createElement("span");
-    name.className = "name";
-    name.textContent = `${d.name} · ${d.ip || "lan"}`;
-    const scope = document.createElement("span");
-    scope.className = `scope ${d.scope === "full" ? "" : "voice"}`;
-    scope.textContent = d.scope === "full" ? "full" : "voice";
-    const cut = document.createElement("button");
-    cut.type = "button";
-    cut.className = "pill";
-    cut.textContent = "CUT";
-    cut.addEventListener("click", async () => {
-      await api("/api/devices/revoke", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: d.id }),
-      });
-      refreshSettings();
-    });
-    row.append(name, scope, cut);
-    el.deviceList.append(row);
-  }
+  if (cfg.local && el.auditList) renderAudit();
 }
 
 async function renderAudit() {
@@ -1879,17 +1840,6 @@ el.apiSave.addEventListener("click", () => {
   }
   showNotice("Saved. Reloading the link.", null, null, 1800);
   setTimeout(() => location.reload(), 600);
-});
-
-el.copyPair.addEventListener("click", async () => {
-  const url = el.copyPair.dataset.url || location.origin;
-  try {
-    await navigator.clipboard.writeText(url);
-    el.copyPair.textContent = "COPIED";
-    setTimeout(() => { el.copyPair.textContent = "COPY LINK"; }, 1500);
-  } catch {
-    showNotice(url);
-  }
 });
 
 el.pcLockBtn.addEventListener("click", async () => {
@@ -2026,9 +1976,35 @@ el.accessDeny.addEventListener("click", () => answerAccess(false));
 
 el.micBtn.addEventListener("click", () => {
   unlockAudio();
-  if (rec.starting) rec.cancelStart = true;
-  else if (rec.active) stopListening();
-  else startListening();
+  if (rec.starting) {
+    rec.cancelStart = true;
+  } else if (rec.active) {
+    stopListening();
+  } else if (wakeWord.active || wakeWord.starting) {
+    // Stop wake-word recognition and go straight into voice capture
+    const recognition = wakeWord.recognition;
+    wakeWord.recognition = null;
+    wakeWord.active = false;
+    wakeWord.starting = false;
+    wakeWord.pendingStart = false;
+    try { recognition?.stop(); } catch { /* ignore */ }
+    // Small delay so recognition.onend doesn't fight us
+    setTimeout(() => startListening(), 80);
+  } else if (state.phase === "thinking" || state.streaming) {
+    // Capri is thinking — abort and go straight to listening
+    activeAbort?.abort();
+    speech.stop();
+    state.streaming = false;
+    rec.listenQueued = false;
+    setTimeout(() => startListening(), 120);
+  } else if (speech.busy) {
+    // Capri is speaking — cut her off and listen
+    speech.stop();
+    rec.listenQueued = false;
+    setTimeout(() => startListening(), 80);
+  } else {
+    startListening();
+  }
 });
 
 el.kbBtn.addEventListener("click", () => {
@@ -2057,7 +2033,6 @@ function isTypingTarget(target) {
 document.addEventListener("keydown", (e) => {
   if (e.code === "Escape") {
     if (!el.settings.classList.contains("hidden")) return closeSheet(el.settings);
-    if (!el.pairPanel.classList.contains("hidden")) return;
     if (!el.accessPrompt.classList.contains("hidden")) return;
     if (!el.kbForm.classList.contains("hidden")) return el.kbForm.classList.add("hidden");
     speech.stop();
@@ -2156,10 +2131,6 @@ async function boot() {
     if (el.notice) el.notice.classList.add("hidden");
     state.config = cfg;
     state.scope = cfg.scope;
-
-    if (!cfg.paired && !cfg.local && !cfg.profile?.google && !cfg.google?.configured) {
-      showPair("This device is not paired. Read the code on the PC.");
-    }
 
     if (Array.isArray(cfg.orpheusVoices) && cfg.orpheusVoices.length) {
       state.orpheusVoices = cfg.orpheusVoices;

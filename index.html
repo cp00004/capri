@@ -44,9 +44,24 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=20261027-1723" />
+<link rel="stylesheet" href="styles.css?v=20261029-01" />
 </head>
 <body data-state="idle">
+<!-- Electron frameless window drag bar (hidden on web) -->
+<div id="electronBar" class="electron-bar" style="display:none">
+  <span class="electron-title">CAPRI // CAPRICORN</span>
+  <div class="electron-controls">
+    <button onclick="window.capriNative?.minimize()" title="Minimise">&#x2212;</button>
+    <button onclick="window.capriNative?.maximize()" title="Maximise">&#x25A1;</button>
+    <button onclick="window.capriNative?.close()" title="Hide to tray" class="close-btn">&#x2715;</button>
+  </div>
+</div>
+<script>
+  if (window.capriNative?.isElectron) {
+    var eb = document.getElementById("electronBar");
+    if (eb) eb.style.display = "flex";
+  }
+</script>
 <div id="splash" class="splash">
   <div class="splash-inner">
     <img src="assets/splash.png" alt="Capri" class="splash-logo" onerror="this.src='assets/capri.svg'" />
@@ -78,7 +93,6 @@
     </svg>
   </button>
 </header>
-
 <main class="stage">
   <div class="portrait" id="portraitWrap">
     <div class="hex-glow" aria-hidden="true"></div>
@@ -134,7 +148,7 @@
         <button id="googleBtn" class="pill accent" type="button">SIGN IN WITH GOOGLE</button>
         <button id="signOutBtn" class="pill hidden" type="button">SIGN OUT</button>
       </div>
-      <div id="googleButton" class="google-slot" aria-hidden="true"></div>
+      <div id="googleButton" class="google-slot"></div>
       <button id="googleFallbackBtn" class="pill accent hidden" type="button">SIGN IN WITH GOOGLE (FALLBACK)</button>
       <p class="hint" id="accountHint">Sign in once and your memory follows you to any device.</p>
     </div>
@@ -235,19 +249,6 @@
       </div>
       <p class="hint" id="pcHint">PC control is off for this device.</p>
     </div>
-
-    <div class="field" id="pairField">
-      <span class="label">pair a device</span>
-      <div class="row">
-        <span class="value code" id="pairCode">------</span>
-        <button class="pill" type="button" id="copyPair">COPY LINK</button>
-      </div>
-      <p class="hint" id="pairUrl">open the link on your phone, enter the code</p>
-    </div>
-
-    <div class="field" id="deviceField">
-      <span class="label">paired devices</span>
-      <div id="deviceList" class="devices"><p class="hint">nothing paired yet</p></div>
     </div>
 
     <div class="field">
@@ -274,21 +275,7 @@
   </div>
 </section>
 
-<!-- ================================================= pairing -->
-<section id="pairPanel" class="sheet center hidden" aria-label="Pair device">
-  <div class="sheet-head">
-    <h2>PAIR THIS PHONE</h2>
-  </div>
-  <div class="sheet-body">
-    <p class="hint">On the PC, open Settings and read the six-digit code. Then give her a name.</p>
-    <form id="pairForm" class="stack">
-      <input id="pairName" type="text" placeholder="device name" maxlength="24" value="" />
-      <input id="pairCodeInput" type="tel" inputmode="numeric" placeholder="000000" maxlength="6" autocomplete="one-time-code" />
-      <button class="pill accent" type="submit">LINK ME</button>
-    </form>
-    <p class="hint" id="pairError"></p>
-  </div>
-</section>
+
 
 <!-- ================================================= desktop approval -->
 <section id="accessPrompt" class="sheet center prompt hidden" aria-label="Access request">
@@ -305,17 +292,23 @@
 </section>
 
 <!-- ================================================= download sidebar -->
-<section id="downloadSidebar" class="sheet hidden" aria-label="Download APK">
+<section id="downloadSidebar" class="sheet hidden" aria-label="Download Capri">
   <div class="sheet-head">
-    <h2>Download APK</h2>
+    <h2>DOWNLOAD // CAPRI</h2>
     <button class="icon" type="button" data-close="downloadSidebar" aria-label="Close">&times;</button>
   </div>
   <div class="sheet-body">
-    <p>Get the latest CAPRI Android build (v2):</p>
-    <a href="https://github.com/cp00004/capri/releases/download/v2/app-debug.apk" class="pill accent" download>
+    <p>Android app:</p>
+    <a href="assets/C.A.P.R.Iv1.apk" class="pill accent" download>
       <img src="assets/update-icon.png" alt="download" style="width:24px;height:24px;vertical-align:middle;margin-right:4px;" />
-      Download CAPRI v2 APK
+      Download C.A.P.R.I v1 APK
     </a>
+    <p>Windows desktop app:</p>
+    <a href="https://github.com/cp00004/capri/releases/latest" class="pill accent" target="_blank" rel="noopener">
+      <img src="assets/update-icon.png" alt="download" style="width:24px;height:24px;vertical-align:middle;margin-right:4px;" />
+      Download Capri for Windows
+    </a>
+    <p class="hint">Windows builds are published on GitHub Releases. The Android APK installs straight from this page.</p>
   </div>
 </section>
 
@@ -335,8 +328,6 @@
     document.body.classList.add("ready");
   }, 4500);
 </script>
-<script src="app.js?v=20261028-fix2"></script>
-<!-- Privacy policy link required for Google OAuth branding verification -->
-<a href="https://cp00004.github.io/capri/privacy.html" style="position:absolute;bottom:4px;right:8px;font-size:10px;opacity:0.35;color:#888;text-decoration:none;z-index:1;">Privacy Policy</a>
+<script src="app.js?v=20261029-01"></script>
 </body>
 </html>
