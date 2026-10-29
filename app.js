@@ -131,18 +131,25 @@ function apiUrl(url) {
   return state.apiBase + url;
 }
 
+// Device type travels as a query param so it never trips a CORS preflight on
+// an older server.
+function withDevice(url) {
+  if (url !== "/api/chat") return url;
+  const device = IS_PHONE ? "mobile" : IS_HOSTED_WEB ? "web" : "";
+  if (!device) return url;
+  return `${url}?device=${device}`;
+}
+
 async function api(url, opts = {}) {
   const headers = new Headers(opts.headers || {});
   if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
   if (state.session) headers.set("X-Capri-Profile", state.session);
-  if (IS_PHONE) headers.set("X-Capri-Device", "mobile");
-  else if (IS_HOSTED_WEB) headers.set("X-Capri-Device", "web");
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
   const controller = opts.signal ? null : new AbortController();
   const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
   let res;
   try {
-    res = await fetch(apiUrl(url), { ...opts, headers, signal: opts.signal || controller.signal });
+    res = await fetch(apiUrl(withDevice(url)), { ...opts, headers, signal: opts.signal || controller.signal });
   } finally {
     clearTimeout(timeoutId);
   }
