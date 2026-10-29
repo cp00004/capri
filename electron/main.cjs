@@ -23,10 +23,9 @@ if (!gotLock) {
   process.exit(0);
 } else {
   app.on('second-instance', () => {
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
-    }
+    // A second launch used to vanish: the first window stayed behind whatever
+    // was already on screen. Raise it the same way a taskbar click would.
+    raiseWindow();
   });
 }
 
@@ -39,23 +38,28 @@ const ROOT    = path.join(__dirname, "..");
 const SERVER  = path.join(ROOT, "server.js");
 const ICON    = path.join(ROOT, "public", "assets", "icon-512.png");
 const net = require('net');
-// Determine a free port – fallback if default is occupied
-function isPortFree(p) {
-  try {
-    const tester = net.createServer().listen(p);
-    tester.once('listening', () => tester.close());
-    return true;
-  } catch {
-    return false;
-  }
+// Walk upward until a port can actually be bound. The previous check called
+// listen() and returned before the socket reported in, so a busy port raised
+// EADDRINUSE with no handler and killed the app before any window existed.
+function findFreePort(start, tries = 20) {
+  return new Promise((resolve) => {
+    const attempt = (port, left) => {
+      const tester = net.createServer();
+      tester.once("error", () => {
+        if (left <= 0) return resolve(start);
+        attempt(port + 1, left - 1);
+      });
+      tester.once("listening", () => {
+        const found = tester.address()?.port || port;
+        tester.close(() => resolve(found));
+      });
+      tester.listen(port, "127.0.0.1");
+    };
+    attempt(start, tries);
+  });
 }
-let effectivePort = Number(process.env.PORT || 4173);
-if (!isPortFree(effectivePort)) {
-  effectivePort = effectivePort + 1; // simple fallback to next port
-}
-const PORT = effectivePort;
-
-const APP_URL = `http://localhost:${PORT}`;
+let PORT = Number(process.env.PORT || 4173);
+let APP_URL = `http://localhost:${PORT}`;
 // Her brain, keys and Google memory live on the hosted server, so the window
 // opens that build and drives PC actions over the native bridge. The bundled
 // server stays as an offline fallback so the shell still opens without a link.
@@ -263,6 +267,8 @@ function createWindow() {
     if (usingRemote) win.loadURL(APP_URL).catch(() => {});
   });
 
+  win.once("ready-to-show", () => raiseWindow());
+
   // Google treats "Electron/xx" as an embedded browser and may refuse sign-in.
   const cleanUA = win.webContents.getUserAgent().replace(/\s(Electron|Capri)\/\S+/g, "");
   win.webContents.setUserAgent(cleanUA);
@@ -341,9 +347,19 @@ function createTray() {
   tray.on("double-click", showWindow);
 }
 
-function showWindow() {
-  if (!win) createWindow();
-  else { win.show(); win.focus(); }
+function showWindow() { raiseWindow(); }
+
+// Windows will not let a background process steal focus, so pulse always-on-top
+// for a moment instead of calling focus() alone and hoping.
+function raiseWindow() {
+  if (!win) { createWindow(); return; }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  try { win.setAlwaysOnTop(true); } catch { /* ignore */ }
+  win.focus();
+  setTimeout(() => {
+    try { if (win && !win.isDestroyed()) win.setAlwaysOnTop(false); } catch { /* ignore */ }
+  }, 1200);
 }
 
 function quitApp() {
@@ -470,11 +486,18 @@ ipcMain.handle("capri-open", async (_event, target) => {
 
 // ── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
-  // Request accessibility + full-system access via UAC (handled by manifest/build config)
+  // Pick a bindable port first; the bundled server is only a fallback, so a
+  // failure here must never stop the window from opening.
+  try { PORT = await findFreePort(PORT); } catch { /* keep the default */ }
+  APP_URL = `http://localhost:${PORT}`;
   startServer();
-  createTray();
-  await waitForServer();
+  try { createTray(); } catch (err) { console.warn("[capri] tray unavailable:", err.message); }
+  // Show the window quickly; the bundled server is the fallback, not a gate.
+  await Promise.race([waitForServer(), new Promise((r) => setTimeout(r, 2500))]);
   createWindow();
+}).catch((err) => {
+  console.error("[capri] startup error:", err);
+  if (!win) createWindow();
 });
 
 // Keep alive even when all windows close (lives in tray)
