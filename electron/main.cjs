@@ -274,13 +274,11 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
 
-  win.loadURL(START_URL).catch(() => {
-    if (usingRemote) win.loadURL(APP_URL).catch(() => {});
-  });
-
   win.once("ready-to-show", () => raiseWindow());
 
   // Google treats "Electron/xx" as an embedded browser and may refuse sign-in.
+  // This has to happen BEFORE loadURL: changing the UA mid-navigation aborts
+  // the page and drops the window onto the bundled fallback every launch.
   const cleanUA = win.webContents.getUserAgent().replace(/\s(Electron|Capri)\/\S+/g, "");
   win.webContents.setUserAgent(cleanUA);
   // The GSI popup is a separate webContents and needs the same clean UA.
@@ -307,6 +305,12 @@ function createWindow() {
       `<p style="color:#9ad">No link to the hosted build and the local server did not answer.</p>` +
       `<p><a href="${REMOTE_URL}" style="color:#6ff">retry</a></p></div></body>`
     )).catch(() => {});
+  });
+
+  // Both listeners are in place before the first navigation now.
+  win.loadURL(START_URL).catch((err) => {
+    logLine(`remote load rejected: ${err?.code || err?.message || err}`);
+    if (usingRemote) win.loadURL(APP_URL).catch(() => {});
   });
 
   // Give the page a moment to settle before touching the network again.
