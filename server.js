@@ -58,11 +58,33 @@ const DEVICES_FILE = path.join(DATA_DIR, ".capri-devices.json");
 
 const PORT = Number(process.env.PORT || 4173);
 const MODEL = process.env.CAPRI_MODEL || "openai/gpt-oss-120b";
+// Free tiers cap tokens per minute per model, so when one model is capped the
+// next link in the chain still answers instead of failing the whole turn.
+const GROQ_MODEL_CHAIN = [...new Set([
+  MODEL,
+  ...String(process.env.CAPRI_MODEL_CHAIN || "openai/gpt-oss-20b,llama-3.3-70b-versatile,llama-3.1-8b-instant").split(","),
+].map((m) => m.trim()).filter(Boolean))];
 const GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english";
 const STT_MODEL = process.env.CAPRI_STT_MODEL || "whisper-large-v3-turbo";
 const GROQ_BASE = "https://api.groq.com/openai/v1";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
-const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
+const OPENROUTER_MODEL = process.env.CAPRI_OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
+
+// A key list with commas or newlines gives several free buckets to rotate through.
+function readKeys(...names) {
+  const out = [];
+  for (const name of names) {
+    for (const chunk of String(process.env[name] || "").split(/[\s,;]+/)) {
+      if (chunk) out.push(chunk);
+    }
+  }
+  return [...new Set(out)];
+}
+const GROQ_KEYS = readKeys("GROQ_API_KEY", "GROQ_API_KEYS");
+const GEMINI_KEYS = readKeys("GEMINI_API_KEY", "GEMINI_API_KEYS");
+const OPENROUTER_KEYS = readKeys("OPENROUTER_API_KEY", "OPENROUTER_API_KEYS");
+const GEMINI_KEY = GEMINI_KEYS[0] || "";
 const GEMINI_MODEL = process.env.CAPRI_GEMINI_MODEL || "gemini-3.5-flash";
 const GEMINI_TTS_MODEL = process.env.CAPRI_TTS_MODEL || "gemini-3.8-flash-tts";
 const CHAT_PROVIDER = (process.env.CAPRI_CHAT_PROVIDER || (GEMINI_KEY ? "gemini" : "groq")).toLowerCase();
@@ -490,24 +512,72 @@ function friendlyError(status, raw, provider = "groq") {
   if (status === 401) {
     return provider === "gemini"
       ? "Google rejected the Gemini key. Check GEMINI_API_KEY in .env."
-      : "Groq rejected the key. Check GROQ_API_KEY in .env.";
+      : provider === "openrouter"
+        ? "OpenRouter rejected the key. Check OPENROUTER_API_KEY in .env."
+        : "Groq rejected the key. Check GROQ_API_KEY in .env.";
   }
   if (status === 429) return "Rate limit hit. Give it a minute, choom.";
   if (status === 404) return `Model not available on this key: ${provider === "gemini" ? GEMINI_MODEL : MODEL}`;
   return String(message).slice(0, 400) || `Upstream error ${status}`;
 }
 
-function providerFor(name) {
-  if (name === "gemini" && GEMINI_KEY) {
-    return { name: "gemini", base: GEMINI_BASE, key: GEMINI_KEY, model: GEMINI_MODEL };
-  }
-  return { name: "groq", base: GROQ_BASE, key: process.env.GROQ_API_KEY || "", model: MODEL };
+// ---------------------------------------------------------------- providers
+// Every combination of provider, model and key is a separate free quota
+// bucket. When one is capped we cool it down and move to the next.
+const providerCooldown = new Map();
+
+function candidateId(p) {
+  return `${p.name}|${p.model}|${p.key.slice(-8)}`;
 }
 
-function otherProvider(name) {
-  if (name === "gemini" && process.env.GROQ_API_KEY) return providerFor("groq");
-  if (name !== "gemini" && GEMINI_KEY) return providerFor("gemini");
-  return null;
+function providerCandidates() {
+  const gemini = GEMINI_KEYS.map((key) => ({ name: "gemini", base: GEMINI_BASE, key, model: GEMINI_MODEL }));
+  const groq = [];
+  for (const model of GROQ_MODEL_CHAIN) {
+    for (const key of GROQ_KEYS) groq.push({ name: "groq", base: GROQ_BASE, key, model });
+  }
+  const openrouter = OPENROUTER_KEYS.map((key) => ({ name: "openrouter", base: OPENROUTER_BASE, key, model: OPENROUTER_MODEL }));
+  const primary = CHAT_PROVIDER === "gemini" ? [...gemini, ...groq] : [...groq, ...gemini];
+  return [...primary, ...openrouter];
+}
+
+function orderCandidates() {
+  const now = Date.now();
+  const ready = [];
+  const cooling = [];
+  for (const c of providerCandidates()) {
+    const until = providerCooldown.get(candidateId(c)) || 0;
+    if (until <= now) ready.push(c);
+    else cooling.push({ c, until });
+  }
+  cooling.sort((a, b) => a.until - b.until);
+  return [...ready, ...cooling.map((x) => x.c)];
+}
+
+function coolDown(candidate, seconds) {
+  const wait = Math.min(180, Math.max(5, Math.round(seconds)));
+  providerCooldown.set(candidateId(candidate), Date.now() + wait * 1000);
+  return wait;
+}
+
+function cooldownFrom(err, candidate) {
+  const header = Number(err?.retryAfter);
+  if (Number.isFinite(header) && header > 0) return coolDown(candidate, header);
+  const body = String(err?.body || "");
+  const ms = Number((body.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/) || [])[1]);
+  if (Number.isFinite(ms) && ms > 0) return coolDown(candidate, ms);
+  return coolDown(candidate, 20);
+}
+
+function cappedMessage() {
+  const now = Date.now();
+  let soonest = Infinity;
+  for (const c of providerCandidates()) {
+    const until = providerCooldown.get(candidateId(c)) || 0;
+    if (until > now) soonest = Math.min(soonest, until);
+  }
+  const secs = Number.isFinite(soonest) ? Math.max(1, Math.round((soonest - now) / 1000)) : 30;
+  return `Every relay I have is capped right now. Give me about ${secs} seconds and ask again.`;
 }
 
 // ---------------------------------------------------------------- static
@@ -563,10 +633,15 @@ async function chatCompletion({ provider, messages, tools, signal }) {
     payload.parallel_tool_calls = false;
   }
 
+  const headers = { Authorization: `Bearer ${provider.key}`, "Content-Type": "application/json" };
+  if (provider.name === "openrouter") {
+    headers["HTTP-Referer"] = "https://cp00004.github.io/capri/";
+    headers["X-Title"] = "Capri";
+  }
   const upstream = await fetch(`${provider.base}/chat/completions`, {
     method: "POST",
     signal,
-    headers: { Authorization: `Bearer ${provider.key}`, "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(payload),
   });
 
@@ -576,6 +651,7 @@ async function chatCompletion({ provider, messages, tools, signal }) {
     err.status = upstream.status;
     err.body = raw;
     err.provider = provider.name;
+    err.retryAfter = Number(upstream.headers.get("retry-after") || upstream.headers.get("x-ratelimit-reset-requests") || 0) || 0;
     throw err;
   }
   return upstream;
@@ -689,8 +765,12 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   let useTools = true;
   let spoke = false;
   let finalText = "";
-  let provider = providerFor(CHAT_PROVIDER);
-  let switched = false;
+  const candidates = orderCandidates();
+  let candIdx = 0;
+  let attempts = 0;
+  const maxAttempts = Math.max(1, Math.min(candidates.length, 10));
+  let waitSlept = false;
+  let lastProvider = candidates[0] || { name: CHAT_PROVIDER };
 
   const deviceDefs = [...(mobile ? PHONE_TOOL_DEFS : []), ...(web ? WEB_TOOL_DEFS : [])];
   // A browser or phone caller never reaches this machine's shell, so advertise
@@ -721,22 +801,46 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
 
   for (let step = 0; step < MAX_STEPS; step++) {
     let upstream;
+    let provider;
     try {
+      const candidate = candidates[candIdx % candidates.length];
+      provider = candidate;
+      lastProvider = candidate;
+      attempts += 1;
       upstream = await chatCompletion({
         provider,
         messages,
         tools: useTools ? toolSet : undefined,
         signal: controller.signal,
       });
+      candIdx = 0;
+      waitSlept = false;
     } catch (err) {
       const emsg = String(err.body || err.message || "");
-      // quota, demand spike or a model that vanished: try the other provider once
-      const alternate = switched ? null : otherProvider(provider.name);
-      if (alternate && [401, 404, 429, 500, 503].includes(Number(err.status))) {
-        switched = true;
-        provider = alternate;
+      const status = Number(err.status);
+      const transient = !status || [401, 402, 403, 404, 408, 409, 413, 429, 500, 502, 503, 504, 529].includes(status);
+
+      // A capped or broken bucket: cool it and hand the turn to the next one.
+      if (transient && attempts < maxAttempts) {
+        if (status === 429) {
+          coolDown(provider, Number(err.retryAfter) || 20);
+        } else if (status === 401 || status === 403) {
+          coolDown(provider, 300);
+        } else if (status === 404) {
+          coolDown(provider, 600);
+        }
+        candIdx += 1;
+        // Everything is cooling: wait out the shortest window instead of failing.
+        if (candIdx % candidates.length === 0 && !waitSlept) {
+          waitSlept = true;
+          const wait = Math.min(4000, 600 + attempts * 700);
+          await new Promise((r) => setTimeout(r, wait));
+        }
         step -= 1;
         continue;
+      }
+      if (status === 429) {
+        throw new Error(cappedMessage());
       }
       // Gemini thinking/signature issues - disable tools and retry
       if (/thought_signature|functionCall/i.test(emsg) && useTools) {
@@ -903,7 +1007,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
     sse(res, { type: "delta", text: note });
   }
   if (profile && userText) {
-    addHistory(profile, userText, finalText, { scope: source || "local", provider: provider.name });
+    addHistory(profile, userText, finalText, { scope: source || "local", provider: lastProvider.name });
     sse(res, { type: "profile", profile: profileSummary(profile) });
   }
   sse(res, { type: "done" });
@@ -1004,7 +1108,7 @@ async function handleGoogleSignIn(req, res) {
 }
 
 async function handleChat(req, res, who) {
-  if (!process.env.GROQ_API_KEY && !GEMINI_KEY) {
+  if (!GROQ_KEYS.length && !GEMINI_KEYS.length && !OPENROUTER_KEYS.length) {
     return json(res, 500, { error: "No chat key set. Add GROQ_API_KEY or GEMINI_API_KEY to .env and restart." });
   }
 
@@ -1016,13 +1120,24 @@ async function handleChat(req, res, who) {
   }
 
   const incoming = Array.isArray(body.messages) ? body.messages : [];
-  const history = incoming
+  const recent = incoming
     .slice(-16)
     .map((m) => ({
       role: m?.role === "assistant" ? "assistant" : "user",
       content: String(m?.content ?? "").slice(0, 4000),
     }))
     .filter((m) => m.content.trim().length > 0);
+  // Free tiers meter tokens per minute; a fat history is what pushes a turn
+  // over the cap. Keep the newest exchanges and drop the rest.
+  const HISTORY_CHAR_BUDGET = 9000;
+  const history = [];
+  let usedChars = 0;
+  for (let i = recent.length - 1; i >= 0; i -= 1) {
+    const msg = recent[i];
+    if (history.length >= 4 && usedChars + msg.content.length > HISTORY_CHAR_BUDGET) break;
+    history.unshift(msg);
+    usedChars += msg.content.length;
+  }
 
   if (!history.length) return json(res, 400, { error: "No messages provided." });
 
@@ -1451,8 +1566,9 @@ const handler = async (req, res) => {
       provider: CHAT_PROVIDER,
       ttsModel: GEMINI_KEY ? GEMINI_TTS_MODEL : GROQ_TTS_MODEL,
       sttModel: STT_MODEL,
-      hasKey: Boolean(process.env.GROQ_API_KEY),
-      hasGemini: Boolean(GEMINI_KEY),
+      hasKey: GROQ_KEYS.length > 0,
+      hasGemini: GEMINI_KEYS.length > 0,
+      relays: GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + GEMINI_KEYS.length + OPENROUTER_KEYS.length,
       portrait: fs.existsSync(jpgPortrait)
         ? "assets/capri-portrait.jpg"
         : fs.existsSync(pngPortrait)
