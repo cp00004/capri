@@ -23,3 +23,7 @@ shots/
 
 dist-electron/
 
+
+electron-dist-clean/
+dist-v3/
+build-out/
