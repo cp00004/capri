@@ -229,14 +229,29 @@ async function checkForUpdates() {
     const current = app.getVersion();
     if (!latest || !feed?.windows || cmpVersion(latest, current) <= 0) return;
 
+    // A silent install that never changes the version would reopen, redownload
+    // and quit forever. Two tries, then hand the download link to the user.
+    const state = readUpdateState();
+    const tries = state.version === latest ? Number(state.tries || 0) : 0;
+    if (tries >= 2) {
+      logLine(`update ${latest} failed ${tries} times - asking the user to install`);
+      sendUpdate({ phase: "error", message: "install did not stick", manual: feed.page || "" });
+      return;
+    }
+
     console.log(`[capri] update ${current} -> ${latest}`);
     sendUpdate({ phase: "downloading", version: latest, percent: 0 });
     const file = path.join(app.getPath("temp"), `Capri-${latest}-Setup.exe`);
-    const { bytes } = await downloadFile(feed.windows, file, (percent) => {
-      sendUpdate({ phase: "downloading", version: latest, percent });
-    });
+    // Reuse the previous download when the same version is retried.
+    const have = (() => { try { return fs.statSync(file).size; } catch { return 0; } })();
+    const { bytes } = have > 20 * 1024 * 1024
+      ? { bytes: have }
+      : await downloadFile(feed.windows, file, (percent) => {
+        sendUpdate({ phase: "downloading", version: latest, percent });
+      });
     if (bytes < 20 * 1024 * 1024) throw new Error("installer came down short");
 
+    writeUpdateState({ version: latest, tries: tries + 1, at: Date.now() });
     sendUpdate({ phase: "installing", version: latest });
     const installer = spawn(file, ["/S"], { detached: true, stdio: "ignore", windowsHide: true });
     installer.on("error", (err) => sendUpdate({ phase: "error", message: err.message }));
@@ -244,8 +259,19 @@ async function checkForUpdates() {
     setTimeout(() => { quitting = true; app.exit(0); }, 1800);
   } catch (err) {
     console.warn(`[capri] update check failed: ${err.message}`);
+    logLine(`update failed: ${err.message}`);
     sendUpdate({ phase: "error", message: String(err.message || err) });
   }
+}
+
+function readUpdateState() {
+  try { return JSON.parse(fs.readFileSync(path.join(app.getPath("userData"), "update-state.json"), "utf8")); }
+  catch { return {}; }
+}
+
+function writeUpdateState(state) {
+  try { fs.writeFileSync(path.join(app.getPath("userData"), "update-state.json"), JSON.stringify(state)); }
+  catch { /* best effort */ }
 }
 
 ipcMain.handle("capri-version", () => app.getVersion());

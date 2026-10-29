@@ -2787,7 +2787,15 @@ function initUpdates() {
       } else if (evt.phase === "error") {
         updateUi.dismissed = true;
         if (el.updateScreen) el.updateScreen.classList.add("hidden");
-        showNotice("Update failed. Grab the new build from the download panel.", null, null, 9000);
+        // The shell gives up after a couple of failed installs and hands over
+        // the download page instead of looping.
+        const manual = evt.manual || "";
+        showNotice(
+          manual ? "Update could not install itself. Download it once from here." : "Update failed. Grab the new build from the download panel.",
+          manual || null,
+          manual ? "download" : null,
+          12000
+        );
       }
     });
     return;
