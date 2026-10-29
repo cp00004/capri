@@ -1675,10 +1675,10 @@ const handler = async (req, res) => {
       hasKey: GROQ_KEYS.length > 0,
       hasGemini: GEMINI_KEYS.length > 0,
       relays: FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + MISTRAL_KEYS.length * MISTRAL_MODEL_CHAIN.length + OPENROUTER_KEYS.length,
-      portrait: fs.existsSync(jpgPortrait)
-        ? "assets/capri-portrait.jpg"
-        : fs.existsSync(pngPortrait)
-          ? "assets/capri-portrait.png"
+      portrait: fs.existsSync(pngPortrait)
+        ? "assets/capri-portrait.png"
+        : fs.existsSync(jpgPortrait)
+          ? "assets/capri-portrait.jpg"
           : fs.existsSync(fallbackPortrait)
             ? "assets/capri.png"
             : "assets/capri.svg",
