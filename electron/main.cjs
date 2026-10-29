@@ -55,9 +55,11 @@ if (!isPortFree(effectivePort)) {
 const PORT = effectivePort;
 
 const APP_URL = `http://localhost:${PORT}`;
-// The live build is the memory bank: chats and profiles live on the server,
-// keyed by the Google account. The local server stays as an offline fallback.
-const REMOTE_URL = process.env.CAPRI_REMOTE_URL || "https://capricorn.de.deplexo.com";
+// Default to the local server: loopback needs no pairing, so hands and memory
+// work the moment the app opens. Point CAPRI_START_URL at a paired host to use
+// a shared memory bank instead.
+const REMOTE_URL = process.env.CAPRI_START_URL || "";
+const START_URL = REMOTE_URL || APP_URL;
 
 // Electron ships its own node runtime; ELECTRON_RUN_AS_NODE runs the server
 // with it. The packaged binary is Capri.exe, not electron.exe, so never rely
@@ -69,7 +71,7 @@ let win    = null;
 let tray   = null;
 let server = null;
 let quitting = false;
-let usingRemote = true;
+let usingRemote = Boolean(REMOTE_URL);
 
 // ── Permissions — grant mic + camera without prompting ───────────────────────
 app.whenReady().then(() => {
@@ -156,7 +158,9 @@ function createWindow() {
     },
   });
 
-  win.loadURL(REMOTE_URL).catch(() => {});
+  win.loadURL(START_URL).catch(() => {
+    if (usingRemote) win.loadURL(APP_URL).catch(() => {});
+  });
 
   // Google treats "Electron/xx" as an embedded browser and may refuse sign-in.
   const cleanUA = win.webContents.getUserAgent().replace(/\s(Electron|Capri)\/\S+/g, "");
