@@ -76,28 +76,26 @@ const el = {
   downloadSidebar: $("#downloadSidebar"),
 };
 
-// Determine API base. Use tunnel only on non‑GitHub‑Pages origins.
-const IS_GITHUB_PAGES = location.hostname.includes('github.io');
-// Replace <YOUR-PROXY-URL> with the URL where you deploy the proxy (e.g. https://capri-proxy.vercel.app)
-const PROXY_URL = 'https://<YOUR-PROXY-URL>';
-const DEFAULT_TUNNEL = IS_GITHUB_PAGES ? PROXY_URL : "https://capricorn.de.deplexo.com";
+// Where the API lives. The Node build serves this page, so it can use its own
+// origin. Static builds (GitHub Pages) and the native shell need the tunnel.
+const IS_GITHUB_PAGES = location.hostname.includes("github.io");
+const IS_NATIVE = location.protocol === "capacitor:" || (Boolean(window.Capacitor) && location.hostname === "localhost");
+const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
+const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
-const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
+const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
-const DEFAULT_BACKEND = LOCAL_HOST ? "" : DEFAULT_TUNNEL;
-// Always force to current tunnel on non-local hosts and save it privately
-if (!LOCAL_HOST) {
-  localStorage.setItem(API_KEY, DEFAULT_TUNNEL);
-  localStorage.setItem(SERVER_KEY, DEFAULT_TUNNEL);
-} else if (!LOCAL_HOST && SAVED_TUNNEL && SAVED_BACKEND !== DEFAULT_TUNNEL) {
+const DEFAULT_BACKEND = REMOTE_ONLY ? DEFAULT_TUNNEL : "";
+// Keep static/native builds pointed at the live tunnel.
+if (REMOTE_ONLY) {
   localStorage.setItem(API_KEY, DEFAULT_TUNNEL);
   localStorage.setItem(SERVER_KEY, DEFAULT_TUNNEL);
 }
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
   session: localStorage.getItem(SESSION_KEY) || "",
-  apiBase: DEFAULT_TUNNEL,
+  apiBase: REMOTE_ONLY ? DEFAULT_TUNNEL : (SAVED_BACKEND || ""),
   config: null,
   profile: null,
   voices: [],
