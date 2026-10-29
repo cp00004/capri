@@ -907,7 +907,8 @@ What you can see right now:
 
 
 async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile, web, userKey, activity }) {
-  const banterOn = banterEnabled(profile);
+  // The client's local switch wins, so a signed-out browser still respects it.
+  const banterOn = typeof activity?.banter === "boolean" ? activity.banter : banterEnabled(profile);
   const hands = `${web ? "" : pcLocked ? LOCKED_HANDS : HANDS_ON}${mobile && !pcLocked ? PHONE_HANDS : ""}${web ? WEB_HANDS : ""}`;
   const messages = [
     { role: "system", content: buildSystemPrompt(profile, hands) },
@@ -1373,6 +1374,7 @@ async function handleChat(req, res, who) {
           lastOpen: String(rawAct.lastOpen || "").slice(0, 60),
           openedAgo: Number(rawAct.openedAgo),
           tabFocused: typeof rawAct.tabFocused === "boolean" ? rawAct.tabFocused : undefined,
+          banter: typeof rawAct.banter === "boolean" ? rawAct.banter : undefined,
         }
       : null;
     await runAgent({ history, userText, toolsOn, res, controller, profile, source: who.scope, mobile, web, userKey, activity });

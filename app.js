@@ -1664,6 +1664,7 @@ async function respond(userText) {
           lastOpen: activity.lastOpen,
           openedAgo: activity.lastOpenAt ? Math.round((Date.now() - activity.lastOpenAt) / 1000) : undefined,
           tabFocused: !document.hidden,
+          banter: localStorage.getItem("capri.appBanter") !== "0",
         },
       }),
       signal: activeAbort.signal,
