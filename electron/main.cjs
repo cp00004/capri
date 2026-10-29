@@ -260,10 +260,18 @@ async function checkForUpdates() {
     const installer = spawn("powershell.exe", [
       "-NoProfile", "-WindowStyle", "Hidden", "-Command",
       `Start-Process -FilePath '${quoted}' -ArgumentList '/S' -Verb RunAs`,
-    ], { detached: true, stdio: "ignore", windowsHide: true });
+    ], { stdio: "ignore", windowsHide: true });
     installer.on("error", (err) => sendUpdate({ phase: "error", message: err.message }));
+    installer.on("exit", (code) => {
+      if (code !== 0) {
+        // Declining the UAC prompt must not close the app on them.
+        logLine(`update elevation declined (${code})`);
+        sendUpdate({ phase: "error", message: "elevation declined" });
+        return;
+      }
+      setTimeout(() => { quitting = true; app.exit(0); }, 400);
+    });
     installer.unref();
-    setTimeout(() => { quitting = true; app.exit(0); }, 1800);
   } catch (err) {
     console.warn(`[capri] update check failed: ${err.message}`);
     logLine(`update failed: ${err.message}`);
