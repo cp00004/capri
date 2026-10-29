@@ -250,13 +250,141 @@ function downloadFile(url, dest, onProgress) {
   });
 }
 
+// ── Self-contained updates ───────────────────────────────────────────────────
+// The NSIS setup needs administrator rights, and on this kind of machine the
+// silent install exits without changing anything. Instead a newer build is
+// unpacked next to the user profile and launched from there, so updates need no
+// UAC at all. The installed copy (if any) stays as the permanent fallback and
+// simply hands off to the newest unpacked build on launch.
+const UPD_ROOT = path.join(process.env.LOCALAPPDATA || app.getPath("userData"), "Capri", "versions");
+
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
+}
+function writeJson(file, value) {
+  try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify(value)); }
+  catch { /* best effort */ }
+}
+const readCurrent = () => readJson(path.join(UPD_ROOT, "current.json"));
+const writeCurrent = (value) => writeJson(path.join(UPD_ROOT, "current.json"), value);
+const readHandoff = () => readJson(path.join(UPD_ROOT, "handoff.json"));
+const writeHandoff = (value) => writeJson(path.join(UPD_ROOT, "handoff.json"), value);
+
+function launchLater(exe) {
+  // The old process has to let go of the single-instance lock first.
+  const quoted = exe.replace(/"/g, '""');
+  spawn(process.env.ComSpec || "cmd.exe", ["/c", `timeout /t 2 /nobreak >nul & start "" "${quoted}"`], {
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+  }).unref();
+}
+
+function handoffToNewer() {
+  const current = readCurrent();
+  if (!current?.dir) return false;
+  const exe = path.join(current.dir, "Capri.exe");
+  if (cmpVersion(current.version, app.getVersion()) <= 0) {
+    try { fs.unlinkSync(path.join(UPD_ROOT, "handoff.json")); } catch { /* nothing to clear */ }
+    if (!fs.existsSync(exe)) { try { fs.unlinkSync(path.join(UPD_ROOT, "current.json")); } catch { /* ignore */ } }
+    return false;
+  }
+  if (!fs.existsSync(exe)) {
+    try { fs.unlinkSync(path.join(UPD_ROOT, "current.json")); } catch { /* ignore */ }
+    return false;
+  }
+  // If the handoff just happened and we are running again, the newer copy never
+  // came up. Forget it instead of handing off in a loop.
+  const previous = readHandoff();
+  if (previous?.version === current.version && Date.now() - Number(previous.at || 0) < 120000) {
+    try { fs.unlinkSync(path.join(UPD_ROOT, "current.json")); } catch { /* ignore */ }
+    logLine(`handoff to ${current.version} did not stick - staying on ${app.getVersion()}`);
+    return false;
+  }
+  writeHandoff({ version: current.version, at: Date.now() });
+  logLine(`handing off to ${current.version} (${exe})`);
+  launchLater(exe);
+  setTimeout(() => { quitting = true; app.exit(0); }, 400);
+  return true;
+}
+
+function extractZip(zip, dir) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("tar.exe", ["-xf", zip, "-C", dir], { stdio: "ignore", windowsHide: true });
+    child.on("error", reject);
+    child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`unzip exited ${code}`))));
+  });
+}
+
+function pruneOldVersions(keepDir) {
+  try {
+    for (const name of fs.readdirSync(UPD_ROOT)) {
+      const full = path.join(UPD_ROOT, name);
+      if (full === keepDir || name === "current.json" || name === "handoff.json") continue;
+      try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* in use */ }
+    }
+  } catch { /* nothing unpacked yet */ }
+}
+
+async function installOverlay(feed, latest) {
+  const dir = path.join(UPD_ROOT, latest);
+  const zip = path.join(app.getPath("temp"), `Capri-${latest}-win.zip`);
+  sendUpdate({ phase: "downloading", version: latest, percent: 0 });
+  const progress = (percent) => sendUpdate({ phase: "downloading", version: latest, percent });
+  let bytes = (() => { try { return fs.statSync(zip).size; } catch { return 0; } })();
+
+  if (bytes < 50 * 1024 * 1024) {
+    try {
+      ({ bytes } = await downloadFile(feed.windowsZip, zip, progress));
+    } catch (err) {
+      logLine(`update: zip download failed (${err.message}) - retrying once`);
+      await new Promise((r) => setTimeout(r, 3000));
+      ({ bytes } = await downloadFile(feed.windowsZip, zip, progress));
+    }
+  }
+  if (bytes < 50 * 1024 * 1024) throw new Error("update package came down short");
+
+  sendUpdate({ phase: "installing", version: latest });
+  logLine(`update: unpacking ${latest}`);
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* fresh dir */ }
+  fs.mkdirSync(dir, { recursive: true });
+  await extractZip(zip, dir);
+  const exe = path.join(dir, "Capri.exe");
+  if (!fs.existsSync(exe)) throw new Error("update package had no Capri.exe");
+
+  writeCurrent({ version: latest, dir });
+  logLine(`update: ${latest} ready, relaunching`);
+  launchLater(exe);
+  setTimeout(() => { quitting = true; app.exit(0); }, 600);
+}
+
 async function checkForUpdates() {
   if (usingRemote === false) return; // offline fallback, no point
   try {
     const feed = await fetchJson(`${UPDATE_FEED}?t=${Date.now()}`);
     const latest = String(feed?.version || "");
     const current = app.getVersion();
-    if (!latest || !feed?.windows || cmpVersion(latest, current) <= 0) return;
+    if (!latest || cmpVersion(latest, current) <= 0) return;
+
+    // Unpacked builds need no administrator, so prefer them over the setup.
+    if (feed?.windowsZip) {
+      if (readUpdateState().version === latest && Number(readUpdateState().tries || 0) >= 2) {
+        logLine(`update ${latest} failed twice - asking the user to install`);
+        sendUpdate({ phase: "error", message: "install did not stick", manual: feed.page || "" });
+        return;
+      }
+      logLine(`update: ${current} -> ${latest} (unpacked)`);
+      writeUpdateState({ version: latest, tries: Number(readUpdateState().tries || 0) + 1, at: Date.now() });
+      try {
+        await installOverlay(feed, latest);
+      } catch (err) {
+        logLine(`update: unpacked install failed (${err.message})`);
+        sendUpdate({ phase: "error", message: String(err.message || err) });
+      }
+      return;
+    }
+
+    if (!feed?.windows) return;
 
     // A silent install that never changes the version would reopen, redownload
     // and quit forever. Two tries, then hand the download link to the user.
@@ -671,6 +799,8 @@ ipcMain.handle("capri-open", async (_event, target) => {
 // ── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   logLine(`start v${app.getVersion()} pid=${process.pid} electron=${process.versions.electron}`);
+  if (handoffToNewer()) return;
+  pruneOldVersions(readCurrent()?.dir || "");
   // Pick a bindable port first; the bundled server is only a fallback, so a
   // failure here must never stop the window from opening.
   try { PORT = await findFreePort(PORT); } catch { /* keep the default */ }

@@ -1,6 +1,6 @@
 {
   "name": "capri",
-  "version": "4.0.6",
+  "version": "4.0.7",
   "private": true,
   "type": "module",
   "description": "Capri - a voice-first personality construct with hands on your PC",
@@ -61,6 +61,12 @@
       "target": [
         {
           "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
           "arch": [
             "x64"
           ]
