@@ -984,6 +984,7 @@ function setWakeWordEnabled(enabled) {
     wakeWord.capture = "";
     clearTimeout(wakeWord.decideTimer);
     wakeWord.decideTimer = null;
+    if (cmdRec.active) stopCommandRec();
     const recognition = wakeWord.recognition;
     wakeWord.recognition = null;
     wakeWord.active = false;
@@ -1085,8 +1086,87 @@ function finishWake() {
   // Only the name was said: the mic opens in onend and records the order.
 }
 
+/* After "Capri", listen for the order with the same engine that heard the
+   wake word. No recorder handoff, no server transcription in the way. */
+const cmdRec = { active: false, rec: null, timer: null, text: "" };
+
+function stopCommandRec() {
+  clearTimeout(cmdRec.timer);
+  cmdRec.timer = null;
+  const r = cmdRec.rec;
+  cmdRec.active = false;
+  cmdRec.rec = null;
+  try { r?.stop(); } catch { /* already stopped */ }
+}
+
+function listenForCommand() {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) return startListening();
+  if (rec.active || rec.starting || cmdRec.active || state.streaming || state.phase === "thinking") return;
+
+  const r = new Recognition();
+  cmdRec.active = true;
+  cmdRec.rec = r;
+  cmdRec.text = "";
+  const alreadyChimed = wakeWord.chimed;
+  wakeWord.chimed = false;
+  r.lang = "en-US";
+  r.continuous = true;
+  r.interimResults = true;
+  setPhase("listening");
+  clearHeard();
+  if (!alreadyChimed) playListeningChime();
+
+  const finish = (text) => {
+    if (!cmdRec.active) return;
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    stopCommandRec();
+    if (clean) {
+      showHeard(clean);
+      respond(clean);
+    } else {
+      setPhase("idle");
+      resumeWakeWord();
+    }
+  };
+
+  r.onresult = (event) => {
+    let text = "";
+    let final = false;
+    for (let i = 0; i < event.results.length; i += 1) {
+      text += ` ${event.results[i][0]?.transcript || ""}`;
+      if (event.results[i].isFinal) final = true;
+    }
+    cmdRec.text = text.trim();
+    if (cmdRec.text) showHeard(cmdRec.text);
+    if (final) {
+      clearTimeout(cmdRec.timer);
+      cmdRec.timer = setTimeout(() => finish(cmdRec.text), 500);
+    }
+  };
+  r.onerror = (event) => {
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      showNotice("Allow microphone access for voice commands, then try again.", null, null, 8000);
+    }
+    finish(cmdRec.text);
+  };
+  r.onend = () => {
+    if (!cmdRec.active) return;
+    const heard = cmdRec.text;
+    setTimeout(() => finish(heard), 150);
+  };
+
+  cmdRec.timer = setTimeout(() => finish(cmdRec.text), 9000);
+  try {
+    r.start();
+  } catch {
+    stopCommandRec();
+    startListening();
+  }
+}
+
 function startWakeWord() {
-  if (!wakeWord.enabled || document.hidden || wakeWord.active || wakeWord.starting || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
+  if (!wakeWord.enabled || document.hidden || wakeWord.active || wakeWord.starting || cmdRec.active || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
     setWakeWordEnabled(false);
@@ -1145,12 +1225,12 @@ function startWakeWord() {
     wakeWord.starting = false;
     paintWakeWord();
     if (wakeWord.pendingStart && wakeWord.enabled && !document.hidden) {
-      // The wake utterance ended: open the mic for the order.
+      // The wake utterance ended: listen for the order.
       wakeWord.pendingStart = false;
       wakeWord.capture = "";
       clearTimeout(wakeWord.decideTimer);
       wakeWord.decideTimer = null;
-      setTimeout(() => startListening(), 260);
+      setTimeout(() => listenForCommand(), 420);
     } else if (owned && wakeWord.enabled && !document.hidden) {
       setTimeout(startWakeWord, 900);
     } else if (!rec.active && !state.streaming) {
@@ -1177,6 +1257,7 @@ paintWakeWord();
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     try { wakeWord.recognition?.stop(); } catch { /* already stopped */ }
+    if (cmdRec.active) stopCommandRec();
   } else if (wakeWord.pendingStart && wakeWord.enabled) {
     wakeWord.pendingStart = false;
     wakeWord.capture = "";
@@ -2269,6 +2350,9 @@ el.micBtn.addEventListener("click", () => {
     rec.cancelStart = true;
   } else if (rec.active) {
     stopListening();
+  } else if (cmdRec.active) {
+    stopCommandRec();
+    setTimeout(() => startListening(), 80);
   } else if (wakeWord.active || wakeWord.starting) {
     // Stop wake-word recognition and go straight into voice capture
     const recognition = wakeWord.recognition;
