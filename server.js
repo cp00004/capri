@@ -814,7 +814,8 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         tools: useTools ? toolSet : undefined,
         signal: controller.signal,
       });
-      candIdx = 0;
+      candIdx %= candidates.length; // keep using the relay that just answered
+      attempts = 0;
       waitSlept = false;
     } catch (err) {
       const emsg = String(err.body || err.message || "");
