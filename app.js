@@ -1377,7 +1377,7 @@ async function transcribe(blob) {
 
 /* ---------------------------------------------------------------- phone hands */
 
-let lastOpen = { key: "", at: 0 };
+const recentOpens = [];
 
 function openKey(target) {
   return String(target || "")
@@ -1385,19 +1385,35 @@ function openKey(target) {
     .replace(/^https?:\/\//, "")
     .replace(/^www\./, "")
     .replace(/\/+$/, "")
+    .replace(/\.(com|org|net|io|tv|co|app|gg|dev|me|so|xyz)(?=\/|$)/, "")
     .replace(/\s+(app|website|site)$/, "")
+    .replace(/[^a-z0-9.]/g, "")
     .trim();
+}
+
+// Quick-open and a model tool call can both name the same site in one turn.
+function openedRecently(key, now) {
+  if (!key) return false;
+  for (let i = recentOpens.length - 1; i >= 0; i -= 1) {
+    const seen = recentOpens[i];
+    if (now - seen.at > 6000) {
+      recentOpens.splice(i, 1);
+      continue;
+    }
+    if (seen.key === key) return true;
+    if (key.length >= 3 && seen.key.length >= 3 && (seen.key.includes(key) || key.includes(seen.key))) return true;
+  }
+  return false;
 }
 
 function openOnDevice(args = {}) {
   const target = String(args.target ?? args.name ?? args.app ?? args.query ?? args.url ?? "").trim();
   if (!target) return false;
 
-  // Quick-open and a model tool call can both name the same site in one turn.
   const key = openKey(target);
   const now = Date.now();
-  if (key && key === lastOpen.key && now - lastOpen.at < 6000) return true;
-  lastOpen = { key, at: now };
+  if (openedRecently(key, now)) return true;
+  recentOpens.push({ key, at: now });
 
   if (window.capriNative && typeof window.capriNative.openTarget === "function") {
     try { window.capriNative.openTarget(target); return true; } catch { /* fall through */ }
