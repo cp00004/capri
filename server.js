@@ -843,7 +843,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   let finalText = "";
   const ownKey = userKeyCandidates(userKey);
   const candidates = [...ownKey, ...orderCandidates()];
-  if (!candidates.length) throw new Error("No chat key is set. Add GROQ_API_KEY or GEMINI_API_KEY in the hosting panel.");
+  if (!candidates.length) throw new Error("No chat key is set. Add GROQ_API_KEY, MISTRAL_API_KEY or FREETHEAI_API_KEY in the hosting panel.");
   let candIdx = 0;
   let attempts = 0;
   const maxAttempts = Math.max(1, Math.min(candidates.length, 10));
