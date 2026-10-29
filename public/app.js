@@ -1251,6 +1251,17 @@ function openOnPhone(args = {}) {
     } catch { /* fall through to browser intents */ }
   }
 
+  const digits = target.replace(/[^\d+]/g, "");
+  if (/\b(call|dial|ring|text|sms|message)\b/i.test(target) && digits.replace(/\D/g, "").length >= 3) {
+    location.href = `${/\b(text|sms|message)\b/i.test(target) ? "sms" : "tel"}:${digits}`;
+    return true;
+  }
+  const mail = target.match(/[\w.+-]+@[\w.-]+\.[a-z]{2,}/i);
+  if (mail) {
+    location.href = `mailto:${mail[0]}`;
+    return true;
+  }
+
   if (/^(https?:|tel:|sms:|mailto:)/i.test(target)) {
     location.href = target;
     return true;

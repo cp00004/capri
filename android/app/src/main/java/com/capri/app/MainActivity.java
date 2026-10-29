@@ -109,6 +109,18 @@ public class MainActivity extends BridgeActivity {
 			}
 		}
 
+		String digits = raw.replaceAll("[^0-9+]", "");
+		boolean wantsText = lower.contains("text") || lower.contains("sms") || lower.contains("message");
+		if ((wantsText || lower.contains("call") || lower.contains("dial") || lower.contains("ring"))
+				&& digits.replaceAll("[^0-9]", "").length() >= 3) {
+			return openUri(Uri.parse((wantsText ? "sms:" : "tel:") + digits), raw);
+		}
+		java.util.regex.Matcher mail = java.util.regex.Pattern
+				.compile("[\\w.+-]+@[\\w.-]+\\.[A-Za-z]{2,}").matcher(raw);
+		if (mail.find()) {
+			return openUri(Uri.parse("mailto:" + mail.group()), raw);
+		}
+
 		if (lower.equals("settings") || lower.endsWith(" settings")) {
 			return openAction(Settings.ACTION_SETTINGS);
 		}
