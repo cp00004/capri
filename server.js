@@ -919,6 +919,11 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
     refreshActiveWindow();
     const sight = sightBlock(activity, knownWindow());
     if (sight) messages.splice(1, 0, { role: "system", content: sight });
+  } else {
+    messages.splice(1, 0, {
+      role: "system",
+      content: "app_banter is off right now: no teasing, no comments about the app or what they are doing. One flat confirmation at most.",
+    });
   }
 
   let toolBudget = MAX_TOOL_CALLS;
