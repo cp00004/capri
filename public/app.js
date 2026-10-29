@@ -83,7 +83,7 @@ const IS_NATIVE = location.protocol === "capacitor:" || (Boolean(window.Capacito
 const IS_PHONE = IS_NATIVE || /android|iphone|ipod|ipad|mobile/i.test(navigator.userAgent);
 const IS_DESKTOP_APP = Boolean(window.capriNative?.isElectron);
 // Pages served from a remote host can't touch this machine from the server side.
-const IS_HOSTED_WEB = !IS_NATIVE && !IS_DESKTOP_APP && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+const IS_HOSTED_WEB = !IS_NATIVE && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
 const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 

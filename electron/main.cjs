@@ -55,6 +55,9 @@ if (!isPortFree(effectivePort)) {
 const PORT = effectivePort;
 
 const APP_URL = `http://localhost:${PORT}`;
+// The live build is the memory bank: chats and profiles live on the server,
+// keyed by the Google account. The local server stays as an offline fallback.
+const REMOTE_URL = process.env.CAPRI_REMOTE_URL || "https://capricorn.de.deplexo.com";
 
 // Find the bundled node binary (same one running Electron)
 const NODE_BIN = process.execPath.replace("electron.exe", "node.exe");
@@ -65,6 +68,7 @@ let win    = null;
 let tray   = null;
 let server = null;
 let quitting = false;
+let usingRemote = true;
 
 // ── Permissions — grant mic + camera without prompting ───────────────────────
 app.whenReady().then(() => {
@@ -151,7 +155,15 @@ function createWindow() {
     },
   });
 
-  win.loadURL(APP_URL);
+  win.loadURL(REMOTE_URL).catch(() => {});
+
+  win.webContents.on("did-fail-load", (_event, code, description, failedUrl, isMainFrame) => {
+    if (!isMainFrame || !usingRemote) return;
+    if (code === -3) return; // aborted, not a real outage
+    console.warn(`[capri] remote load failed (${code} ${description}) — using the local build`);
+    usingRemote = false;
+    win.loadURL(APP_URL).catch(() => {});
+  });
 
   // ── Google OAuth popup handling ──────────────────────────────────────────
   // Google GSI opens a popup to accounts.google.com — allow it
