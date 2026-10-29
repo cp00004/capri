@@ -23,11 +23,6 @@ const el = {
   kbInput: $("#kbInput"),
   settingsBtn: $("#settingsBtn"),
   settings: $("#settings"),
-  pairPanel: $("#pairPanel"),
-  pairForm: $("#pairForm"),
-  pairName: $("#pairName"),
-  pairCode: $("#pairCodeInput"),
-  pairError: $("#pairError"),
   voiceSelect: $("#voiceSelect"),
   voiceBtn: $("#voiceBtn"),
   voiceLabel: $("#voiceLabel"),
@@ -38,12 +33,6 @@ const el = {
   pcHint: $("#pcHint"),
   accessBtn: $("#accessBtn"),
   pcLockBtn: $("#pcLockBtn"),
-  pairField: $("#pairField"),
-  pairCodeText: $("#pairCode"),
-  pairUrl: $("#pairUrl"),
-  copyPair: $("#copyPair"),
-  deviceField: $("#deviceField"),
-  deviceList: $("#deviceList"),
   auditField: $("#auditField"),
   auditList: $("#auditList"),
   stopBtn: $("#stopBtn"),
@@ -154,7 +143,7 @@ async function api(url, opts = {}) {
     clearTimeout(timeoutId);
   }
   if (res.status === 401) {
-    if (state.token) showPair("That device link expired. Connect again with Google.");
+    if (state.token) showNotice("That link expired. Sign in with Google again.", null, null, 8000);
     if (state.session) {
       state.session = "";
       localStorage.removeItem(SESSION_KEY);
@@ -1302,37 +1291,6 @@ async function respond(userText) {
 /* ---------------------------------------------------------------- audio unlock */
 
 let unlocked = false;
-function initGoogleButton() {
-  const googleBtn = document.getElementById('googleBtn');
-  if (!googleBtn) return;
-  // Remove previous listeners by cloning
-  const fresh = googleBtn.cloneNode(true);
-  googleBtn.parentNode.replaceChild(fresh, googleBtn);
-  const btn = document.getElementById('googleBtn');
-  btn.addEventListener('click', async () => {
-    try {
-      if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.SocialLogin) {
-        const result = await window.Capacitor.Plugins.SocialLogin.login({
-          provider: 'google',
-          options: { scopes: ['profile', 'email'] }
-        });
-        state.google = result;
-        el.googleBtn.classList.add('hidden');
-        el.signOutBtn.classList.remove('hidden');
-      } else {
-        // fallback opens Google OAuth URL (replace with your actual client id if needed)
-        const clientId = '240583618801-6l8bpgneim3nfker6kbbbj4brt2gjrg2.apps.googleusercontent.com';
-        const redirectUri = encodeURIComponent(window.location.origin);
-        const scope = encodeURIComponent('profile email');
-        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${redirectUri}&response_type=token&scope=${scope}`;
-        window.open(authUrl, '_blank');
-      }
-    } catch (e) {
-      console.error('Google sign‑in failed', e);
-      alert('Google sign‑in could not start.');
-    }
-  });
-}
 function unlockAudio() {
   if (unlocked) return;
   unlocked = true;
@@ -1390,60 +1348,12 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
 });
 
 /* ---------------------------------------------------------------- download */
-el.downloadBtn?.addEventListener("click", () => {
-  if (el.downloadSidebar.classList.contains("hidden")) {
-    openSheet(el.downloadSidebar);
-  } else {
-    closeSheet(el.downloadSidebar);
-  }
-});
-
-function showPair(message) {
-  if (message) el.pairError.textContent = message;
-  openSheet(el.pairPanel);
+function toggleDownloadSheet() {
+  if (!el.downloadSidebar) return;
+  if (el.downloadSidebar.classList.contains("hidden")) openSheet(el.downloadSidebar);
+  else closeSheet(el.downloadSidebar);
 }
-
-el.pairForm.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const code = el.pairCode.value.replace(/\D/g, "").slice(0, 6);
-  const name = el.pairName.value.trim() || "phone";
-  if (code.length !== 6) {
-    el.pairError.textContent = "Six digits, like the one on the PC screen.";
-    return;
-  }
-  el.pairError.textContent = "linking…";
-  try {
-    const res = await fetch(apiUrl("/api/pair"), {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(state.apiBase.includes(".loca.lt") ? { "Bypass-Tunnel-Reminder": "1" } : {}),
-      },
-      body: JSON.stringify({ code, name }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      el.pairError.textContent = data.message || "That did not work.";
-      return;
-    }
-    state.token = data.token;
-    localStorage.setItem(TOKEN_KEY, data.token);
-    localStorage.setItem("capri.name", data.name || name);
-    closeSheet(el.pairPanel);
-    await boot();
-    const splashBar = document.getElementById('splashBar');
-    if (splashBar) splashBar.classList.add('hidden');
-    if (state.scope === "full") {
-      typer.reset("Locked on. I have your chrome.");
-      speech.enqueue("Locked on. I have your chrome.");
-    } else {
-      typer.reset("Paired. Voice only for now.");
-      speech.enqueue("Paired. Voice only for now.");
-    }
-  } catch (err) {
-    el.pairError.textContent = `No link: ${err.message}`;
-  }
-});
+el.downloadBtn?.addEventListener("click", toggleDownloadSheet);
 
 /* ---------------------------------------------------------------- profile */
 
