@@ -46,6 +46,7 @@
                   "artifactName":  "Capri-v3-Setup.${ext}",
                   "copyright":  "Project Capricorn",
                   "asar":  false,
+                  "electronDist":  "node_modules/electron/dist",
 
                   "files":  [
                                 "electron/**/*",
