@@ -1627,6 +1627,18 @@ function toggleDownloadSheet() {
 }
 el.downloadBtn?.addEventListener("click", toggleDownloadSheet);
 
+// In the desktop app, hand installer links to the system browser so the
+// download runs where the user can see it.
+document.querySelectorAll(".dl-card").forEach((card) => {
+  card.addEventListener("click", (event) => {
+    if (!window.capriNative?.openTarget) return;
+    const href = card.getAttribute("href") || "";
+    if (!/^https?:/i.test(href)) return;
+    event.preventDefault();
+    window.capriNative.openTarget(href);
+  });
+});
+
 /* ---------------------------------------------------------------- profile */
 
 function applyProfile(profile) {

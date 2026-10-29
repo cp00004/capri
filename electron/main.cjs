@@ -237,6 +237,43 @@ ipcMain.on("win-maximize", () => win?.isMaximized() ? win.unmaximize() : win?.ma
 ipcMain.on("win-close",    () => win?.hide());
 ipcMain.on("win-quit",     () => quitApp());
 
+// ── IPC — open apps and sites on this PC ─────────────────────────────────────
+const APP_SCHEMES = {
+  discord: "discord://", spotify: "spotify://", steam: "steam://open/main",
+  telegram: "tg://", whatsapp: "whatsapp://", slack: "slack://open",
+  zoom: "zoommtg://", obs: "obs64.exe", teams: "msteams://",
+  youtube: "https://www.youtube.com", twitch: "https://www.twitch.tv",
+  netflix: "https://www.netflix.com", reddit: "https://www.reddit.com",
+  twitter: "https://x.com", x: "https://x.com", instagram: "https://www.instagram.com",
+  gmail: "https://mail.google.com", maps: "https://maps.google.com",
+  github: "https://github.com", chatgpt: "https://chatgpt.com",
+};
+
+ipcMain.handle("capri-open", async (_event, target) => {
+  const raw = String(target || "").trim();
+  if (!raw) return "err:empty";
+  const key = raw.toLowerCase().replace(/\s+/g, " ").trim();
+
+  if (/^(https?:|mailto:|tel:|sms:)/i.test(raw)) {
+    await shell.openExternal(raw);
+    return "ok";
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
+    try { await shell.openExternal(raw); return "ok"; } catch { /* fall through */ }
+  }
+  if (APP_SCHEMES[key]) {
+    try { await shell.openExternal(APP_SCHEMES[key]); return "ok"; } catch { /* fall through */ }
+  }
+  try {
+    const child = spawn("cmd.exe", ["/c", "start", "", raw], { detached: true, stdio: "ignore", windowsHide: true });
+    child.on("error", () => {});
+    child.unref();
+    return "ok";
+  } catch (err) {
+    return `err:${err?.message || err}`;
+  }
+});
+
 // ── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
   // Request accessibility + full-system access via UAC (handled by manifest/build config)

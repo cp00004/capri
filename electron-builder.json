@@ -1,6 +1,7 @@
 ﻿{
   "appId": "com.capricorn.capri",
   "productName": "Capri",
+  "artifactName": "Capri-v3-Setup.${ext}",
   "copyright": "Project Capricorn",
   "asar": false,
   "files": [
