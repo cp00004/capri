@@ -1641,7 +1641,7 @@ const handler = async (req, res) => {
       sttModel: STT_MODEL,
       hasKey: GROQ_KEYS.length > 0,
       hasGemini: GEMINI_KEYS.length > 0,
-      relays: FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + OPENROUTER_KEYS.length,
+      relays: FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + MISTRAL_KEYS.length * MISTRAL_MODEL_CHAIN.length + OPENROUTER_KEYS.length,
       portrait: fs.existsSync(jpgPortrait)
         ? "assets/capri-portrait.jpg"
         : fs.existsSync(pngPortrait)
