@@ -159,12 +159,23 @@ async function api(url, opts = {}) {
       state.session = "";
       localStorage.removeItem(SESSION_KEY);
     }
+    if (url === "/api/chat") nudgeSignIn();
     throw new Error("unauthorized");
   }
   return res;
 }
 
 /* ---------------------------------------------------------------- phase */
+
+// Pages and the native shell have no paired-device token, so a Google session
+// is the only key to chat and memory. Say that once instead of failing silently.
+let authNudged = false;
+function nudgeSignIn() {
+  if (!REMOTE_ONLY || authNudged || state.session) return;
+  authNudged = true;
+  showNotice("Sign in with Google so she can reach her memory.", null, null, 9000);
+  if (el.settings?.classList.contains("hidden")) openSheet(el.settings);
+}
 
 const PHASES = {
   idle: { tag: "online", hint: "tap or hold space to talk" },
