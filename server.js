@@ -678,6 +678,12 @@ async function chatCompletion({ provider, messages, tools, signal }) {
     payload.reasoning_effort = "none";
     // Some endpoints don't accept thinking_config; try without first, rely on reasoning_effort
   }
+  if (provider.name === "mistral") {
+    // large-4 thinks before every line; "low" keeps it snappy. Smaller Ministral
+    // models reject the field outright, so only send it where it is accepted.
+    payload.max_tokens = 1400;
+    if (/large|medium|magistral/i.test(provider.model)) payload.reasoning_effort = "low";
+  }
   if (tools) {
     payload.tools = tools;
     payload.tool_choice = "auto";
