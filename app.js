@@ -101,7 +101,7 @@ const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.0.4";
+const APP_VERSION = "4.0.5";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -2247,8 +2247,57 @@ function syncGoogleUi() {
   }
 }
 
+// Embedded webviews (Electron, the Android shell) cannot host Google's sign-in
+// UI, so both of those hand the job to the system browser, which has the user's
+// real Google sessions and therefore their account list.
+const SIGNIN_PAGE_URL = "https://cp00004.github.io/capri/auth.html";
+
+async function startBrowserSignIn() {
+  if (window.capriNative?.googleSignIn) {
+    showNotice("Pick your Google account in the browser window that just opened.", null, null, 9000);
+    try {
+      const result = await window.capriNative.googleSignIn();
+      if (result?.credential) {
+        await handleGoogleCredential({ credential: result.credential });
+      } else if (result?.error) {
+        showNotice(`Google sign-in stopped: ${result.error}.`, null, null, 9000);
+      }
+    } catch (err) {
+      showNotice(`Google sign-in failed: ${err?.message || err}.`, null, null, 9000);
+    }
+    return true;
+  }
+  const capacitor = window.Capacitor;
+  if (capacitor?.isNativePlatform?.()) {
+    const browser = capacitor.Plugins?.Browser;
+    if (!browser) return false;
+    showNotice("Pick your Google account in the browser, then come back to Capri.", null, null, 9000);
+    try {
+      await browser.open({ url: `${SIGNIN_PAGE_URL}?mode=app` });
+    } catch (err) {
+      showNotice(`Could not open the browser: ${err?.message || err}.`, null, null, 8000);
+    }
+    return true;
+  }
+  return false;
+}
+
+// Android returns through capri://auth#credential=… once the browser is done.
+if (window.Capacitor?.isNativePlatform?.() && window.Capacitor.Plugins?.App) {
+  window.Capacitor.Plugins.App.addListener("appUrlOpen", (event) => {
+    const url = String(event?.url || "");
+    if (!url.startsWith("capri://auth")) return;
+    const raw = url.includes("#") ? url.slice(url.indexOf("#") + 1) : url.split("?")[1] || "";
+    const credential = new URLSearchParams(raw).get("credential");
+    if (!credential) return;
+    try { window.Capacitor.Plugins.Browser?.close?.(); } catch { /* tab is gone */ }
+    handleGoogleCredential({ credential });
+  });
+}
+
 // One tap from the main screen: the account sheet plus Google's own button.
 el.signInPill?.addEventListener("click", async () => {
+  if (await startBrowserSignIn()) return;
   await renderGoogle();
   if (el.settings.classList.contains("hidden")) openSheet(el.settings);
   setTimeout(() => el.googleBtn?.click(), 220);
@@ -2262,6 +2311,7 @@ el.googleBtn?.addEventListener("click", async () => {
     );
     return;
   }
+  if (await startBrowserSignIn()) return;
   await renderGoogle();
   if (googleButtonRendered()) {
     el.googleButton.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -2275,7 +2325,8 @@ el.googleBtn?.addEventListener("click", async () => {
   }
 });
 
-googleFallbackBtn?.addEventListener("click", () => {
+googleFallbackBtn?.addEventListener("click", async () => {
+  if (await startBrowserSignIn()) return;
   if (googleButtonRendered()) {
     el.googleButton.querySelector('div[role="button"]')?.click();
   } else if (window.google?.accounts?.id) {
@@ -2787,7 +2838,15 @@ function initUpdates() {
       } else if (evt.phase === "error") {
         updateUi.dismissed = true;
         if (el.updateScreen) el.updateScreen.classList.add("hidden");
-        showNotice("Update failed. Grab the new build from the download panel.", null, null, 9000);
+        // The shell gives up after a couple of failed installs and hands over
+        // the download page instead of looping.
+        const manual = evt.manual || "";
+        showNotice(
+          manual ? "Update could not install itself. Download it once from here." : "Update failed. Grab the new build from the download panel.",
+          manual || null,
+          manual ? "download" : null,
+          12000
+        );
       }
     });
     return;
