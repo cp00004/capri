@@ -85,7 +85,9 @@ function getAllowedOrigins() {
     .split(",")
     .map((s) => s.trim().replace(/\/+$/, ""))
     .filter(Boolean);
-  return fromEnv.length ? fromEnv : DEFAULT_ALLOW_ORIGINS;
+  const list = fromEnv.length ? fromEnv : DEFAULT_ALLOW_ORIGINS;
+  // the packaged Android/iOS webview always calls from a localhost origin
+  return Array.from(new Set([...list, "capacitor://localhost", "https://localhost"]));
 }
 
 const CAPRI_VOICES = [

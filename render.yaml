@@ -21,7 +21,7 @@ services:
       - key: CAPRI_AUTOPUBLISH
         value: "1"
       - key: CAPRI_ALLOW_ORIGINS
-        value: https://cp00004.github.io,https://capricorn.de.deplexo.com,capacitor://localhost,http://localhost
+        value: https://cp00004.github.io,https://capricorn.de.deplexo.com,capacitor://localhost,https://localhost,http://localhost,https://localhost:4174
       - key: CAPRI_CHAT_PROVIDER
         value: groq
       - key: CAPRI_MODEL
