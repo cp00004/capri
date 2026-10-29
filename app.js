@@ -134,11 +134,11 @@ async function api(url, opts = {}) {
   if (state.session) headers.set("X-Capri-Profile", state.session);
   if (IS_PHONE) headers.set("X-Capri-Device", "mobile");
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const controller = opts.signal ? null : new AbortController();
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
   let res;
   try {
-    res = await fetch(apiUrl(url), { ...opts, headers, signal: controller.signal });
+    res = await fetch(apiUrl(url), { ...opts, headers, signal: opts.signal || controller.signal });
   } finally {
     clearTimeout(timeoutId);
   }
@@ -1241,10 +1241,13 @@ function openOnPhone(args = {}) {
   if (!target) return false;
   showAction(`phone: ${target}`);
 
-  if (window.CapriDevice && typeof window.CapriDevice.open === "function") {
+  const nativeBridge = window.CapriDevice && typeof window.CapriDevice.open === "function";
+  if (nativeBridge) {
     try {
       const reply = String(window.CapriDevice.open(target) || "");
       if (reply.startsWith("ok")) return true;
+      showNotice(`Could not open ${target} on this phone.`, null, null, 5000);
+      return false;
     } catch { /* fall through to browser intents */ }
   }
 
