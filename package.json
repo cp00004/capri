@@ -54,9 +54,7 @@
                                 "server.js",
                                 "agent.js",
                                 "package.json",
-                                "node_modules/**/*",
-                                "!node_modules/**/test/**",
-                                "!node_modules/**/*.md",
+                                "!public/assets/*.apk",
                                 "!**/.git/**",
                                 "!dist-electron/**"
                             ],
