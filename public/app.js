@@ -2166,7 +2166,11 @@ async function handleGoogleCredential(response) {
     await boot();
     showNotice(`Signed in as ${data.profile.name || data.profile.email}. Memory is tied to this account now.`, null, null, 6000);
     speech.enqueue("There you are. I remember you.");
-  } catch {
+  } catch (err) {
+    if (err?.message === "unauthorized") {
+      showNotice("Google rejected that sign-in. Try again and pick the account you want.", null, null, 8000);
+      return;
+    }
     showNotice("Google sign-in could not reach the PC.", null, null, 6000);
   }
 }
