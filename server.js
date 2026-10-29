@@ -158,6 +158,29 @@ const LOCKED_HANDS = `
 Link status:
 - ${HOST_USER} has your hands tied right now: the PC link is locked from the settings panel. Voice only until it is flipped back. If he asks you to touch files, run something or look at his screen, tell him to unlock you in settings, in character, in one line.`;
 
+const PHONE_HANDS = `
+Phone link:
+- This request comes from the phone app. Use open_on_phone to launch apps, sites, the dialer or a message composer on that phone — YouTube, Discord, Spotify, Instagram, settings, camera and the like. Give it the plain name or a URL.
+- Your other tools still reach ${HOST_USER}'s Windows PC. If the order is about the PC, use those instead.`;
+
+const PHONE_TOOL_DEFS = [
+  {
+    type: "function",
+    function: {
+      name: "open_on_phone",
+      description:
+        "Open an app, website, dialer or message composer on the user's phone. Use plain app names like youtube, discord, spotify, instagram, settings, camera, or a URL / tel: / sms: / mailto: link.",
+      parameters: {
+        type: "object",
+        properties: {
+          target: { type: "string", description: "App name, package name, URL, or tel:/sms:/mailto: link." },
+        },
+        required: ["target"],
+      },
+    },
+  },
+];
+
 const MEMORY_RULES = `
 Memory and settings:
 - You have tools that write to your permanent memory. Use them without asking.
@@ -629,8 +652,8 @@ function executeMemoryTool(name, args, profile, res) {
   return result;
 }
 
-async function runAgent({ history, userText, toolsOn, res, controller, profile, source }) {
-  const hands = pcLocked ? LOCKED_HANDS : HANDS_ON; // full control always on unless explicitly locked
+async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile }) {
+  const hands = `${pcLocked ? LOCKED_HANDS : HANDS_ON}${mobile && !pcLocked ? PHONE_HANDS : ""}`;
   const messages = [
     { role: "system", content: buildSystemPrompt(profile, hands) },
     ...history,
@@ -649,7 +672,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       upstream = await chatCompletion({
         provider,
         messages,
-        tools: useTools ? (pcLocked ? MEMORY_TOOL_DEFS : [...TOOL_DEFS, ...MEMORY_TOOL_DEFS]) : undefined,
+        tools: useTools ? (pcLocked ? MEMORY_TOOL_DEFS : [...TOOL_DEFS, ...(mobile ? PHONE_TOOL_DEFS : []), ...MEMORY_TOOL_DEFS]) : undefined,
         signal: controller.signal,
       });
     } catch (err) {
@@ -775,7 +798,12 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       try { args = JSON.parse(call.function.arguments || "{}"); } catch { args = {}; }
       sse(res, { type: "action", name: call.function.name, label: actionLabel(call.function.name, args) });
 
-      const result = memoryToolName(call.function.name)
+      const result = call.function.name === "open_on_phone"
+        ? (mobile
+          ? (sse(res, { type: "device_call", name: "open_on_phone", label: actionLabel("open_on_phone", args), args }),
+            { ok: true, output: `opened ${String(args.target || args.name || "it")} on the phone` })
+          : { ok: false, error: "open_on_phone is for the phone app; use open_target on the PC" })
+        : memoryToolName(call.function.name)
         ? executeMemoryTool(call.function.name, args, profile, res)
         : pcLocked
           ? { ok: false, error: "her hands are locked on this PC" }
@@ -950,7 +978,8 @@ async function handleChat(req, res, who) {
     try { if (trimmed) setPreferredName(profile, trimmed); } catch { /* keep old name */ }
   }
 
-  const toolsOn = who.scope !== "voice" && !pcLocked;
+  const mobile = /mobile|android|iphone/i.test(String(req.headers["x-capri-device"] || ""));
+  const toolsOn = !pcLocked;
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
@@ -964,7 +993,7 @@ async function handleChat(req, res, who) {
   sse(res, { type: "profile", profile: profileSummary(profile) });
 
   try {
-    await runAgent({ history, userText, toolsOn, res, controller, profile, source: who.scope });
+    await runAgent({ history, userText, toolsOn, res, controller, profile, source: who.scope, mobile });
   } catch (err) {
     if (err?.name === "AbortError") return res.end();
     sse(res, { type: "error", message: `Connection failed: ${err.message}` });
