@@ -79,6 +79,15 @@ let quitting = false;
 let usingRemote = true;
 let updateChecked = false;
 
+// Packaged builds have no console, so startup problems go to a file the user
+// can send us instead of a blank window.
+function logLine(message) {
+  try {
+    const dir = app.getPath("userData");
+    fs.appendFileSync(path.join(dir, "capri.log"), `${new Date().toISOString()} ${message}\n`);
+  } catch { /* logging must never break the app */ }
+}
+
 // ── Permissions — grant mic + camera without prompting ───────────────────────
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler(
@@ -282,6 +291,7 @@ function createWindow() {
   win.webContents.on("did-fail-load", (_event, code, description, failedUrl, isMainFrame) => {
     if (!isMainFrame || code === -3) return; // aborted, not a real outage
     console.warn(`[capri] load failed (${code} ${description}) ${failedUrl}`);
+    logLine(`load failed ${code} ${description} ${failedUrl}`);
     if (usingRemote) {
       usingRemote = false;
       win.loadURL(APP_URL).catch(() => {});
@@ -500,10 +510,12 @@ ipcMain.handle("capri-open", async (_event, target) => {
 
 // ── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  logLine(`start v${app.getVersion()} pid=${process.pid} electron=${process.versions.electron}`);
   // Pick a bindable port first; the bundled server is only a fallback, so a
   // failure here must never stop the window from opening.
   try { PORT = await findFreePort(PORT); } catch { /* keep the default */ }
   APP_URL = `http://localhost:${PORT}`;
+  logLine(`local port ${PORT}`);
   startServer();
   try { createTray(); } catch (err) { console.warn("[capri] tray unavailable:", err.message); }
   // Show the window quickly; the bundled server is the fallback, not a gate.
