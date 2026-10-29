@@ -101,7 +101,7 @@ const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.0.7";
+const APP_VERSION = "4.0.8";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -842,6 +842,7 @@ const rec = {
   raf: null,
   startedAt: 0,
   silenceSince: 0,
+  heard: false,
   finishing: false,
 };
 
@@ -855,6 +856,7 @@ const wakeWord = {
   capture: "",
   decideTimer: null,
   recognition: null,
+  suppressedUntil: 0,
 };
 
 const PREFERRED_MIME = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
@@ -891,15 +893,33 @@ function playListeningChime() {
   }
 }
 
-async function startListening() {
+async function startListening(force = false) {
   if (rec.active || rec.starting) return;
-  if (state.phase === "thinking" || state.streaming) return;
+  if (!force && (state.phase === "thinking" || state.streaming)) return;
   if (wakeWord.active || wakeWord.starting) {
-    wakeWord.pendingStart = true;
-    wakeWord.recognition?.stop();
-    return;
+    if (!force) {
+      wakeWord.pendingStart = true;
+      wakeWord.recognition?.stop();
+      return;
+    }
+    // A tap has to win. The wake-word engine can come back to life a moment
+    // after we stop it (its onstart lands late), which used to swallow the
+    // first press entirely. Park it for a few seconds and take the mic.
+    wakeWord.suppressedUntil = Date.now() + 6000;
+    wakeWord.pendingStart = false;
+    wakeWord.capture = "";
+    clearTimeout(wakeWord.decideTimer);
+    wakeWord.decideTimer = null;
+    const stale = wakeWord.recognition;
+    wakeWord.recognition = null;
+    wakeWord.active = false;
+    wakeWord.starting = false;
+    try { stale?.stop(); } catch { /* already stopped */ }
   }
-  rec.listenQueued = false;
+  if (force) {
+    state.streaming = false;
+    rec.listenQueued = false;
+  }
   if (!window.isSecureContext) {
     showNotice(
       "Phone mics only unlock on a secure page. On the PC run npm run cert, reopen the https link, and trust Capri Local once. The keyboard still works.",
@@ -962,6 +982,7 @@ async function startListening() {
   rec.finishing = false;
   rec.startedAt = performance.now();
   rec.silenceSince = rec.startedAt;
+  rec.heard = false;
   if (wakeWord.chimed) wakeWord.chimed = false;
   else playListeningChime();
 
@@ -979,10 +1000,16 @@ async function startListening() {
     el.body.style.setProperty("--lvl", rms.toFixed(3));
 
     const now = performance.now();
-    if (rms > 0.022) rec.silenceSince = now;
+    if (rms > 0.022) {
+      rec.silenceSince = now;
+      rec.heard = true;
+    }
 
     const elapsed = now - rec.startedAt;
-    if (elapsed > 1500 && now - rec.silenceSince > 1800) return stopListening();
+    // Only cut her off once something was actually said; waiting for the first
+    // word used to close the mic at 1.8 s and throw the take away.
+    if (rec.heard && elapsed > 1200 && now - rec.silenceSince > 1800) return stopListening();
+    if (!rec.heard && elapsed > 8000) return stopListening();
     if (elapsed > 30000) return stopListening();
 
     rec.raf = requestAnimationFrame(loop);
@@ -1195,6 +1222,11 @@ function listenForCommand() {
 }
 
 function startWakeWord() {
+  if (Date.now() < (wakeWord.suppressedUntil || 0)) {
+    // A tap is being served right now; re-arm after it.
+    setTimeout(startWakeWord, (wakeWord.suppressedUntil - Date.now()) + 50);
+    return;
+  }
   if (!wakeWord.enabled || document.hidden || wakeWord.active || wakeWord.starting || cmdRec.active || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
@@ -1212,6 +1244,14 @@ function startWakeWord() {
   recognition.interimResults = true;
   recognition.lang = "en-US";
   recognition.onstart = () => {
+    if (rec.active || rec.starting || Date.now() < (wakeWord.suppressedUntil || 0)) {
+      // The tap already owns the mic; this listener would talk over it.
+      wakeWord.recognition = null;
+      wakeWord.active = false;
+      wakeWord.starting = false;
+      try { recognition.stop(); } catch { /* already stopped */ }
+      return;
+    }
     wakeWord.starting = false;
     wakeWord.active = true;
     setPhase("idle");  // stay idle while waiting for wake word
@@ -1332,6 +1372,7 @@ async function stopListening() {
 
   if (!blob || blob.size < 2500) {
     setPhase("idle");
+    showNotice("The mic picked up nothing. Tap once more and talk right away.", null, null, 6000);
     resumeWakeWord();
     return;
   }
@@ -1362,6 +1403,7 @@ async function transcribe(blob) {
     const text = String(data.text || "").trim();
     if (!text) {
       setPhase("idle");
+      showNotice("I caught noise, not words. Say it again a little closer to the mic.", null, null, 6000);
       resumeWakeWord();
       return;
     }
@@ -2595,40 +2637,21 @@ el.micBtn.addEventListener("click", () => {
   unlockAudio();
   if (rec.starting) {
     rec.cancelStart = true;
-  } else if (rec.active) {
-    stopListening();
-  } else if (cmdRec.active) {
-    stopCommandRec();
-    setTimeout(() => startListening(), 80);
-  } else if (wakeWord.active || wakeWord.starting) {
-    // Stop wake-word recognition and go straight into voice capture
-    const recognition = wakeWord.recognition;
-    wakeWord.recognition = null;
-    wakeWord.active = false;
-    wakeWord.starting = false;
-    wakeWord.pendingStart = false;
-    wakeWord.capture = "";
-    clearTimeout(wakeWord.decideTimer);
-    wakeWord.decideTimer = null;
-    try { recognition?.stop(); } catch { /* ignore */ }
-    // Small delay so recognition.onend doesn't fight us
-    setTimeout(() => startListening(), 80);
-  } else if (state.phase === "thinking" || state.streaming) {
-    // Capri is thinking — abort and go straight to listening
-    activeAbort?.abort();
-    speech.stop();
-    state.streaming = false;
-    rec.listenQueued = false;
-    setPhase("idle"); // startListening refuses to run while the phase says thinking
-    setTimeout(() => startListening(), 120);
-  } else if (speech.busy) {
-    // Capri is speaking — cut her off and listen
-    speech.stop();
-    rec.listenQueued = false;
-    setTimeout(() => startListening(), 80);
-  } else {
-    startListening();
+    return;
   }
+  if (rec.active) {
+    stopListening();
+    return;
+  }
+  if (cmdRec.active) stopCommandRec();
+  if (state.streaming || state.phase === "thinking" || speech.busy) {
+    activeAbort?.abort();
+    activeAbort = null;
+    state.streaming = false;
+    speech.stop();
+  }
+  rec.listenQueued = false;
+  startListening(true);
 });
 
 el.kbBtn.addEventListener("click", () => {
