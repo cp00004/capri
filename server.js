@@ -875,6 +875,18 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       if (target && !/\b(?:about|up to you|your eyes|the door)\b/i.test(target)) {
         quickTarget = target;
         sse(res, { type: "device_call", name: "open_on_device", label: `open ${target}`, args: { target } });
+        // Roblox gets a coin-flip jab instead of a model turn. It lands faster
+        // than any relay and never drifts off-script.
+        const banterOn = String(profile?.settings?.app_banter || "on") !== "off";
+        if (banterOn && /\broblox\b/i.test(target) && Math.random() < 0.45) {
+          const line = "I hope you're not gonna play JJS.";
+          sse(res, { type: "delta", text: line });
+          if (profile && userText) addHistory(profile, userText, line, { scope: source || "local" });
+          if (profile) sse(res, { type: "profile", profile: profileSummary(profile) });
+          sse(res, { type: "done" });
+          res.end();
+          return;
+        }
         messages.push({
           role: "system",
           content: `The device is already opening "${target}" this turn. Do not call a tool. Reply in one short line, in character.`,
