@@ -529,7 +529,9 @@ function friendlyError(status, raw, provider = "groq") {
         ? `OpenRouter rejected the key. ${where}`
         : provider === "freetheai"
           ? `FreeTheAI rejected the key. ${where}`
-          : `Groq rejected the key. ${where}`;
+          : provider === "mistral"
+            ? `Mistral rejected the key. ${where}`
+            : `Groq rejected the key. ${where}`;
   }
   if (status === 403 && /check-?in/i.test(message)) {
     return "FreeTheAI wants today's check-in. Open freetheai.org/checkin once, then ask again.";
