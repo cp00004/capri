@@ -111,7 +111,7 @@
     goEl.hidden = true;
 
     if (mode === "app") {
-      var link = "capri://auth#credential=" + encodeURIComponent(credential);
+      var link = "capri://auth?credential=" + encodeURIComponent(credential);
       titleEl.textContent = "You're signed in";
       subEl.textContent = "Capri should reopen by itself. If it doesn't, press the button below.";
       goEl.textContent = "Return to Capri";
