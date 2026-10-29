@@ -38,25 +38,24 @@ const ROOT    = path.join(__dirname, "..");
 const SERVER  = path.join(ROOT, "server.js");
 const ICON    = path.join(ROOT, "public", "assets", "icon-512.png");
 const net = require('net');
-// Walk upward until a port can actually be bound. The previous check called
-// listen() and returned before the socket reported in, so a busy port raised
-// EADDRINUSE with no handler and killed the app before any window existed.
-function findFreePort(start, tries = 20) {
+// Walk upward until two consecutive ports can be bound - the server takes PORT
+// and PORT+1 for plain http and https. A socket bound to 127.0.0.1 still lets
+// another process hold 0.0.0.0 on Windows, so the probe binds every interface
+// exactly like server.js does.
+function canBind(port) {
   return new Promise((resolve) => {
-    const attempt = (port, left) => {
-      const tester = net.createServer();
-      tester.once("error", () => {
-        if (left <= 0) return resolve(start);
-        attempt(port + 1, left - 1);
-      });
-      tester.once("listening", () => {
-        const found = tester.address()?.port || port;
-        tester.close(() => resolve(found));
-      });
-      tester.listen(port, "127.0.0.1");
-    };
-    attempt(start, tries);
+    const tester = net.createServer();
+    tester.once("error", () => resolve(false));
+    tester.once("listening", () => tester.close(() => resolve(true)));
+    tester.listen(port);
   });
+}
+async function findFreePort(start, tries = 20) {
+  for (let i = 0; i < tries; i++) {
+    const port = start + i;
+    if ((await canBind(port)) && (await canBind(port + 1))) return port;
+  }
+  return start;
 }
 let PORT = Number(process.env.PORT || 4173);
 let APP_URL = `http://localhost:${PORT}`;
@@ -278,11 +277,23 @@ function createWindow() {
   });
 
   win.webContents.on("did-fail-load", (_event, code, description, failedUrl, isMainFrame) => {
-    if (!isMainFrame || !usingRemote) return;
-    if (code === -3) return; // aborted, not a real outage
-    console.warn(`[capri] remote load failed (${code} ${description}) — using the local build`);
-    usingRemote = false;
-    win.loadURL(APP_URL).catch(() => {});
+    if (!isMainFrame || code === -3) return; // aborted, not a real outage
+    console.warn(`[capri] load failed (${code} ${description}) ${failedUrl}`);
+    if (usingRemote) {
+      usingRemote = false;
+      win.loadURL(APP_URL).catch(() => {});
+      return;
+    }
+    if (!APP_URL.startsWith(String(failedUrl || ""))) return;
+    // Both the hosted build and the local fallback are gone - say so instead
+    // of sitting on a black window.
+    win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(
+      `<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;` +
+      `background:#07000c;color:#ff4fd8;font:16px/1.5 system-ui"><div style="text-align:center">` +
+      `<h1 style="font:600 22px system-ui;letter-spacing:2px">CAPRI // OFFLINE</h1>` +
+      `<p style="color:#9ad">No link to the hosted build and the local server did not answer.</p>` +
+      `<p><a href="${REMOTE_URL}" style="color:#6ff">retry</a></p></div></body>`
+    )).catch(() => {});
   });
 
   // Give the page a moment to settle before touching the network again.
