@@ -108,7 +108,7 @@ const state = {
   voicePreset: localStorage.getItem("capri.voicePreset") || "capri",
   browserVoice: null,
   orpheusVoices: ["diana", "hannah", "autumn", "tara", "leah", "mia", "zoe"],
-  portrait: "assets/capri.svg",
+  portrait: "assets/capri-portrait.png",
   streaming: false,
   pendingAccessId: null,
   pendingPoll: null,

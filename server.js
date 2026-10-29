@@ -1372,7 +1372,8 @@ const handler = async (req, res) => {
   if (req.method === "GET" && pathname === "/api/config") {
     const device = auth(req);
     const who = device || sessionCaller(req);
-    const pngPortrait = path.join(PUBLIC_DIR, "assets", "capri.png");
+    const pngPortrait = path.join(PUBLIC_DIR, "assets", "capri-portrait.png");
+    const fallbackPortrait = path.join(PUBLIC_DIR, "assets", "capri.png");
     const local = who?.scope === "local";
     const session = profileFromRequest(req);
     const profile = session || (local ? localProfile() : null);
@@ -1383,7 +1384,11 @@ const handler = async (req, res) => {
       sttModel: STT_MODEL,
       hasKey: Boolean(process.env.GROQ_API_KEY),
       hasGemini: Boolean(GEMINI_KEY),
-      portrait: fs.existsSync(pngPortrait) ? "assets/capri.png" : "assets/capri.svg",
+      portrait: fs.existsSync(pngPortrait)
+        ? "assets/capri-portrait.png"
+        : fs.existsSync(fallbackPortrait)
+          ? "assets/capri.png"
+          : "assets/capri.svg",
       voices: [
         ...CAPRI_VOICES,
         ...(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID
