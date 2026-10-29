@@ -88,6 +88,11 @@ const el = {
 };
 
 // Determine API base. Use tunnel only on non‑GitHub‑Pages origins.
+const IS_GITHUB_PAGES = location.hostname.includes('github.io');
+// Replace <YOUR-PROXY-URL> with the URL where you deploy the proxy (e.g. https://capri-proxy.vercel.app)
+const PROXY_URL = 'https://<YOUR-PROXY-URL>';
+const DEFAULT_TUNNEL = IS_GITHUB_PAGES ? PROXY_URL : "https://capricorn.de.deplexo.com";
+const DEFAULT_BACKEND = IS_GITHUB_PAGES ? "" : DEFAULT_TUNNEL;
 const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
 const IS_GITHUB_PAGES = location.hostname.includes('github.io');
 const DEFAULT_BACKEND = IS_GITHUB_PAGES ? "" : DEFAULT_TUNNEL;
