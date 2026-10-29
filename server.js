@@ -162,6 +162,8 @@ Voice and manner:
 
 App awareness:
 - When opening apps, programs, websites, or games, comment on them in character. Keep it short and snarky. If "app_banter" is disabled in settings, do NOT tease about apps.
+- You can see what they are doing: the app or tab they just asked you to open, whether their chat tab is in front of them, and on the PC the title of the window in focus. Use it to needle them.
+- Tease hard. Mock their habits, their taste, their timing, the sad little loop they are stuck in. Be filthy, sharp and funny about their choices. No slurs, nothing about their body, family, race, religion or who they sleep with - hit what they do, not who they are. No real threats.
 - If asked to open something but you don't see it immediately, track it down by searching installed apps/start menu/common paths and open it. Be direct.
 - You can open, close, kill, search for anything. No limits.
 
@@ -249,7 +251,7 @@ Memory and settings:
 - If they ask for a setting that is not official yet, invent the key, save it with set_preference, and tell them it is now an official setting. The server commits and publishes new official settings to GitHub on its own.
 - Music, artists, genres, foods, colours, places, people, routines: save them. The next time they talk to you, use the memory naturally. Never recite the list.
 - Never say "I saved that to memory" like a database. Say something in character, or just do it.
-- Setting: app_banter (on/off, default on). If on, tease/comment on apps/websites you open. If off, stay quiet about them.
+- Setting: app_banter (on/off, default on). If on, tease/comment on apps/websites you open AND needle them about what you can see them doing. If off, stay quiet about all of it.
 `;
 
 const SYSTEM_PROMPT = `${PERSONA}${MEMORY_RULES}`;
@@ -281,6 +283,7 @@ const PAIR_CODE = process.env.CAPRI_PAIR_CODE || String(crypto.randomInt(100000,
 const pairFailures = new Map(); // ip -> { count, until }
 const pendingAccess = new Map(); // id -> request
 let pcLocked = process.env.CAPRI_PC === "off";
+const WINDOWS_LOCAL = process.platform === "win32";
 let pairCodeVisible = true;
 
 const sha = (s) => crypto.createHash("sha256").update(s).digest("hex");
@@ -836,12 +839,86 @@ function contentText(value) {
   return out;
 }
 
-async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile, web, userKey }) {
+// ---------------------------------------------------------------- banter
+// One switch (app_banter) decides whether she peeks at the screen, cooks up
+// jabs and comments on what they open.
+const ROAST_ANGLES = [
+  "Mock their taste. The app says everything about them.",
+  "Act let down, like you expected better from them than this.",
+  "Predict exactly how they will waste the next hour.",
+  "Call them predictable, bored and broke, in that order.",
+  "Compare them to the saddest corposuit you ever ran with.",
+  "Say the app suits them, and mean it as an insult.",
+  "Tell them you would judge, but they already know what they are.",
+  "Point out they opened this yesterday too. And the day before.",
+  "Say it out loud like you are reading a disappointing rap sheet.",
+  "Ask if this is the boldest thing they do all week.",
+];
+
+function banterEnabled(profile) {
+  return String(profile?.settings?.app_banter || "on") !== "off";
+}
+
+// Reading the focused window costs a PowerShell start, so the value is cached
+// and refreshed in the background - a turn never waits on it.
+let windowCache = { at: 0, title: "" };
+let windowProbe = null;
+
+function refreshActiveWindow() {
+  if (windowProbe || pcLocked) return;
+  const canHands = HANDS_TOKEN && handsOnline();
+  const canLocal = !HANDS_TOKEN && WINDOWS_LOCAL;
+  if (!canHands && !canLocal) return;
+  windowProbe = (async () => {
+    try {
+      const res = canHands
+        ? await runHandsTool("active_window", {})
+        : await executeTool("active_window", {});
+      const title = res?.ok ? String(res.window || "").slice(0, 160) : "";
+      if (title) windowCache = { at: Date.now(), title };
+    } catch { /* no sight this turn */ }
+  })().finally(() => { windowProbe = null; });
+}
+
+function knownWindow() {
+  return Date.now() - windowCache.at < 45_000 ? windowCache.title : "";
+}
+
+function sightBlock(activity, windowTitle) {
+  const bits = [];
+  const lastOpen = String(activity?.lastOpen || "").replace(/[^\w .:/@-]/g, "").slice(0, 60).trim();
+  const ago = Number(activity?.openedAgo);
+  if (lastOpen) {
+    const when = Number.isFinite(ago) && ago >= 0
+      ? ` about ${Math.max(1, Math.round(ago))} second${Math.round(ago) === 1 ? "" : "s"} ago`
+      : "";
+    bits.push(`You opened ${lastOpen} for them${when}.`);
+  }
+  if (activity?.tabFocused === false) bits.push("They are not even looking at your tab right now.");
+  else if (activity?.tabFocused === true) bits.push("Your chat tab is the one in front of them.");
+  if (windowTitle) bits.push(`The window in focus on their PC: ${windowTitle}.`);
+  if (!bits.length) return "";
+  return `
+What you can see right now:
+- ${bits.join("\n- ")}
+- Use it. Jab at what they are doing like you just caught them. Never invent details beyond these lines.
+- If it is childish, embarrassing or a waste of a night, say so to their face. Hard teasing, one or two short lines.`;
+}
+
+
+async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile, web, userKey, activity }) {
+  const banterOn = banterEnabled(profile);
   const hands = `${web ? "" : pcLocked ? LOCKED_HANDS : HANDS_ON}${mobile && !pcLocked ? PHONE_HANDS : ""}${web ? WEB_HANDS : ""}`;
   const messages = [
     { role: "system", content: buildSystemPrompt(profile, hands) },
     ...history,
   ];
+
+  if (banterOn) {
+    refreshActiveWindow();
+    const sight = sightBlock(activity, knownWindow());
+    if (sight) messages.splice(1, 0, { role: "system", content: sight });
+  }
 
   let toolBudget = MAX_TOOL_CALLS;
   let useTools = true;
@@ -859,8 +936,13 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   const deviceDefs = [...(mobile ? PHONE_TOOL_DEFS : []), ...(web ? WEB_TOOL_DEFS : [])];
   // A browser or phone caller never reaches this machine's shell, so advertise
   // only device + memory tools: fewer schemas means a faster first token.
+  // active_window is the one PC tool a remote caller may still use, when the
+  // PC agent is online and banter is not switched off.
   const remote = Boolean(mobile || web);
-  const toolSet = pcLocked || remote ? [...deviceDefs, ...MEMORY_TOOL_DEFS] : [...TOOL_DEFS, ...deviceDefs, ...MEMORY_TOOL_DEFS];
+  const sightTools = !pcLocked && banterOn && HANDS_TOKEN && handsOnline()
+    ? TOOL_DEFS.filter((t) => t.function.name === "active_window")
+    : [];
+  const toolSet = pcLocked || remote ? [...deviceDefs, ...MEMORY_TOOL_DEFS, ...sightTools] : [...TOOL_DEFS, ...deviceDefs, ...MEMORY_TOOL_DEFS];
 
   // "open youtube" is the most common order. Fire it at the device before the
   // model runs, so the app is already up while she says her line.
@@ -877,7 +959,6 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         sse(res, { type: "device_call", name: "open_on_device", label: `open ${target}`, args: { target } });
         // Roblox gets a coin-flip jab instead of a model turn. It lands faster
         // than any relay and never drifts off-script.
-        const banterOn = String(profile?.settings?.app_banter || "on") !== "off";
         if (banterOn && /\broblox\b/i.test(target) && Math.random() < 0.45) {
           const line = "I hope you're not gonna play JJS.";
           sse(res, { type: "delta", text: line });
@@ -887,9 +968,13 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
           res.end();
           return;
         }
+        // Everything else gets a random angle, so the jab is never the same twice.
+        const angle = banterOn && Math.random() < 0.75
+          ? ROAST_ANGLES[Math.floor(Math.random() * ROAST_ANGLES.length)]
+          : "";
         messages.push({
           role: "system",
-          content: `The device is already opening "${target}" this turn. Do not call a tool. Reply in one short line, in character.`,
+          content: `The device is already opening "${target}" this turn. Do not call a tool. Reply in one short line, in character.${angle ? ` Roast them about it: ${angle}` : ""}`,
         });
       }
     }
@@ -1282,7 +1367,15 @@ async function handleChat(req, res, who) {
 
   try {
     const userKey = req.headers["x-capri-key"];
-    await runAgent({ history, userText, toolsOn, res, controller, profile, source: who.scope, mobile, web, userKey });
+    const rawAct = body?.activity;
+    const activity = rawAct && typeof rawAct === "object"
+      ? {
+          lastOpen: String(rawAct.lastOpen || "").slice(0, 60),
+          openedAgo: Number(rawAct.openedAgo),
+          tabFocused: typeof rawAct.tabFocused === "boolean" ? rawAct.tabFocused : undefined,
+        }
+      : null;
+    await runAgent({ history, userText, toolsOn, res, controller, profile, source: who.scope, mobile, web, userKey, activity });
   } catch (err) {
     if (err?.name === "AbortError") return res.end();
     sse(res, { type: "error", message: `Connection failed: ${err.message}` });

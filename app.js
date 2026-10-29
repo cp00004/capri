@@ -1378,6 +1378,10 @@ async function transcribe(blob) {
 /* ---------------------------------------------------------------- phone hands */
 
 const recentOpens = [];
+// What she is allowed to notice: the last thing she opened, and whether this
+// tab is the one in front of them. Sent with every chat turn.
+const activity = { lastOpen: "", lastOpenAt: 0 };
+document.addEventListener("visibilitychange", () => { activity.tabFocused = !document.hidden; });
 
 function openKey(target) {
   return String(target || "")
@@ -1414,6 +1418,8 @@ function openOnDevice(args = {}) {
   const now = Date.now();
   if (openedRecently(key, now)) return true;
   recentOpens.push({ key, at: now });
+  activity.lastOpen = target;
+  activity.lastOpenAt = now;
 
   if (window.capriNative && typeof window.capriNative.openTarget === "function") {
     try { window.capriNative.openTarget(target); return true; } catch { /* fall through */ }
@@ -1652,7 +1658,14 @@ async function respond(userText) {
     const res = await api("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: state.history }),
+      body: JSON.stringify({
+        messages: state.history,
+        activity: {
+          lastOpen: activity.lastOpen,
+          openedAgo: activity.lastOpenAt ? Math.round((Date.now() - activity.lastOpenAt) / 1000) : undefined,
+          tabFocused: !document.hidden,
+        },
+      }),
       signal: activeAbort.signal,
     });
 
