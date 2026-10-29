@@ -134,11 +134,11 @@ async function api(url, opts = {}) {
   if (state.session) headers.set("X-Capri-Profile", state.session);
   if (IS_PHONE) headers.set("X-Capri-Device", "mobile");
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000);
+  const controller = opts.signal ? null : new AbortController();
+  const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
   let res;
   try {
-    res = await fetch(apiUrl(url), { ...opts, headers, signal: controller.signal });
+    res = await fetch(apiUrl(url), { ...opts, headers, signal: opts.signal || controller.signal });
   } finally {
     clearTimeout(timeoutId);
   }
