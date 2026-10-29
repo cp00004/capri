@@ -936,8 +936,8 @@ async function startListening() {
     if (rms > 0.022) rec.silenceSince = now;
 
     const elapsed = now - rec.startedAt;
-    if (elapsed > 1400 && now - rec.silenceSince > 1300) return stopListening();
-    if (elapsed > 25000) return stopListening();
+    if (elapsed > 1500 && now - rec.silenceSince > 1800) return stopListening();
+    if (elapsed > 30000) return stopListening();
 
     rec.raf = requestAnimationFrame(loop);
   };
@@ -953,7 +953,7 @@ function paintWakeWord() {
   el.wakeWordBtn.textContent = wakeWord.enabled ? "ON" : "OFF";
   el.wakeWordState.textContent = !supported ? "not supported here" : wakeWord.active ? "listening for Capri" : wakeWord.enabled ? "armed" : "tap to enable";
   el.wakeWordHint.textContent = supported
-    ? "When enabled, say Capri while this page is open and visible. Background listening needs native app support."
+    ? "Say Capri — or anything close, like capree or kapri — then give the order. Background listening needs native app support."
     : "This browser does not support wake-word listening. Tap the mic to talk instead.";
 }
 
@@ -975,6 +975,51 @@ function setWakeWordEnabled(enabled) {
   startWakeWord();
 }
 
+const WAKE_WORDS = new Set([
+  "capri", "capry", "capree", "caprie", "caprii", "kapri", "kapry", "kabri", "cabri",
+  "caprice", "cappy", "cappi", "capra", "caprio", "capris",
+]);
+
+function editDistance(a, b) {
+  const s = String(a || "");
+  const t = String(b || "");
+  if (Math.abs(s.length - t.length) > 2) return 99;
+  const prev = new Array(t.length + 1);
+  const next = new Array(t.length + 1);
+  for (let j = 0; j <= t.length; j += 1) prev[j] = j;
+  for (let i = 1; i <= s.length; i += 1) {
+    next[0] = i;
+    for (let j = 1; j <= t.length; j += 1) {
+      next[j] = Math.min(
+        prev[j] + 1,
+        next[j - 1] + 1,
+        prev[j - 1] + (s[i - 1] === t[j - 1] ? 0 : 1)
+      );
+    }
+    for (let j = 0; j <= t.length; j += 1) prev[j] = next[j];
+  }
+  return prev[t.length];
+}
+
+function isWakePhrase(text) {
+  const clean = String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9' ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) return false;
+  if (/\bcapricorn\b/.test(clean)) return false;
+  const tokens = clean.split(" ");
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i].replace(/^'+|'+$/g, "");
+    if (!token) continue;
+    if (WAKE_WORDS.has(token)) return true;
+    if (token === "cap" && tokens[i + 1] === "ri") return true;
+    if (token.length >= 4 && token.length <= 7 && editDistance(token, "capri") <= 1) return true;
+  }
+  return false;
+}
+
 function startWakeWord() {
   if (!wakeWord.enabled || document.hidden || wakeWord.active || wakeWord.starting || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -988,7 +1033,7 @@ function startWakeWord() {
   wakeWord.recognition = recognition;
   wakeWord.starting = true;
   recognition.continuous = true;
-  recognition.interimResults = false;
+  recognition.interimResults = true;
   recognition.lang = "en-US";
   recognition.onstart = () => {
     wakeWord.starting = false;
@@ -1001,14 +1046,15 @@ function startWakeWord() {
     }
   };
   recognition.onresult = (event) => {
+    let said = "";
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      if (!event.results[index].isFinal) continue;
-      if (/\bcapri\b/i.test(event.results[index][0]?.transcript || "")) {
-        wakeWord.pendingStart = true;
-        try { recognition.stop(); } catch { /* onend will resume */ }
-        return;
-      }
+      said += ` ${event.results[index][0]?.transcript || ""}`;
     }
+    if (!isWakePhrase(said)) return;
+    if (wakeWord.pendingStart) return;
+    wakeWord.pendingStart = true;
+    playListeningChime();
+    try { recognition.stop(); } catch { /* onend will resume */ }
   };
   recognition.onerror = (event) => {
     if (["not-allowed", "service-not-allowed"].includes(event.error)) {
