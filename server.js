@@ -70,6 +70,10 @@ const GROQ_BASE = "https://api.groq.com/openai/v1";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const OPENROUTER_MODEL = process.env.CAPRI_OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
+const FREETHEAI_BASE = "https://api.freetheai.org/v1";
+const FREETHEAI_MODEL_CHAIN = [...new Set(String(
+  process.env.CAPRI_FREETHEAI_MODELS || "fta/lion/gpt-4.1,fta/olf/gpt-oss:120b,fta/dog/gpt-4.1-mini",
+).split(",").map((m) => m.trim()).filter(Boolean))];
 
 // A key list with commas or newlines gives several free buckets to rotate through.
 function readKeys(...names) {
@@ -84,6 +88,7 @@ function readKeys(...names) {
 const GROQ_KEYS = readKeys("GROQ_API_KEY", "GROQ_API_KEYS");
 const GEMINI_KEYS = readKeys("GEMINI_API_KEY", "GEMINI_API_KEYS");
 const OPENROUTER_KEYS = readKeys("OPENROUTER_API_KEY", "OPENROUTER_API_KEYS");
+const FREETHEAI_KEYS = readKeys("FREETHEAI_API_KEY", "FREETHEAI_API_KEYS");
 const GEMINI_KEY = GEMINI_KEYS[0] || "";
 const GEMINI_MODEL = process.env.CAPRI_GEMINI_MODEL || "gemini-3.5-flash";
 const GEMINI_TTS_MODEL = process.env.CAPRI_TTS_MODEL || "gemini-3.8-flash-tts";
@@ -515,7 +520,12 @@ function friendlyError(status, raw, provider = "groq") {
       ? `Google rejected the Gemini key. ${where}`
       : provider === "openrouter"
         ? `OpenRouter rejected the key. ${where}`
-        : `Groq rejected the key. ${where}`;
+        : provider === "freetheai"
+          ? `FreeTheAI rejected the key. ${where}`
+          : `Groq rejected the key. ${where}`;
+  }
+  if (status === 403 && /check-?in/i.test(message)) {
+    return "FreeTheAI wants today's check-in. Open freetheai.org/checkin once, then ask again.";
   }
   if (status === 429) return "Rate limit hit. Give it a minute, choom.";
   if (status === 404) return `Model not available on this key: ${provider === "gemini" ? GEMINI_MODEL : MODEL}`;
@@ -532,13 +542,17 @@ function candidateId(p) {
 }
 
 function providerCandidates() {
-  const gemini = GEMINI_KEYS.map((key) => ({ name: "gemini", base: GEMINI_BASE, key, model: GEMINI_MODEL }));
+  // Thinking runs on FreeTheAI + Groq only; Gemini stays reserved for the voice.
+  const freetheai = [];
+  for (const model of FREETHEAI_MODEL_CHAIN) {
+    for (const key of FREETHEAI_KEYS) freetheai.push({ name: "freetheai", base: FREETHEAI_BASE, key, model });
+  }
   const groq = [];
   for (const model of GROQ_MODEL_CHAIN) {
     for (const key of GROQ_KEYS) groq.push({ name: "groq", base: GROQ_BASE, key, model });
   }
   const openrouter = OPENROUTER_KEYS.map((key) => ({ name: "openrouter", base: OPENROUTER_BASE, key, model: OPENROUTER_MODEL }));
-  const primary = CHAT_PROVIDER === "gemini" ? [...gemini, ...groq] : [...groq, ...gemini];
+  const primary = CHAT_PROVIDER === "groq" ? [...groq, ...freetheai] : [...freetheai, ...groq];
   return [...primary, ...openrouter];
 }
 
@@ -594,6 +608,9 @@ function userKeyCandidates(raw) {
   }
   if (key.startsWith("sk-or-")) {
     return [{ name: "openrouter", base: OPENROUTER_BASE, key, model: OPENROUTER_MODEL, own: true }];
+  }
+  if (key.startsWith("ftai_")) {
+    return FREETHEAI_MODEL_CHAIN.map((model) => ({ name: "freetheai", base: FREETHEAI_BASE, key, model, own: true }));
   }
   return [];
 }
@@ -1591,7 +1608,7 @@ const handler = async (req, res) => {
       sttModel: STT_MODEL,
       hasKey: GROQ_KEYS.length > 0,
       hasGemini: GEMINI_KEYS.length > 0,
-      relays: GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + GEMINI_KEYS.length + OPENROUTER_KEYS.length,
+      relays: FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + OPENROUTER_KEYS.length,
       portrait: fs.existsSync(jpgPortrait)
         ? "assets/capri-portrait.jpg"
         : fs.existsSync(pngPortrait)
@@ -1808,8 +1825,8 @@ httpServer.listen(PORT, () => {
   console.log(`  google:    ${GOOGLE_CLIENT_ID ? "sign-in ready" : "not configured - see docs/GOOGLE_SIGNIN.md"}`);
   console.log(`  publish:   ${publisher.state.enabled ? "auto-push on" : "auto-push off"}`);
   console.log(`  secure:    ${HTTPS_ON ? `https on :${HTTPS_PORT} (cert.pem)` : "http only - phone mic needs npm run cert"}`);
-  console.log(`  keys:      ${GROQ_KEYS.length ? `Groq ok (${GROQ_KEYS.length} key${GROQ_KEYS.length > 1 ? "s" : ""})` : "Groq missing"} / ${GEMINI_KEYS.length ? "Gemini ok" : "Gemini missing"}${OPENROUTER_KEYS.length ? " / OpenRouter ok" : ""}`);
-  console.log(`  relays:    ${GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + GEMINI_KEYS.length + OPENROUTER_KEYS.length} fallback chain${GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + GEMINI_KEYS.length + OPENROUTER_KEYS.length === 1 ? "" : "s"}`);
+  console.log(`  keys:      ${FREETHEAI_KEYS.length ? "FreeTheAI ok" : "FreeTheAI missing"} / ${GROQ_KEYS.length ? `Groq ok (${GROQ_KEYS.length} key${GROQ_KEYS.length > 1 ? "s" : ""})` : "Groq missing"} / ${GEMINI_KEYS.length ? "Gemini voice ok" : "Gemini missing"}${OPENROUTER_KEYS.length ? " / OpenRouter ok" : ""}`);
+  console.log(`  relays:    ${FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + OPENROUTER_KEYS.length} fallback chain${FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + OPENROUTER_KEYS.length === 1 ? "" : "s"}`);
   console.log("");
 });
 
