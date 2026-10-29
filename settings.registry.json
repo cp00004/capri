@@ -66,5 +66,15 @@
     "type": "list",
     "default": [],
     "description": "Anything you tell her you like, use or want remembered."
+  },
+  {
+    "key": "app_banter",
+    "label": "App banter",
+    "type": "text",
+    "default": "",
+    "description": "Added by Capri from a spoken instruction.",
+    "official": true,
+    "addedBy": "TestUser",
+    "addedAt": "2026-10-29T20:09:12.902Z"
   }
 ]
