@@ -1227,6 +1227,13 @@ function startWakeWord() {
       localStorage.setItem("capri.wakeWord", "0");
       paintWakeWord();
       showNotice("Allow microphone access for wake-word listening, then turn it on again.", null, null, 8000);
+    } else if (event.error === "network" && IS_DESKTOP_APP) {
+      // Electron ships without Google's speech service, so this window cannot
+      // run the wake word. The mic button still records and transcribes.
+      wakeWord.enabled = false;
+      localStorage.setItem("capri.wakeWord", "0");
+      paintWakeWord();
+      showNotice("This window can't hear the wake word. Tap the mic and talk.", null, null, 9000);
     }
   };
   recognition.onend = () => {

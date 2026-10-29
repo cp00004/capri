@@ -55,11 +55,11 @@ if (!isPortFree(effectivePort)) {
 const PORT = effectivePort;
 
 const APP_URL = `http://localhost:${PORT}`;
-// Default to the local server: loopback needs no pairing, so hands and memory
-// work the moment the app opens. Point CAPRI_START_URL at a paired host to use
-// a shared memory bank instead.
-const REMOTE_URL = process.env.CAPRI_START_URL || "";
-const START_URL = REMOTE_URL || APP_URL;
+// Her brain, keys and Google memory live on the hosted server, so the window
+// opens that build and drives PC actions over the native bridge. The bundled
+// server stays as an offline fallback so the shell still opens without a link.
+const REMOTE_URL = process.env.CAPRI_START_URL || "https://cp00004.github.io/capri/";
+const START_URL = REMOTE_URL;
 
 // Electron ships its own node runtime; ELECTRON_RUN_AS_NODE runs the server
 // with it. The packaged binary is Capri.exe, not electron.exe, so never rely
@@ -71,7 +71,7 @@ let win    = null;
 let tray   = null;
 let server = null;
 let quitting = false;
-let usingRemote = Boolean(REMOTE_URL);
+let usingRemote = true;
 
 // ── Permissions — grant mic + camera without prompting ───────────────────────
 app.whenReady().then(() => {
@@ -165,6 +165,10 @@ function createWindow() {
   // Google treats "Electron/xx" as an embedded browser and may refuse sign-in.
   const cleanUA = win.webContents.getUserAgent().replace(/\s(Electron|Capri)\/\S+/g, "");
   win.webContents.setUserAgent(cleanUA);
+  // The GSI popup is a separate webContents and needs the same clean UA.
+  win.webContents.on("did-create-window", (child) => {
+    try { child.webContents.setUserAgent(cleanUA); } catch { /* popup already gone */ }
+  });
 
   win.webContents.on("did-fail-load", (_event, code, description, failedUrl, isMainFrame) => {
     if (!isMainFrame || !usingRemote) return;
@@ -267,12 +271,11 @@ ipcMain.handle("capri-open", async (_event, target) => {
     await shell.openExternal(raw);
     return "ok";
   }
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) {
-    try { await shell.openExternal(raw); return "ok"; } catch { /* fall through */ }
-  }
   if (APP_SCHEMES[key]) {
     try { await shell.openExternal(APP_SCHEMES[key]); return "ok"; } catch { /* fall through */ }
   }
+  // cmd.exe still parses the string after `start`, so refuse shell metacharacters.
+  if (raw.length > 200 || !/^[\p{L}\p{N} ._\-'()+]+$/u.test(raw)) return "err:unsafe";
   try {
     const child = spawn("cmd.exe", ["/c", "start", "", raw], { detached: true, stdio: "ignore", windowsHide: true });
     child.on("error", () => {});
