@@ -16,7 +16,7 @@ async function loop() {
     await fetch(`${BASE}/api/hands/result`, {
       method: "POST",
       headers: { ...AUTH, "Content-Type": "application/json" },
-      body: JSON.stringify({ id: payload.call.id, result: { ok: true, output: "opened roblox" } }),
+      body: JSON.stringify({ id: payload.call.id, result: { ok: false, error: "not installed" } }),
     });
   }
 }
