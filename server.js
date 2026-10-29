@@ -623,6 +623,9 @@ function userKeyCandidates(raw) {
   if (key.startsWith("ftai_")) {
     return FREETHEAI_MODEL_CHAIN.map((model) => ({ name: "freetheai", base: FREETHEAI_BASE, key, model, own: true }));
   }
+  if (key.startsWith("mstrl_")) {
+    return MISTRAL_MODEL_CHAIN.map((model) => ({ name: "mistral", base: MISTRAL_BASE, key, model, own: true }));
+  }
   return [];
 }
 
