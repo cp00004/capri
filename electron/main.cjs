@@ -144,8 +144,10 @@ function createWindow() {
     height:          900,
     minWidth:        360,
     minHeight:       600,
-    frame:           false,
-    transparent:     false,
+    frame:           true,
+    autoHideMenuBar: true,
+    resizable:       true,
+    maximizable:     true,
     backgroundColor: "#07000c",
     icon:            ICON,
     title:           "CAPRI",
@@ -157,6 +159,7 @@ function createWindow() {
       allowRunningInsecureContent: false,
     },
   });
+  win.setMenuBarVisibility(false);
 
   win.loadURL(START_URL).catch(() => {
     if (usingRemote) win.loadURL(APP_URL).catch(() => {});
