@@ -1,16 +1,17 @@
 /**
  * CAPRI // Electron shell  — main.cjs
  * - Spawns server.js (ESM) as a child process
- * - Opens frameless window
+ * - Opens a normal window with OS min/max/close
  * - Grants mic + camera permissions automatically
  * - Handles Google OAuth popup
+ * - Checks the update feed and installs new builds with a progress bar
  * - Lives in the system tray
  */
 
 const {
   app, BrowserWindow, Tray, Menu,
   nativeImage, ipcMain, shell, session,
-  dialog
+  net
 } = require("electron");
 
 const { spawn } = require("child_process");

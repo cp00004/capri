@@ -1538,6 +1538,24 @@ function lastSentenceEnd(text) {
   return 0;
 }
 
+// The first chunk goes out as soon as it is speakable, so the voice does not
+// sit waiting for a full sentence while the text is already on screen.
+function firstSpeechBoundary(text, from = 0) {
+  const chunk = text.slice(from);
+  if (chunk.length < 18) return 0;
+  const hard = chunk.match(/[.!?]["')\\]]?\s/g);
+  if (hard) return from + chunk.lastIndexOf(hard[hard.length - 1]) + hard[hard.length - 1].length;
+  const soft = chunk.match(/[,;:]\s/g);
+  if (soft && chunk.length >= 22) {
+    return from + chunk.lastIndexOf(soft[soft.length - 1]) + soft[soft.length - 1].length;
+  }
+  if (chunk.length >= 44) {
+    const space = chunk.lastIndexOf(" ", 60);
+    if (space >= 20) return from + space + 1;
+  }
+  return 0;
+}
+
 let activeAbort = null;
 let actTimer = null;
 
@@ -1563,6 +1581,7 @@ async function respond(userText) {
 
   let speechBuf = "";
   let spokenUpTo = 0;
+  let firstChunk = true;
   let failed = false;
   state.streaming = true;
 
@@ -1570,8 +1589,8 @@ async function respond(userText) {
 
   speech.stopped = false;
   speech.onDrain = () => {
-    if (!state.streaming) {
-      setPhase("idle");
+    if (!state.streaming && !rec.active && !rec.starting && !cmdRec.active) {
+      if (state.phase !== "listening") setPhase("idle");
       if (rec.listenQueued) startListening();
       else if (wakeWord.enabled) startWakeWord();
     }
@@ -1618,10 +1637,13 @@ async function respond(userText) {
             typer.push(evt.text);
             speechBuf += evt.text;
 
-            const boundary = lastSentenceEnd(speechBuf);
+            const boundary = firstChunk
+              ? firstSpeechBoundary(speechBuf, spokenUpTo)
+              : lastSentenceEnd(speechBuf);
             if (boundary > spokenUpTo) {
               speech.enqueue(speechBuf.slice(spokenUpTo, boundary).trim());
               spokenUpTo = boundary;
+              firstChunk = false;
             }
           } else if (evt.type === "device_call" && (evt.name === "open_on_phone" || evt.name === "open_on_device")) {
             openOnDevice(evt.args || {});
@@ -1670,8 +1692,9 @@ async function respond(userText) {
   } finally {
     state.streaming = false;
     activeAbort = null;
-    if (!speech.busy) {
-      setPhase("idle");
+    // A barge-in tap may already be recording; never stomp on it.
+    if (!speech.busy && !rec.active && !rec.starting && !cmdRec.active) {
+      if (state.phase !== "listening") setPhase("idle");
       if (rec.listenQueued) startListening();
       else if (wakeWord.enabled) startWakeWord();
     }
@@ -1744,6 +1767,12 @@ function toggleDownloadSheet() {
   else closeSheet(el.downloadSidebar);
 }
 el.downloadBtn?.addEventListener("click", toggleDownloadSheet);
+
+// The installed builds already are the download; no point offering it again.
+if (INSTALLED) {
+  el.downloadBtn?.classList.add("hidden");
+  el.downloadSidebar?.classList.add("hidden");
+}
 
 // In the desktop app, hand installer links to the system browser so the
 // download runs where the user can see it.
@@ -2090,7 +2119,18 @@ function syncGoogleUi() {
   if (el.googleButton) el.googleButton.classList.toggle("hidden", signedIn);
   if (el.signOutBtn) el.signOutBtn.classList.toggle("hidden", !signedIn);
   if (googleFallbackBtn) googleFallbackBtn.classList.toggle("hidden", signedIn || rendered);
+  if (el.signInPill) {
+    const offer = REMOTE_ONLY && !signedIn && Boolean(state.config?.google?.configured);
+    el.signInPill.classList.toggle("hidden", !offer);
+  }
 }
+
+// One tap from the main screen: the account sheet plus Google's own button.
+el.signInPill?.addEventListener("click", async () => {
+  await renderGoogle();
+  if (el.settings.classList.contains("hidden")) openSheet(el.settings);
+  setTimeout(() => el.googleBtn?.click(), 220);
+});
 
 el.googleBtn?.addEventListener("click", async () => {
   if (!state.config?.google?.configured) {
@@ -2402,6 +2442,7 @@ el.micBtn.addEventListener("click", () => {
     speech.stop();
     state.streaming = false;
     rec.listenQueued = false;
+    setPhase("idle"); // startListening refuses to run while the phase says thinking
     setTimeout(() => startListening(), 120);
   } else if (speech.busy) {
     // Capri is speaking — cut her off and listen
@@ -2560,6 +2601,88 @@ async function boot() {
     typer.reset(cfg?.local ? "Capricorn is awake. Say the word." : "Capricorn is on the line.");
   }
   if (wakeWord.enabled && !document.hidden) startWakeWord();
+  initUpdates();
+}
+
+/* ---------------------------------------------------------------- updates */
+
+const updateUi = { shown: false, dismissed: false, wired: false, checked: false };
+
+function showUpdateScreen({ kicker, title, note, percent = 0, action = null }) {
+  if (!el.updateScreen) return;
+  updateUi.shown = true;
+  el.updateKicker.textContent = kicker;
+  el.updateTitle.textContent = title;
+  el.updateNote.textContent = note;
+  el.updateFill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+  el.updatePct.textContent = `${Math.round(percent)}%`;
+  el.updateAction.classList.toggle("hidden", !action);
+  if (action) el.updateAction.textContent = action.label;
+  el.updateScreen.classList.remove("hidden");
+}
+
+function newerVersion(latest, current) {
+  const a = String(latest || "").split(".").map((n) => Number(n) || 0);
+  const b = String(current || "").split(".").map((n) => Number(n) || 0);
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
+function initUpdates() {
+  // The desktop shell checks the feed itself and reports progress over IPC.
+  if (IS_DESKTOP_APP && typeof window.capriNative?.onUpdate === "function") {
+    if (updateUi.wired) return;
+    updateUi.wired = true;
+    window.capriNative.onUpdate((evt) => {
+      if (!evt || updateUi.dismissed) return;
+      if (evt.phase === "downloading") {
+        showUpdateScreen({
+          kicker: `NEW BUILD ${evt.version || ""}`.trim(),
+          title: "UPDATING CAPRI",
+          note: "Downloading the new build. The app restarts by itself when it lands.",
+          percent: evt.percent || 0,
+        });
+      } else if (evt.phase === "installing") {
+        showUpdateScreen({
+          kicker: "PACKAGE READY",
+          title: "INSTALLING",
+          note: "Closing this window and running the installer.",
+          percent: 100,
+        });
+      } else if (evt.phase === "error") {
+        updateUi.dismissed = true;
+        if (el.updateScreen) el.updateScreen.classList.add("hidden");
+        showNotice("Update failed. Grab the new build from the download panel.", null, null, 9000);
+      }
+    });
+    return;
+  }
+
+  // The phone build points at the download page instead of self-installing.
+  if (!IS_NATIVE || updateUi.checked) return;
+  updateUi.checked = true;
+  fetch(`${UPDATE_FEED}?t=${Date.now()}`, { cache: "no-store" })
+    .then((res) => (res.ok ? res.json() : null))
+    .then((feed) => {
+      if (!feed?.version || !newerVersion(feed.version, APP_VERSION)) return;
+      showUpdateScreen({
+        kicker: `CAPRI v${feed.version} IS OUT`,
+        title: "NEW BUILD READY",
+        note: "Install it over this one and your memory comes with you.",
+        percent: 100,
+        action: { label: "UPDATE ON DEPLEXO" },
+      });
+      el.updateAction.onclick = () => {
+        const url = feed.page || STORE_URL;
+        if (window.CapriDevice?.open) window.CapriDevice.open(url);
+        else window.open(url, "_system");
+      };
+    })
+    .catch(() => { /* offline: try again next launch */ });
 }
 
 /* ---------------------------------------------------------------- lost link */
