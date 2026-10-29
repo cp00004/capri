@@ -92,10 +92,7 @@ const IS_GITHUB_PAGES = location.hostname.includes('github.io');
 // Replace <YOUR-PROXY-URL> with the URL where you deploy the proxy (e.g. https://capri-proxy.vercel.app)
 const PROXY_URL = 'https://<YOUR-PROXY-URL>';
 const DEFAULT_TUNNEL = IS_GITHUB_PAGES ? PROXY_URL : "https://capricorn.de.deplexo.com";
-const DEFAULT_BACKEND = IS_GITHUB_PAGES ? "" : DEFAULT_TUNNEL;
-const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
-const IS_GITHUB_PAGES = location.hostname.includes('github.io');
-const DEFAULT_BACKEND = IS_GITHUB_PAGES ? "" : DEFAULT_TUNNEL;
+
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
