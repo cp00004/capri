@@ -704,26 +704,6 @@ function refreshVoices() {
   el.voiceSelect.value = state.voicePreset;
   paintVoiceHint();
 }
-  const list = state.voices.length ? state.voices : FALLBACK_VOICES;
-  el.voiceSelect.innerHTML = "";
-  for (const v of list) {
-    const opt = document.createElement("option");
-    opt.value = v.id;
-    opt.textContent = v.label || v.id;
-    opt.title = v.note || "";
-    el.voiceSelect.append(opt);
-  }
-  const sys = document.createElement("option");
-  sys.value = "system";
-  sys.textContent = "SYSTEM // browser voice";
-  el.voiceSelect.append(sys);
-
-  if (![...el.voiceSelect.options].some((o) => o.value === state.voicePreset)) {
-    state.voicePreset = "capri";
-  }
-  el.voiceSelect.value = state.voicePreset;
-  paintVoiceHint();
-}
 
 function paintVoiceHint() {
   if (!el.voiceHint) return;
