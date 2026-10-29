@@ -1957,7 +1957,9 @@ function syncUserKeyHint() {
       ? "OpenRouter"
       : saved.startsWith("ftai_")
         ? "FreeTheAI"
-        : "Gemini";
+        : saved.startsWith("mstrl_")
+          ? "Mistral"
+          : "Gemini";
   el.userKeyHint.textContent = `Using your own ${who} key (${saved.slice(0, 3)}…${saved.slice(-4)}). Saved on this device only. Tap SAVE with an empty box to remove it.`;
 }
 syncUserKeyHint();
@@ -1971,9 +1973,9 @@ el.userKeySave.addEventListener("click", () => {
     showNotice("Own key removed. Capri is back on the server key.", null, null, 4000);
     return;
   }
-  const known = /^(gsk_|AIza|AQ\.|sk-or-|ftai_)/.test(typed) && typed.length >= 20;
+  const known = /^(gsk_|AIza|AQ\.|sk-or-|ftai_|mstrl_)/.test(typed) && typed.length >= 20;
   if (!known) {
-    showNotice("That doesn't look like a Groq, Gemini or OpenRouter key.", null, null, 6000);
+    showNotice("That doesn't look like a Groq, Gemini, Mistral or OpenRouter key.", null, null, 6000);
     return;
   }
   localStorage.setItem(OWN_KEY, typed);
