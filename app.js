@@ -2662,10 +2662,17 @@ async function boot() {
     }
     state.google = cfg.google || null;
     if (cfg.portrait) {
-      state.portrait = cfg.portrait;
-      el.portraitImg.src = cfg.portrait;
-      el.ghostA.src = cfg.portrait;
-      el.ghostB.src = cfg.portrait;
+      // The shipped portrait wins over a stale server path, and a fresh query
+      // string keeps browsers from reusing the old cached face.
+      const shipped = "assets/capri-portrait.png?v=2";
+      const use = (src) => {
+        state.portrait = src;
+        el.portraitImg.src = src;
+        el.ghostA.src = src;
+        el.ghostB.src = src;
+      };
+      el.portraitImg.addEventListener("error", () => use(cfg.portrait), { once: true });
+      use(shipped);
     }
     if (!cfg.hasKey && !cfg.hasGemini) showNotice("Capri's server has no API key yet, so she cannot think. Add GROQ_API_KEY (or GEMINI_API_KEY) in the hosting panel, then redeploy.", null, null, 20000);
 
