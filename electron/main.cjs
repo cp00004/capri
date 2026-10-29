@@ -336,6 +336,26 @@ ipcMain.handle("capri-version", () => app.getVersion());
 const SIGNIN_PAGE = "https://cp00004.github.io/capri/auth.html";
 let signInBusy = false;
 
+const CHROME_PATHS = [
+  path.join(process.env.LOCALAPPDATA || "", "Google", "Chrome", "Application", "chrome.exe"),
+  path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+  path.join(process.env["PROGRAMFILES(X86)"] || "", "Google", "Chrome", "Application", "chrome.exe"),
+];
+
+// A browser without Google sessions cannot show the account picker. Chrome on
+// this PC already has them, and a running Chrome just opens another tab in the
+// profile the user is on, so prefer it over whatever the default browser is.
+function openSystemBrowser(url) {
+  const chrome = CHROME_PATHS.find((p) => p && fs.existsSync(p));
+  logLine(chrome ? "sign-in: opening chrome" : "sign-in: opening the default browser");
+  if (!chrome) return shell.openExternal(url);
+  return new Promise((resolve, reject) => {
+    const child = spawn(chrome, [url], { detached: true, stdio: "ignore" });
+    child.once("error", () => { shell.openExternal(url).then(resolve, reject); });
+    child.once("spawn", () => { child.unref(); resolve(); });
+  });
+}
+
 const SIGNIN_DONE_PAGE = `<!doctype html><meta charset="utf-8"><title>Capri signed in</title>
 <body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#07000c;color:#e6dbe4;font:16px/1.5 system-ui,sans-serif">
 <div style="max-width:380px;padding:28px;border:1px solid #3a0a2a;border-radius:16px;text-align:center;background:#120013">
@@ -376,7 +396,8 @@ function googleSignIn() {
       const port = server.address().port;
       const url = `${SIGNIN_PAGE}?mode=loop&cb=${encodeURIComponent(`http://127.0.0.1:${port}/g`)}`;
       logLine(`google sign-in: browser on loopback ${port}`);
-      shell.openExternal(url).catch((err) => finish({ error: `could not open your browser: ${err.message}` }));
+      openSystemBrowser(url)
+        .catch((err) => finish({ error: `could not open your browser: ${err.message}` }));
     });
 
     timer = setTimeout(() => finish({ error: "sign-in timed out" }), 5 * 60 * 1000);

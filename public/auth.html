@@ -83,6 +83,7 @@
     <div id="slot"></div>
     <button id="go" class="btn" type="button" hidden>Continue with Google</button>
     <p class="hint" id="hint">Google's account picker opens when you press the button.</p>
+    <p class="hint"><a id="altLink" href="https://accounts.google.com/AccountChooser">Don't see your account? Add it in Google</a></p>
   </main>
 
 <script>
@@ -92,6 +93,10 @@
   var mode = params.get("mode") === "app" ? "app" : "loop";
   var cb = params.get("cb") || "";
   var done = false;
+
+  // Lets a user add a Google account to this browser, then come straight back.
+  document.getElementById("altLink").href =
+    "https://accounts.google.com/AccountChooser?continue=" + encodeURIComponent(location.href);
 
   var titleEl = document.getElementById("title");
   var subEl = document.getElementById("sub");
