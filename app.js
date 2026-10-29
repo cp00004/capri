@@ -80,6 +80,7 @@ const el = {
 // origin. Static builds (GitHub Pages) and the native shell need the tunnel.
 const IS_GITHUB_PAGES = location.hostname.includes("github.io");
 const IS_NATIVE = location.protocol === "capacitor:" || (Boolean(window.Capacitor) && location.hostname === "localhost");
+const IS_PHONE = IS_NATIVE || /android|iphone|ipod|ipad|mobile/i.test(navigator.userAgent);
 const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
 const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
@@ -107,7 +108,7 @@ const state = {
   voicePreset: localStorage.getItem("capri.voicePreset") || "capri",
   browserVoice: null,
   orpheusVoices: ["diana", "hannah", "autumn", "tara", "leah", "mia", "zoe"],
-  portrait: "assets/capri.svg",
+  portrait: "assets/capri-portrait.png",
   streaming: false,
   pendingAccessId: null,
   pendingPoll: null,
@@ -131,6 +132,7 @@ async function api(url, opts = {}) {
   const headers = new Headers(opts.headers || {});
   if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
   if (state.session) headers.set("X-Capri-Profile", state.session);
+  if (IS_PHONE) headers.set("X-Capri-Device", "mobile");
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
@@ -936,8 +938,8 @@ async function startListening() {
     if (rms > 0.022) rec.silenceSince = now;
 
     const elapsed = now - rec.startedAt;
-    if (elapsed > 1400 && now - rec.silenceSince > 1300) return stopListening();
-    if (elapsed > 25000) return stopListening();
+    if (elapsed > 1500 && now - rec.silenceSince > 1800) return stopListening();
+    if (elapsed > 30000) return stopListening();
 
     rec.raf = requestAnimationFrame(loop);
   };
@@ -953,7 +955,7 @@ function paintWakeWord() {
   el.wakeWordBtn.textContent = wakeWord.enabled ? "ON" : "OFF";
   el.wakeWordState.textContent = !supported ? "not supported here" : wakeWord.active ? "listening for Capri" : wakeWord.enabled ? "armed" : "tap to enable";
   el.wakeWordHint.textContent = supported
-    ? "When enabled, say Capri while this page is open and visible. Background listening needs native app support."
+    ? "Say Capri — or anything close, like capree or kapri — then give the order. Background listening needs native app support."
     : "This browser does not support wake-word listening. Tap the mic to talk instead.";
 }
 
@@ -975,6 +977,51 @@ function setWakeWordEnabled(enabled) {
   startWakeWord();
 }
 
+const WAKE_WORDS = new Set([
+  "capri", "capry", "capree", "caprie", "caprii", "kapri", "kapry", "kabri", "cabri",
+  "caprice", "cappy", "cappi", "capra", "caprio", "capris",
+]);
+
+function editDistance(a, b) {
+  const s = String(a || "");
+  const t = String(b || "");
+  if (Math.abs(s.length - t.length) > 2) return 99;
+  const prev = new Array(t.length + 1);
+  const next = new Array(t.length + 1);
+  for (let j = 0; j <= t.length; j += 1) prev[j] = j;
+  for (let i = 1; i <= s.length; i += 1) {
+    next[0] = i;
+    for (let j = 1; j <= t.length; j += 1) {
+      next[j] = Math.min(
+        prev[j] + 1,
+        next[j - 1] + 1,
+        prev[j - 1] + (s[i - 1] === t[j - 1] ? 0 : 1)
+      );
+    }
+    for (let j = 0; j <= t.length; j += 1) prev[j] = next[j];
+  }
+  return prev[t.length];
+}
+
+function isWakePhrase(text) {
+  const clean = String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9' ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!clean) return false;
+  if (/\bcapricorn\b/.test(clean)) return false;
+  const tokens = clean.split(" ");
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i].replace(/^'+|'+$/g, "");
+    if (!token) continue;
+    if (WAKE_WORDS.has(token)) return true;
+    if (token === "cap" && tokens[i + 1] === "ri") return true;
+    if (token.length >= 4 && token.length <= 7 && editDistance(token, "capri") <= 1) return true;
+  }
+  return false;
+}
+
 function startWakeWord() {
   if (!wakeWord.enabled || document.hidden || wakeWord.active || wakeWord.starting || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -988,7 +1035,7 @@ function startWakeWord() {
   wakeWord.recognition = recognition;
   wakeWord.starting = true;
   recognition.continuous = true;
-  recognition.interimResults = false;
+  recognition.interimResults = true;
   recognition.lang = "en-US";
   recognition.onstart = () => {
     wakeWord.starting = false;
@@ -1001,14 +1048,15 @@ function startWakeWord() {
     }
   };
   recognition.onresult = (event) => {
+    let said = "";
     for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      if (!event.results[index].isFinal) continue;
-      if (/\bcapri\b/i.test(event.results[index][0]?.transcript || "")) {
-        wakeWord.pendingStart = true;
-        try { recognition.stop(); } catch { /* onend will resume */ }
-        return;
-      }
+      said += ` ${event.results[index][0]?.transcript || ""}`;
     }
+    if (!isWakePhrase(said)) return;
+    if (wakeWord.pendingStart) return;
+    wakeWord.pendingStart = true;
+    playListeningChime();
+    try { recognition.stop(); } catch { /* onend will resume */ }
   };
   recognition.onerror = (event) => {
     if (["not-allowed", "service-not-allowed"].includes(event.error)) {
@@ -1135,6 +1183,114 @@ async function transcribe(blob) {
   }
 }
 
+/* ---------------------------------------------------------------- phone hands */
+
+const PHONE_APPS = {
+  youtube: { pkg: "com.google.android.youtube", url: "https://www.youtube.com", ios: "youtube://" },
+  yt: { pkg: "com.google.android.youtube", url: "https://www.youtube.com", ios: "youtube://" },
+  discord: { pkg: "com.discord", url: "https://discord.com/app", ios: "discord://" },
+  spotify: { pkg: "com.spotify.music", url: "https://open.spotify.com", ios: "spotify://" },
+  instagram: { pkg: "com.instagram.android", url: "https://www.instagram.com", ios: "instagram://" },
+  insta: { pkg: "com.instagram.android", url: "https://www.instagram.com", ios: "instagram://" },
+  facebook: { pkg: "com.facebook.katana", url: "https://www.facebook.com", ios: "fb://" },
+  tiktok: { pkg: "com.zhiliaoapp.musically", url: "https://www.tiktok.com", ios: "https://www.tiktok.com" },
+  twitter: { pkg: "com.twitter.android", url: "https://x.com", ios: "twitter://" },
+  x: { pkg: "com.twitter.android", url: "https://x.com", ios: "twitter://" },
+  reddit: { pkg: "com.reddit.frontpage", url: "https://www.reddit.com", ios: "reddit://" },
+  twitch: { pkg: "tv.twitch.android.app", url: "https://www.twitch.tv", ios: "twitch://" },
+  netflix: { pkg: "com.netflix.mediaclient", url: "https://www.netflix.com", ios: "nflx://" },
+  whatsapp: { pkg: "com.whatsapp", url: "https://web.whatsapp.com", ios: "whatsapp://" },
+  telegram: { pkg: "org.telegram.messenger", url: "https://web.telegram.org", ios: "tg://" },
+  snapchat: { pkg: "com.snapchat.android", url: "https://web.snapchat.com", ios: "snapchat://" },
+  gmail: { pkg: "com.google.android.gm", url: "https://mail.google.com", ios: "googlegmail://" },
+  maps: { pkg: "com.google.android.apps.maps", url: "https://maps.google.com", ios: "maps://" },
+  chrome: { pkg: "com.android.chrome", url: "https://www.google.com", ios: "googlechrome://" },
+  browser: { pkg: "com.android.chrome", url: "https://www.google.com", ios: "https://www.google.com" },
+  photos: { pkg: "com.google.android.apps.photos", url: "https://photos.google.com", ios: "photos-redirect://" },
+  drive: { pkg: "com.google.android.apps.docs", url: "https://drive.google.com", ios: "googledrive://" },
+  calendar: { pkg: "com.google.android.calendar", url: "https://calendar.google.com", ios: "calshow://" },
+  clock: { pkg: "com.google.android.deskclock", url: null, action: "android.intent.action.SHOW_ALARMS" },
+  alarm: { pkg: "com.google.android.deskclock", url: null, action: "android.intent.action.SHOW_ALARMS" },
+  calculator: { pkg: "com.google.android.calculator", url: null },
+  camera: { pkg: "com.android.camera2", url: null, action: "android.media.action.STILL_IMAGE_CAMERA" },
+  settings: { pkg: "com.android.settings", url: null, action: "android.settings.SETTINGS" },
+  store: { pkg: "com.android.vending", url: "https://play.google.com/store", ios: "https://play.google.com/store" },
+  "play store": { pkg: "com.android.vending", url: "https://play.google.com/store", ios: "https://play.google.com/store" },
+  phone: { url: "tel:", ios: "tel:" },
+  dialer: { url: "tel:", ios: "tel:" },
+  call: { url: "tel:", ios: "tel:" },
+  messages: { url: "sms:", ios: "sms:" },
+  sms: { url: "sms:", ios: "sms:" },
+  text: { url: "sms:", ios: "sms:" },
+  email: { url: "mailto:", ios: "mailto:" },
+  mail: { url: "mailto:", ios: "mailto:" },
+};
+
+function phoneAppFor(target) {
+  const clean = String(target || "").toLowerCase().replace(/[^a-z0-9 .:/-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!clean) return null;
+  if (PHONE_APPS[clean]) return PHONE_APPS[clean];
+  for (const token of clean.split(" ")) {
+    if (PHONE_APPS[token]) return PHONE_APPS[token];
+  }
+  return null;
+}
+
+function openOnPhone(args = {}) {
+  const target = String(args.target ?? args.name ?? args.app ?? args.query ?? "").trim();
+  if (!target) return false;
+  showAction(`phone: ${target}`);
+
+  if (window.CapriDevice && typeof window.CapriDevice.open === "function") {
+    try {
+      const reply = String(window.CapriDevice.open(target) || "");
+      if (reply.startsWith("ok")) return true;
+    } catch { /* fall through to browser intents */ }
+  }
+
+  if (/^(https?:|tel:|sms:|mailto:)/i.test(target)) {
+    location.href = target;
+    return true;
+  }
+
+  const app = phoneAppFor(target);
+  const ua = navigator.userAgent;
+  const android = /android/i.test(ua);
+
+  if (app && /^(tel|sms|mailto):/i.test(app.url || "")) {
+    location.href = app.url;
+    return true;
+  }
+
+  if (app && android && app.pkg) {
+    if (app.action) {
+      location.href = `intent:#Intent;action=${app.action};end`;
+      return true;
+    }
+    const fallback = app.url || `https://play.google.com/store/apps/details?id=${app.pkg}`;
+    const path = app.url ? app.url.replace(/^https?:\/\//, "") : "";
+    const scheme = app.url ? app.url.split(":")[0] : "https";
+    location.href = `intent://${path}#Intent;scheme=${scheme};package=${app.pkg};S.browser_fallback_url=${encodeURIComponent(fallback)};end`;
+    return true;
+  }
+
+  if (app && /iphone|ipad|ipod/i.test(ua) && app.ios) {
+    location.href = app.ios;
+    return true;
+  }
+  if (app && app.url) {
+    window.open(app.url, "_blank", "noopener");
+    return true;
+  }
+  if (app && app.pkg) {
+    location.href = `https://play.google.com/store/apps/details?id=${app.pkg}`;
+    return true;
+  }
+
+  location.href = `https://www.google.com/search?q=${encodeURIComponent(`${target} app`)}`;
+  return true;
+}
+
 /* ---------------------------------------------------------------- chat */
 
 function lastSentenceEnd(text) {
@@ -1233,6 +1389,8 @@ async function respond(userText) {
               speech.enqueue(speechBuf.slice(spokenUpTo, boundary).trim());
               spokenUpTo = boundary;
             }
+          } else if (evt.type === "device_call" && evt.name === "open_on_phone") {
+            openOnPhone(evt.args || {});
           } else if (evt.type === "action") {
             showAction(evt.label || evt.name);
           } else if (evt.type === "tool") {
@@ -1609,8 +1767,6 @@ async function handleGoogleCredential(response) {
     state.session = data.token;
     localStorage.setItem(SESSION_KEY, data.token);
     await boot();
-    const splashBar = document.getElementById('splashBar');
-    if (splashBar) splashBar.classList.add('hidden');
     showNotice(`Signed in as ${data.profile.name || data.profile.email}. Memory is tied to this account now.`, null, null, 6000);
     speech.enqueue("There you are. I remember you.");
   } catch {
@@ -1736,8 +1892,6 @@ el.signOutBtn.addEventListener("click", async () => {
   localStorage.removeItem(SESSION_KEY);
   showNotice("Signed out. This device is back on the local profile.", null, null, 5000);
   await boot();
-  const splashBar = document.getElementById('splashBar');
-  if (splashBar) splashBar.classList.add('hidden');
 });
 
 /* ---------------------------------------------------------------- settings */
@@ -2066,37 +2220,6 @@ async function fetchConfig() {
 }
 
 
-function initSplash() {
-  const splash = document.getElementById('splash');
-  const profileBg = document.getElementById('profileBg');
-  const profileBgBar = document.getElementById('profileBgBar');
-  if (splash) {
-    setTimeout(() => splash.classList.add('hidden'), 900);
-    setTimeout(() => { splash.remove(); }, 1600);
-  }
-  // Show profile background with loading bar after splash
-  if (profileBg) {
-    setTimeout(() => {
-      profileBg.classList.remove('hidden');
-      // Animate loading bar
-      if (profileBgBar) {
-        let progress = 0;
-        const interval = setInterval(() => {
-          progress += 2;
-          profileBgBar.style.width = Math.min(progress, 100) + '%';
-          if (progress >= 100) {
-            clearInterval(interval);
-            // After loading completes, hide profile bg
-            setTimeout(() => {
-              profileBg.classList.add('hidden');
-            }, 500);
-          }
-        }, 30);
-      }
-    }, 1000);
-  }
-}
-
 async function boot() {
   // Save default backend to localStorage if not already set
   if (DEFAULT_BACKEND && !localStorage.getItem(API_KEY) && !localStorage.getItem(SERVER_KEY)) {
@@ -2191,13 +2314,4 @@ async function boot() {
 
 window.addEventListener("online", () => { if (!state.config) boot(); });
 
-initSplash();
 boot();
-
-/* failsafe: the splash must never be able to hang the app */
-setTimeout(function () {
-  var s = document.getElementById("splash");
-  if (s) s.style.display = "none";
-  document.body.classList.remove("loading");
-  document.body.classList.add("ready");
-}, 4500);
