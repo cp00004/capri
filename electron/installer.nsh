@@ -1,15 +1,15 @@
 ; CAPRI installer customisation
-; The app installs per-user (no admin), so every registry write stays in HKCU.
+; The app installs per machine, so the registry markers live in HKLM.
 
 !macro customInit
   ; Nothing extra needed.
 !macroend
 
 !macro customInstall
-  WriteRegStr HKCU "SOFTWARE\Capricorn\Capri" "Installed" "1"
-  WriteRegStr HKCU "SOFTWARE\Capricorn\Capri" "InstallDir" "$INSTDIR"
+  WriteRegStr HKLM "SOFTWARE\Capricorn\Capri" "Installed" "1"
+  WriteRegStr HKLM "SOFTWARE\Capricorn\Capri" "InstallDir" "$INSTDIR"
 !macroend
 
 !macro customUnInstall
-  DeleteRegKey HKCU "SOFTWARE\Capricorn\Capri"
+  DeleteRegKey HKLM "SOFTWARE\Capricorn\Capri"
 !macroend

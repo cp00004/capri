@@ -253,7 +253,14 @@ async function checkForUpdates() {
 
     writeUpdateState({ version: latest, tries: tries + 1, at: Date.now() });
     sendUpdate({ phase: "installing", version: latest });
-    const installer = spawn(file, ["/S"], { detached: true, stdio: "ignore", windowsHide: true });
+    // The install lives in Program Files, so the installer has to run elevated.
+    // A plain spawn of a requireAdministrator exe fails silently - that is the
+    // "updates, closes, updates again" loop. Start-Process raises the UAC prompt.
+    const quoted = file.replace(/'/g, "''");
+    const installer = spawn("powershell.exe", [
+      "-NoProfile", "-WindowStyle", "Hidden", "-Command",
+      `Start-Process -FilePath '${quoted}' -ArgumentList '/S' -Verb RunAs`,
+    ], { detached: true, stdio: "ignore", windowsHide: true });
     installer.on("error", (err) => sendUpdate({ phase: "error", message: err.message }));
     installer.unref();
     setTimeout(() => { quitting = true; app.exit(0); }, 1800);
