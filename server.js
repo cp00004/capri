@@ -1858,8 +1858,8 @@ httpServer.listen(PORT, () => {
   console.log(`  google:    ${GOOGLE_CLIENT_ID ? "sign-in ready" : "not configured - see docs/GOOGLE_SIGNIN.md"}`);
   console.log(`  publish:   ${publisher.state.enabled ? "auto-push on" : "auto-push off"}`);
   console.log(`  secure:    ${HTTPS_ON ? `https on :${HTTPS_PORT} (cert.pem)` : "http only - phone mic needs npm run cert"}`);
-  console.log(`  keys:      ${FREETHEAI_KEYS.length ? "FreeTheAI ok" : "FreeTheAI missing"} / ${GROQ_KEYS.length ? `Groq ok (${GROQ_KEYS.length} key${GROQ_KEYS.length > 1 ? "s" : ""})` : "Groq missing"} / ${GEMINI_KEYS.length ? "Gemini voice ok" : "Gemini missing"}${OPENROUTER_KEYS.length ? " / OpenRouter ok" : ""}`);
-  console.log(`  relays:    ${FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + OPENROUTER_KEYS.length} fallback chain${FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + OPENROUTER_KEYS.length === 1 ? "" : "s"}`);
+  console.log(`  keys:      ${FREETHEAI_KEYS.length ? "FreeTheAI ok" : "FreeTheAI missing"} / ${GROQ_KEYS.length ? `Groq ok (${GROQ_KEYS.length} key${GROQ_KEYS.length > 1 ? "s" : ""})` : "Groq missing"} / ${GEMINI_KEYS.length ? "Gemini voice ok" : "Gemini missing"}${MISTRAL_KEYS.length ? " / Mistral ok" : ""}${OPENROUTER_KEYS.length ? " / OpenRouter ok" : ""}`);
+  console.log(`  relays:    ${FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + MISTRAL_KEYS.length * MISTRAL_MODEL_CHAIN.length + OPENROUTER_KEYS.length} fallback chain${FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + MISTRAL_KEYS.length * MISTRAL_MODEL_CHAIN.length + OPENROUTER_KEYS.length === 1 ? "" : "s"}`);
   console.log("");
 });
 
