@@ -1994,6 +1994,11 @@ process.on("unhandledRejection", (err) => {
   console.error(`  ! rejected: ${String(err?.stack || err).slice(0, 1200)}`);
 });
 
+httpServer.on("error", (err) => {
+  console.error(`  ! http port ${PORT} unusable: ${err.code || err.message}`);
+  process.exit(1);
+});
+
 httpServer.listen(PORT, () => {
   const urls = lanUrls();
   console.log("");
@@ -2015,6 +2020,10 @@ httpServer.listen(PORT, () => {
 if (HTTPS_ON) {
   const httpsServer = https.createServer({ cert: fs.readFileSync(CERT_FILE), key: fs.readFileSync(KEY_FILE) }, handler);
   httpsServer.on("tlsClientError", () => {});
+  // Phone mic is a bonus: a taken port must not take the whole server down.
+  httpsServer.on("error", (err) => {
+    console.error(`  ! https port ${HTTPS_PORT} unusable: ${err.code || err.message}`);
+  });
   httpsServer.listen(HTTPS_PORT, () => {
     console.log(`  secure:    https://localhost:${HTTPS_PORT} / phone links above`);
   });

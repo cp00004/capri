@@ -74,6 +74,7 @@ const NODE = process.execPath;
 let win    = null;
 let tray   = null;
 let server = null;
+let restarts = 0;
 let quitting = false;
 let usingRemote = true;
 let updateChecked = false;
@@ -112,9 +113,11 @@ function startServer() {
   server.on("close", (code) => {
     console.log(`[capri] server closed (${code})`);
     server = null;
-    if (!quitting) {
-      // Restart if it crashes unexpectedly
-      setTimeout(startServer, 2000);
+    // Restart a crash, but stop after a few tries so a dead port cannot spin.
+    if (!quitting && code !== 0) {
+      restarts += 1;
+      if (restarts <= 3) setTimeout(startServer, 2000);
+      else console.warn("[capri] bundled server keeps exiting - staying on the hosted build");
     }
   });
 }
