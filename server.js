@@ -1246,7 +1246,7 @@ async function geminiTts(text, voiceName) {
 }
 
 async function groqTts(text, voice) {
-  const key = process.env.GROQ_API_KEY;
+  const key = GROQ_KEYS[0];
   if (!key) throw new Error("No Groq key for the fallback voice.");
   const upstream = await fetch(`${GROQ_BASE}/audio/speech`, {
     method: "POST",
@@ -1364,7 +1364,7 @@ function audioExtension(type) {
 }
 
 async function handleStt(req, res) {
-  const key = process.env.GROQ_API_KEY;
+  const key = GROQ_KEYS[0];
   if (!key) return json(res, 500, { error: "No GROQ_API_KEY set." });
 
   const type = String(req.headers["content-type"] || "audio/webm").split(";")[0].trim();
@@ -1787,7 +1787,8 @@ httpServer.listen(PORT, () => {
   console.log(`  google:    ${GOOGLE_CLIENT_ID ? "sign-in ready" : "not configured - see docs/GOOGLE_SIGNIN.md"}`);
   console.log(`  publish:   ${publisher.state.enabled ? "auto-push on" : "auto-push off"}`);
   console.log(`  secure:    ${HTTPS_ON ? `https on :${HTTPS_PORT} (cert.pem)` : "http only - phone mic needs npm run cert"}`);
-  console.log(`  keys:      ${process.env.GROQ_API_KEY ? "Groq ok" : "Groq missing"} / ${GEMINI_KEY ? "Gemini ok" : "Gemini missing"}`);
+  console.log(`  keys:      ${GROQ_KEYS.length ? `Groq ok (${GROQ_KEYS.length} key${GROQ_KEYS.length > 1 ? "s" : ""})` : "Groq missing"} / ${GEMINI_KEYS.length ? "Gemini ok" : "Gemini missing"}${OPENROUTER_KEYS.length ? " / OpenRouter ok" : ""}`);
+  console.log(`  relays:    ${GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + GEMINI_KEYS.length + OPENROUTER_KEYS.length} fallback chain${GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + GEMINI_KEYS.length + OPENROUTER_KEYS.length === 1 ? "" : "s"}`);
   console.log("");
 });
 
