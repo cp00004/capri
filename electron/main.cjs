@@ -291,6 +291,62 @@ function writeUpdateState(state) {
 
 ipcMain.handle("capri-version", () => app.getVersion());
 
+// ── Google sign-in ───────────────────────────────────────────────────────────
+// Google refuses OAuth inside embedded webviews, so sign-in happens in the
+// system browser (which already has the user's Google sessions, hence the
+// account picker) and the credential comes back over a one-shot loopback port.
+const SIGNIN_PAGE = "https://cp00004.github.io/capri/auth.html";
+let signInBusy = false;
+
+const SIGNIN_DONE_PAGE = `<!doctype html><meta charset="utf-8"><title>Capri signed in</title>
+<body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#07000c;color:#e6dbe4;font:16px/1.5 system-ui,sans-serif">
+<div style="max-width:380px;padding:28px;border:1px solid #3a0a2a;border-radius:16px;text-align:center;background:#120013">
+<h2 style="margin:0 0 10px;color:#6dffbe;font-size:20px">Capri is signed in</h2>
+<p style="margin:0;color:#a98fa4">You can close this tab and go back to Capri.</p>
+</div></body>`;
+
+function googleSignIn() {
+  return new Promise((resolve) => {
+    if (signInBusy) { resolve({ error: "a sign-in is already open" }); return; }
+    signInBusy = true;
+    let settled = false;
+    let timer = null;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      signInBusy = false;
+      if (timer) clearTimeout(timer);
+      try { server.close(); } catch { /* already closed */ }
+      if (win && !win.isDestroyed()) win.focus();
+      logLine(`google sign-in: ${result.credential ? "credential received" : `stopped (${result.error || "no reason"})`}`);
+      resolve(result);
+    };
+
+    const server = http.createServer((req, res) => {
+      let url;
+      try { url = new URL(req.url, "http://127.0.0.1"); } catch { res.writeHead(400).end(); return; }
+      if (url.pathname !== "/g") { res.writeHead(404).end(); return; }
+      const credential = url.searchParams.get("credential") || "";
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+      res.end(SIGNIN_DONE_PAGE);
+      finish(credential ? { credential } : { error: "Google sent no credential back" });
+    });
+
+    server.on("error", (err) => finish({ error: err.message }));
+    server.listen(0, "127.0.0.1", () => {
+      const port = server.address().port;
+      const url = `${SIGNIN_PAGE}?mode=loop&cb=${encodeURIComponent(`http://127.0.0.1:${port}/g`)}`;
+      logLine(`google sign-in: browser on loopback ${port}`);
+      shell.openExternal(url).catch((err) => finish({ error: `could not open your browser: ${err.message}` }));
+    });
+
+    timer = setTimeout(() => finish({ error: "sign-in timed out" }), 5 * 60 * 1000);
+  });
+}
+
+ipcMain.handle("capri-google-signin", () => googleSignIn());
+
 // ── Main window ──────────────────────────────────────────────────────────────
 function createWindow() {
   win = new BrowserWindow({

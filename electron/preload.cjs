@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("capriNative", {
   close:      () => ipcRenderer.send("win-close"),
   quit:       () => ipcRenderer.send("win-quit"),
   version:    () => ipcRenderer.invoke("capri-version"),
+  googleSignIn: () => ipcRenderer.invoke("capri-google-signin"),
   onUpdate:   (cb) => {
     if (typeof cb !== "function") return;
     ipcRenderer.on("capri-update", (_event, data) => cb(data || {}));
