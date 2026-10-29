@@ -309,8 +309,9 @@ function handoffToNewer() {
 }
 
 function extractZip(zip, dir) {
+  const tar = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
   return new Promise((resolve, reject) => {
-    const child = spawn("tar.exe", ["-xf", zip, "-C", dir], { stdio: "ignore", windowsHide: true });
+    const child = spawn(tar, ["-xf", zip, "-C", dir], { stdio: "ignore", windowsHide: true });
     child.on("error", reject);
     child.on("exit", (code) => (code === 0 ? resolve() : reject(new Error(`unzip exited ${code}`))));
   });
