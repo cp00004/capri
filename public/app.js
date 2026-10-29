@@ -1761,60 +1761,12 @@ async function refreshSettings() {
   if (cfg.profile && !state.profile) applyProfile(cfg.profile);
   applyClock();
 
-  if (el.pairField) el.pairField.classList.toggle("hidden", !cfg.local);
-  if (el.deviceField) el.deviceField.classList.toggle("hidden", !cfg.local);
   if (el.auditField) el.auditField.classList.toggle("hidden", !cfg.local);
-  if (el.copyPair) el.copyPair.classList.toggle("hidden", !cfg.local);
-
-  if (cfg.local && el.pairCodeText) {
-    el.pairCodeText.textContent = cfg.pairCode || "------";
-    const url = cfg.lanUrls?.[0] || location.origin;
-    if (el.pairUrl) el.pairUrl.textContent = url;
-    if (el.copyPair) el.copyPair.dataset.url = url;
-  }
 
   if (el.publishState && el.publishHint) renderPublishState(cfg.publish || {});
   renderGoogle();
   setPcState();
-  if (cfg.local && el.deviceList) {
-    renderDevices(cfg.devices || []);
-    if (el.auditList) renderAudit();
-  }
-}
-
-function renderDevices(list) {
-  el.deviceList.innerHTML = "";
-  if (!list.length) {
-    const p = document.createElement("p");
-    p.className = "hint";
-    p.textContent = "nothing paired yet";
-    el.deviceList.append(p);
-    return;
-  }
-  for (const d of list) {
-    const row = document.createElement("div");
-    row.className = "device-row";
-    const name = document.createElement("span");
-    name.className = "name";
-    name.textContent = `${d.name} · ${d.ip || "lan"}`;
-    const scope = document.createElement("span");
-    scope.className = `scope ${d.scope === "full" ? "" : "voice"}`;
-    scope.textContent = d.scope === "full" ? "full" : "voice";
-    const cut = document.createElement("button");
-    cut.type = "button";
-    cut.className = "pill";
-    cut.textContent = "CUT";
-    cut.addEventListener("click", async () => {
-      await api("/api/devices/revoke", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: d.id }),
-      });
-      refreshSettings();
-    });
-    row.append(name, scope, cut);
-    el.deviceList.append(row);
-  }
+  if (cfg.local && el.auditList) renderAudit();
 }
 
 async function renderAudit() {
@@ -1860,17 +1812,6 @@ el.apiSave.addEventListener("click", () => {
   }
   showNotice("Saved. Reloading the link.", null, null, 1800);
   setTimeout(() => location.reload(), 600);
-});
-
-el.copyPair.addEventListener("click", async () => {
-  const url = el.copyPair.dataset.url || location.origin;
-  try {
-    await navigator.clipboard.writeText(url);
-    el.copyPair.textContent = "COPIED";
-    setTimeout(() => { el.copyPair.textContent = "COPY LINK"; }, 1500);
-  } catch {
-    showNotice(url);
-  }
 });
 
 el.pcLockBtn.addEventListener("click", async () => {
@@ -2064,7 +2005,6 @@ function isTypingTarget(target) {
 document.addEventListener("keydown", (e) => {
   if (e.code === "Escape") {
     if (!el.settings.classList.contains("hidden")) return closeSheet(el.settings);
-    if (!el.pairPanel.classList.contains("hidden")) return;
     if (!el.accessPrompt.classList.contains("hidden")) return;
     if (!el.kbForm.classList.contains("hidden")) return el.kbForm.classList.add("hidden");
     speech.stop();
@@ -2163,10 +2103,6 @@ async function boot() {
     if (el.notice) el.notice.classList.add("hidden");
     state.config = cfg;
     state.scope = cfg.scope;
-
-    if (!cfg.paired && !cfg.local && !cfg.profile?.google && !cfg.google?.configured) {
-      showPair("This device is not paired. Read the code on the PC.");
-    }
 
     if (Array.isArray(cfg.orpheusVoices) && cfg.orpheusVoices.length) {
       state.orpheusVoices = cfg.orpheusVoices;
