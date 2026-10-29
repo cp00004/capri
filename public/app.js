@@ -1377,9 +1377,27 @@ async function transcribe(blob) {
 
 /* ---------------------------------------------------------------- phone hands */
 
+let lastOpen = { key: "", at: 0 };
+
+function openKey(target) {
+  return String(target || "")
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/+$/, "")
+    .replace(/\s+(app|website|site)$/, "")
+    .trim();
+}
+
 function openOnDevice(args = {}) {
   const target = String(args.target ?? args.name ?? args.app ?? args.query ?? args.url ?? "").trim();
   if (!target) return false;
+
+  // Quick-open and a model tool call can both name the same site in one turn.
+  const key = openKey(target);
+  const now = Date.now();
+  if (key && key === lastOpen.key && now - lastOpen.at < 6000) return true;
+  lastOpen = { key, at: now };
 
   if (window.capriNative && typeof window.capriNative.openTarget === "function") {
     try { window.capriNative.openTarget(target); return true; } catch { /* fall through */ }
@@ -1404,10 +1422,22 @@ function openOnDesktop(target) {
   showAction(`open: ${target}`);
   const url = webUrlFor(target);
   if (!url) return false;
+  // No "noopener" here on purpose: with it window.open always returns null even
+  // when the tab did open, which used to trigger a second navigation that
+  // replaced this app tab with the target site.
   try {
-    const opened = window.open(url, "_blank", "noopener");
-    if (opened) return true;
-  } catch { /* popups blocked and the tab stays here */ }
+    const opened = window.open(url, "_blank");
+    if (opened) {
+      try { opened.opener = null; } catch { /* cross-origin */ }
+      try { opened.focus(); } catch { /* the browser decides */ }
+      return true;
+    }
+  } catch { /* blocked; handled below */ }
+  if (IS_HOSTED_WEB) {
+    // Never navigate the assistant away from itself - offer the link instead.
+    showNotice("Browser blocked the pop-up.", url, "open it here", 10000);
+    return false;
+  }
   try { location.assign(url); return true; } catch { return false; }
 }
 

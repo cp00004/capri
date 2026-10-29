@@ -789,6 +789,19 @@ function executeMemoryTool(name, args, profile, res) {
   return result;
 }
 
+// Same site spelled two ways ("youtube", "https://www.youtube.com", "YouTube app")
+// should count as one open so the device is not told twice.
+function openKey(target) {
+  return String(target || "")
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/^www\./, "")
+    .replace(/\/+$/, "")
+    .replace(/\s+(app|website|site)$/, "")
+    .replace(/[^a-z0-9.]/g, "")
+    .trim();
+}
+
 async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile, web, userKey }) {
   const hands = `${web ? "" : pcLocked ? LOCKED_HANDS : HANDS_ON}${mobile && !pcLocked ? PHONE_HANDS : ""}${web ? WEB_HANDS : ""}`;
   const messages = [
@@ -847,7 +860,9 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       upstream = await chatCompletion({
         provider,
         messages,
-        tools: useTools ? toolSet : undefined,
+        // The quick-open pass already launched the app, so hiding the open tools
+        // stops the model from asking for a second tab.
+        tools: useTools ? (quickTarget ? toolSet.filter((t) => !/^open_on_/.test(t.function.name)) : toolSet) : undefined,
         signal: controller.signal,
       });
       candIdx %= candidates.length; // keep using the relay that just answered
@@ -1002,7 +1017,9 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       if ((deviceOpen || pcOpen) && (mobile || web) && target) {
         // The client opens it on its own device; the server has no hands there.
         // Skip the echo when the quick-open pass already launched this target.
-        if (!quickTarget || !target.toLowerCase().includes(quickTarget.toLowerCase())) {
+        const q = openKey(quickTarget);
+        const t = openKey(target);
+        if (!q || !t || !(t.includes(q) || q.includes(t))) {
           sse(res, { type: "device_call", name: "open_on_device", label: actionLabel("open_on_device", args), args: { target } });
         }
         result = { ok: true, output: `opened ${target} on their device` };
