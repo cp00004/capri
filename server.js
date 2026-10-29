@@ -549,7 +549,7 @@ function candidateId(p) {
 }
 
 function providerCandidates() {
-  // Thinking runs on FreeTheAI + Groq only; Gemini stays reserved for the voice.
+  // Thinking runs on Groq, Mistral and FreeTheAI; Gemini stays reserved for the voice.
   const freetheai = [];
   for (const model of FREETHEAI_MODEL_CHAIN) {
     for (const key of FREETHEAI_KEYS) freetheai.push({ name: "freetheai", base: FREETHEAI_BASE, key, model });
@@ -558,9 +558,13 @@ function providerCandidates() {
   for (const model of GROQ_MODEL_CHAIN) {
     for (const key of GROQ_KEYS) groq.push({ name: "groq", base: GROQ_BASE, key, model });
   }
+  const mistral = [];
+  for (const model of MISTRAL_MODEL_CHAIN) {
+    for (const key of MISTRAL_KEYS) mistral.push({ name: "mistral", base: MISTRAL_BASE, key, model });
+  }
   const openrouter = OPENROUTER_KEYS.map((key) => ({ name: "openrouter", base: OPENROUTER_BASE, key, model: OPENROUTER_MODEL }));
   const primary = CHAT_PROVIDER === "groq" ? [...groq, ...freetheai] : [...freetheai, ...groq];
-  return [...primary, ...openrouter];
+  return [...primary, ...mistral, ...openrouter];
 }
 
 function orderCandidates() {
