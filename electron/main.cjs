@@ -269,16 +269,25 @@ async function checkForUpdates() {
     }
 
     console.log(`[capri] update ${current} -> ${latest}`);
+    logLine(`update: ${current} -> ${latest}`);
     sendUpdate({ phase: "downloading", version: latest, percent: 0 });
     const file = path.join(app.getPath("temp"), `Capri-${latest}-Setup.exe`);
     // Reuse the previous download when the same version is retried.
     const have = (() => { try { return fs.statSync(file).size; } catch { return 0; } })();
-    const { bytes } = have > 20 * 1024 * 1024
-      ? { bytes: have }
-      : await downloadFile(feed.windows, file, (percent) => {
-        sendUpdate({ phase: "downloading", version: latest, percent });
-      });
+    let bytes = have;
+    if (bytes <= 20 * 1024 * 1024) {
+      const progress = (percent) => sendUpdate({ phase: "downloading", version: latest, percent });
+      try {
+        ({ bytes } = await downloadFile(feed.windows, file, progress));
+      } catch (err) {
+        // One retry: a dropped connection should not cost a whole update cycle.
+        logLine(`update: download failed (${err.message}) - retrying once`);
+        await new Promise((r) => setTimeout(r, 3000));
+        ({ bytes } = await downloadFile(feed.windows, file, progress));
+      }
+    }
     if (bytes < 20 * 1024 * 1024) throw new Error("installer came down short");
+    logLine(`update: installer ready (${Math.round(bytes / 1048576)} MB)`);
 
     writeUpdateState({ version: latest, tries: tries + 1, at: Date.now() });
     sendUpdate({ phase: "installing", version: latest });
