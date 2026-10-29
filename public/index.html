@@ -48,65 +48,31 @@
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="styles.css?v=20261027-1723" />
 <!-- Google Identity Services -->
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
   function handleGoogleCredential(response) {
-    console.log('Google credential:', response.credential);
-    // TODO: send token to backend for verification
+    // Forward token into app.js handler if available, else log it
+    if (typeof window.capriGoogleCredential === 'function') {
+      window.capriGoogleCredential(response);
+    } else {
+      console.log('Google credential received:', response.credential ? response.credential.slice(0,20)+'…' : '(none)');
+    }
   }
-  window.addEventListener('DOMContentLoaded', () => {
-    // Initialize Google Sign‑In button
+  // Called by the GSI library once it is ready (data-callback on the div, or triggered here)
+  window._initGoogle = function() {
+    if (typeof google === 'undefined') return;
     google.accounts.id.initialize({
       client_id: '240583618801-6l8bpgneim3nfker6kbbbj4brt2gjrg2.apps.googleusercontent.com',
       callback: handleGoogleCredential,
+      auto_select: false,
     });
-    // Render button inside the existing #googleBtn container if present
     const btn = document.getElementById('googleBtn');
-    if (btn) {
+    if (btn && !btn.dataset.gsiRendered) {
       google.accounts.id.renderButton(btn, { theme: 'outline', size: 'large' });
+      btn.dataset.gsiRendered = '1';
     }
-    // Open download modal on click
-    const dl = document.getElementById('downloadBtn');
-    if (dl) {
-      dl.addEventListener('click', () => {
-        const modal = document.getElementById('downloadModal');
-        if (modal) {
-          modal.classList.remove('hidden');
-          modal.classList.add('flex');
-        }
-      });
-    }
-    // Modal button handlers
-    const apkBtn = document.getElementById('downloadApkBtn');
-    const pcBtn = document.getElementById('downloadPcBtn');
-    const closeBtn = document.getElementById('closeModalBtn');
-    if (apkBtn) {
-      apkBtn.addEventListener('click', () => {
-        const a = document.createElement('a');
-        a.href = 'assets/C.A.P.R.Iv1.apk';
-        a.download = 'Capri.apk';
-        a.click();
-      });
-    }
-    if (pcBtn) {
-      pcBtn.addEventListener('click', () => {
-        const a = document.createElement('a');
-        a.href = 'https://github.com/cp00004/capri/releases/latest/download/Capri%20Setup%202.1.1.exe';
-        a.download = 'Capri Setup.exe';
-        a.click();
-      });
-    }
-    if (closeBtn) {
-      closeBtn.addEventListener('click', () => {
-        const modal = document.getElementById('downloadModal');
-        if (modal) {
-          modal.classList.remove('flex');
-          modal.classList.add('hidden');
-        }
-      });
-    }
-  });
+  };
 </script>
+<script src="https://accounts.google.com/gsi/client" async defer onload="window._initGoogle()"></script>
 <body data-state="idle">
 <!-- Electron frameless window drag bar (hidden on web) -->
 <div id="electronBar" class="electron-bar" style="display:none">
