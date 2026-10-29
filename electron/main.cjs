@@ -270,14 +270,18 @@ const writeCurrent = (value) => writeJson(path.join(UPD_ROOT, "current.json"), v
 const readHandoff = () => readJson(path.join(UPD_ROOT, "handoff.json"));
 const writeHandoff = (value) => writeJson(path.join(UPD_ROOT, "handoff.json"), value);
 
-function launchLater(exe) {
-  // The old process has to let go of the single-instance lock first.
-  const quoted = exe.replace(/"/g, '""');
-  spawn(process.env.ComSpec || "cmd.exe", ["/c", `timeout /t 2 /nobreak >nul & start "" "${quoted}"`], {
-    detached: true,
-    stdio: "ignore",
-    windowsHide: true,
-  }).unref();
+function relaunchTo(exe) {
+  // Electron starts the new copy once this process has released the
+  // single-instance lock, so both builds never fight over it.
+  try {
+    app.relaunch({ execPath: exe, args: [] });
+  } catch (err) {
+    logLine(`relaunch to ${exe} failed: ${err.message}`);
+    return false;
+  }
+  quitting = true;
+  app.quit();
+  return true;
 }
 
 function handoffToNewer() {
@@ -303,8 +307,7 @@ function handoffToNewer() {
   }
   writeHandoff({ version: current.version, at: Date.now() });
   logLine(`handing off to ${current.version} (${exe})`);
-  launchLater(exe);
-  setTimeout(() => { quitting = true; app.exit(0); }, 400);
+  relaunchTo(exe);
   return true;
 }
 
@@ -355,8 +358,7 @@ async function installOverlay(feed, latest) {
 
   writeCurrent({ version: latest, dir });
   logLine(`update: ${latest} ready, relaunching`);
-  launchLater(exe);
-  setTimeout(() => { quitting = true; app.exit(0); }, 600);
+  relaunchTo(exe);
 }
 
 async function checkForUpdates() {
