@@ -59,9 +59,10 @@ const APP_URL = `http://localhost:${PORT}`;
 // keyed by the Google account. The local server stays as an offline fallback.
 const REMOTE_URL = process.env.CAPRI_REMOTE_URL || "https://capricorn.de.deplexo.com";
 
-// Find the bundled node binary (same one running Electron)
-const NODE_BIN = process.execPath.replace("electron.exe", "node.exe");
-const NODE     = fs.existsSync(NODE_BIN) ? NODE_BIN : "node";
+// Electron ships its own node runtime; ELECTRON_RUN_AS_NODE runs the server
+// with it. The packaged binary is Capri.exe, not electron.exe, so never rely
+// on the file name.
+const NODE = process.execPath;
 
 // ── State ────────────────────────────────────────────────────────────────────
 let win    = null;
@@ -94,7 +95,7 @@ function startServer() {
   // server.js is ESM — spawn with plain node (package.json has "type":"module")
   server = spawn(NODE, [SERVER], {
     cwd:   ROOT,
-    env:   { ...process.env, PORT: String(PORT), ELECTRON: "1", FORCE_COLOR: "0" },
+    env:   { ...process.env, ELECTRON_RUN_AS_NODE: "1", PORT: String(PORT), ELECTRON: "1", FORCE_COLOR: "0" },
     stdio: "pipe",
     shell: false,
   });
@@ -156,6 +157,10 @@ function createWindow() {
   });
 
   win.loadURL(REMOTE_URL).catch(() => {});
+
+  // Google treats "Electron/xx" as an embedded browser and may refuse sign-in.
+  const cleanUA = win.webContents.getUserAgent().replace(/\s(Electron|Capri)\/\S+/g, "");
+  win.webContents.setUserAgent(cleanUA);
 
   win.webContents.on("did-fail-load", (_event, code, description, failedUrl, isMainFrame) => {
     if (!isMainFrame || !usingRemote) return;
