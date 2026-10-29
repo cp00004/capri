@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#07000c" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Capri" />
+<script>
+  (function(){
+    if (location.hostname.includes('github.io')) {
+      var b = document.createElement('base');
+      b.href = '/capri/';
+      document.head.appendChild(b);
+    } else if (location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+      if (!document.querySelector('base')) {
+        var b2 = document.createElement('base');
+        b2.href = './';
+        document.head.appendChild(b2);
+      }
+    } else if (window.Capacitor) {
+      if (!document.querySelector('base')) {
+        var b3 = document.createElement('base');
+        b3.href = './';
+        document.head.appendChild(b3);
+      }
+    } else {
+      if (!document.querySelector('base')) {
+        var b4 = document.createElement('base');
+        b4.href = './';
+        document.head.appendChild(b4);
+      }
+    }
+  })();
+</script>
+<meta name="mobile-web-app-capable" content="yes" />
+<title>CAPRI // Project Capricorn</title>
+<link rel="canonical" href="https://cp00004.github.io/capri/" />
+<link rel="privacy-policy" href="https://cp00004.github.io/capri/privacy.html" />
+<link rel="icon" href="assets/favicon.png" type="image/png" />
+<link rel="apple-touch-icon" href="assets/icon-192.png" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css?v=20261029-03" />
+</head>
+<body data-state="idle">
+<!-- Electron frameless window drag bar (hidden on web) -->
+<div id="electronBar" class="electron-bar" style="display:none">
+  <span class="electron-title">CAPRI // CAPRICORN</span>
+  <div class="electron-controls">
+    <button onclick="window.capriNative?.minimize()" title="Minimise">&#x2212;</button>
+    <button onclick="window.capriNative?.maximize()" title="Maximise">&#x25A1;</button>
+    <button onclick="window.capriNative?.close()" title="Hide to tray" class="close-btn">&#x2715;</button>
+  </div>
+</div>
+<script>
+  if (window.capriNative?.isElectron) {
+    var eb = document.getElementById("electronBar");
+    if (eb) eb.style.display = "flex";
+  }
+</script>
+<div class="grain" aria-hidden="true"></div>
+<div class="glow" aria-hidden="true"></div>
+
+<header class="top">
+    <button id="downloadBtn" class="icon" type="button" aria-label="Download APK" title="Download APK" data-open="downloadSidebar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16v-8M8 12l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  <span class="dot" id="stateDot" aria-hidden="true"></span>
+  <span class="tag" id="stateTag">online</span>
+  <button id="settingsBtn" class="icon" type="button" aria-label="Settings" aria-expanded="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h9M4 12h6M4 17h11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+      <circle cx="17" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="13" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <circle cx="18" cy="17" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+    </svg>
+  </button>
+</header>
+<main class="stage">
+  <div class="portrait" id="portraitWrap">
+    <div class="hex-glow" aria-hidden="true"></div>
+    <div class="hex-frame">
+      <div class="hex-inner">
+        <img id="portraitImg" src="assets/capri-portrait.png" alt="Capri" />
+        <img class="ghost ghost-a" id="ghostA" src="assets/capri-portrait.png" alt="" aria-hidden="true" />
+        <img class="ghost ghost-b" id="ghostB" src="assets/capri-portrait.png" alt="" aria-hidden="true" />
+        <canvas class="arcs" id="arcCanvas" aria-hidden="true"></canvas>
+        <div class="hex-tint" aria-hidden="true"></div>
+        <div class="hex-scan" aria-hidden="true"></div>
+        <div class="tear" id="tearA" aria-hidden="true"></div>
+        <div class="tear" id="tearB" aria-hidden="true"></div>
+        <div class="act" id="act" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="dock">
+  <div class="heard" id="heard"></div>
+  <div class="subtitle" id="subtitle" aria-live="polite"></div>
+  <button id="micBtn" class="mic" type="button" aria-label="Tap to talk">
+    <span class="mic-rings" aria-hidden="true"></span>
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/>
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+      <path d="M12 17.5V21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+    </svg>
+  </button>
+  <div class="dock-row">
+    <button id="kbBtn" class="pill" type="button">KEYBOARD</button>
+  </div>
+</footer>
+
+<form id="kbForm" class="kb-sheet hidden" autocomplete="off">
+  <input id="kbInput" type="text" placeholder="type it, choom..." enterkeyhint="send" />
+  <button class="pill" type="submit">SEND</button>
+</form>
+
+<!-- ================================================= settings -->
+<section id="settings" class="sheet hidden" aria-label="Settings">
+  <div class="sheet-head">
+    <h2>SETTINGS</h2>
+    <button class="icon" type="button" data-close="settings" aria-label="Close">&times;</button>
+  </div>
+
+  <div class="sheet-body">
+    <div class="field">
+      <span class="label">account</span>
+      <div class="row wrap" id="accountRow">
+        <span class="value" id="accountName">this pc</span>
+        <button id="googleBtn" class="pill accent" type="button">SIGN IN WITH GOOGLE</button>
+        <button id="signOutBtn" class="pill hidden" type="button">SIGN OUT</button>
+      </div>
+      <div id="googleButton" class="google-slot"></div>
+      <button id="googleFallbackBtn" class="pill accent hidden" type="button">SIGN IN WITH GOOGLE (FALLBACK)</button>
+      <p class="hint" id="accountHint">Sign in once and your memory follows you to any device.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">what she calls you</span>
+      <div class="row">
+        <input id="prefName" class="text" type="text" maxlength="48" placeholder="your name" autocomplete="nickname" />
+        <button id="prefNameSave" class="pill" type="button">SET</button>
+      </div>
+      <p class="hint">Say "call me ..." out loud, or set it here. It is remembered.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">voice profile</span>
+      <div class="row">
+        <select id="voiceSelect" aria-label="Voice profile"></select>
+        <button id="voicePreview" class="pill" type="button">PREVIEW</button>
+      </div>
+      <p class="hint" id="voiceHint">Neural voice with a show-matched edge. Preview it before you commit.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">voice output</span>
+      <div class="row">
+        <button id="voiceBtn" class="pill is-on" type="button"><span class="led"></span><span id="voiceLabel">ON</span></button>
+        <span class="value" id="ttsEngine">neural</span>
+      </div>
+    </div>
+
+    <div class="field">
+      <span class="label">wake word</span>
+      <div class="row">
+        <button id="wakeWordBtn" class="pill" type="button" aria-pressed="false">OFF</button>
+        <span class="value" id="wakeWordState">tap to enable</span>
+      </div>
+      <p class="hint" id="wakeWordHint">When enabled, say “Capri” while this page is open and visible. Background listening needs native app support.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">clock</span>
+      <div class="row">
+        <select id="timeFormat" aria-label="Clock format">
+          <option value="auto">PC SETTING</option>
+          <option value="12">12-HOUR</option>
+          <option value="24">24-HOUR</option>
+        </select>
+        <span class="value mono" id="clockNow">--:--</span>
+      </div>
+      <p class="hint">PC SETTING follows the Windows taskbar clock. She reads it like a person, never military time.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">glitch</span>
+      <div class="row">
+        <select id="glitchLevel" aria-label="Glitch level">
+          <option value="show">SHOW</option>
+          <option value="subtle">SUBTLE</option>
+          <option value="off">OFF</option>
+        </select>
+        <button id="glitchTest" class="pill" type="button">SURGE</button>
+      </div>
+      <p class="hint">Neon arcs, torn frames and signal corruption. Off is calmer for photosensitive eyes.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">memory</span>
+      <div class="row wrap">
+        <span class="value" id="memoryCount">0 saved</span>
+        <button id="memoryForget" class="pill" type="button">FORGET IT ALL</button>
+      </div>
+      <p class="hint">Saved facts and the latest 500 conversation turns stay in your profile, not in the repo.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">app banter</span>
+      <div class="row">
+        <button id="appBanterBtn" class="pill is-on" type="button"><span class="led"></span><span id="appBanterLabel">ON</span></button>
+      </div>
+      <p class="hint">Tease/comment when she opens apps or websites. Turn off if you want pure action.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">auto-publish</span>
+      <div class="row wrap">
+        <span class="value" id="publishState">on</span>
+        <button id="publishNow" class="pill" type="button">PUBLISH NOW</button>
+      </div>
+      <p class="hint" id="publishHint">Every tracked update is committed and pushed to GitHub automatically.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">her hands</span>
+      <div class="row">
+        <span class="value" id="pcState">voice only</span>
+        <button id="accessBtn" class="pill hidden" type="button">REQUEST FULL ACCESS</button>
+        <button id="pcLockBtn" class="pill hidden" type="button">LOCK HER OUT</button>
+      </div>
+      <p class="hint" id="pcHint">PC control is off for this device.</p>
+    </div>
+
+    <div class="field">
+      <span class="label">link</span>
+      <div class="row wrap">
+        <button id="stopBtn" class="pill" type="button">CUT VOICE</button>
+        <button id="resetBtn" class="pill" type="button">RESET CONVERSATION</button>
+      </div>
+    </div>
+
+    <div class="field" id="backendField" style="display:none">
+      <span class="label">pc address / backend</span>
+      <div class="row">
+        <input id="apiBase" class="text" type="url" inputmode="url" spellcheck="false" placeholder="https://YOUR-PC-IP:4174 or http://192.168.1.10:4173" />
+        <button id="apiSave" class="pill" type="button">SAVE</button>
+      </div>
+      <p class="hint">Required for the Android app. Point to your running Capri server on your PC (LAN or tunnel). Keep keys on the server only.</p>
+    </div>
+
+    <div class="field" id="auditField">
+      <span class="label">last actions</span>
+      <div id="auditList" class="audit"><p class="hint">nothing yet</p></div>
+    </div>
+  </div>
+</section>
+
+
+
+<!-- ================================================= desktop approval -->
+<section id="accessPrompt" class="sheet center prompt hidden" aria-label="Access request">
+  <div class="sheet-head">
+    <h2>CHROME REQUEST</h2>
+  </div>
+  <div class="sheet-body">
+    <p class="hint"><strong id="accessWho">A device</strong> wants Capri to have full access to this PC: files, commands, apps, screen.</p>
+    <div class="row">
+      <button id="accessAllow" class="pill accent" type="button">GIVE HER THE KEYS</button>
+      <button id="accessDeny" class="pill" type="button">DENY</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================================================= download sidebar -->
+<section id="downloadSidebar" class="sheet download-sheet hidden" aria-label="Download Capri">
+  <div class="sheet-head">
+    <h2>DOWNLOAD // CAPRI</h2>
+    <button class="icon" type="button" data-close="downloadSidebar" aria-label="Close">&times;</button>
+  </div>
+  <div class="sheet-body">
+    <p class="dl-intro">Take her off the browser. Same voice, same memory, hands on the device.</p>
+
+    <a class="dl-card" href="assets/C.A.P.R.Iv1.apk" download>
+      <span class="dl-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><rect x="7" y="3" width="10" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 18h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </span>
+      <span class="dl-copy">
+        <span class="dl-name">Android</span>
+        <span class="dl-meta">C.A.P.R.I v1 APK · installs straight from this page</span>
+      </span>
+      <span class="dl-cta">GET APK</span>
+    </a>
+
+    <a class="dl-card" href="https://github.com/cp00004/capri/releases" target="_blank" rel="noopener">
+      <span class="dl-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M9 20h6M12 17v3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </span>
+      <span class="dl-copy">
+        <span class="dl-name">Windows</span>
+        <span class="dl-meta">Desktop build · installers live on GitHub Releases</span>
+      </span>
+      <span class="dl-cta">RELEASES</span>
+    </a>
+
+    <p class="dl-note">Phone and PC talk to the same Capri server, so memory and voice settings follow you. Allow installs from your browser when Android asks.</p>
+  </div>
+</section>
+
+<div id="notice" class="toast hidden">
+  <span id="noticeText"></span>
+  <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
+</div>
+
+<script src="app.js?v=20261029-03"></script>
+<script>
+setTimeout(function(){
+  var ids=['downloadBtn','stateDot','stateTag','settingsBtn'];
+  var out=ids.map(function(id){var e=document.getElementById(id);if(!e)return id+':missing';var r=e.getBoundingClientRect();var c=getComputedStyle(e);return id+':'+[Math.round(r.x),Math.round(r.y),Math.round(r.width),Math.round(r.height),c.display,c.visibility,c.opacity].join('/')}).join(' | ');
+  var d=document.createElement('div');d.id='geomout';d.textContent='GEO '+innerWidth+'x'+innerHeight+' '+out;document.body.appendChild(d);
+},2000);
+</script></body>
+</html>
