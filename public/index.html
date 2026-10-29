@@ -2,8 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<!-- REPLACE content below with your token from Google Search Console / OAuth branding verification -->
-<meta name="google-site-verification" content="PASTE_YOUR_VERIFICATION_TOKEN_HERE" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#07000c" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -46,33 +44,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=20261027-1723" />
-<!-- Google Identity Services -->
-<script>
-  function handleGoogleCredential(response) {
-    // Forward token into app.js handler if available, else log it
-    if (typeof window.capriGoogleCredential === 'function') {
-      window.capriGoogleCredential(response);
-    } else {
-      console.log('Google credential received:', response.credential ? response.credential.slice(0,20)+'…' : '(none)');
-    }
-  }
-  // Called by the GSI library once it is ready (data-callback on the div, or triggered here)
-  window._initGoogle = function() {
-    if (typeof google === 'undefined') return;
-    google.accounts.id.initialize({
-      client_id: '240583618801-6l8bpgneim3nfker6kbbbj4brt2gjrg2.apps.googleusercontent.com',
-      callback: handleGoogleCredential,
-      auto_select: false,
-    });
-    const btn = document.getElementById('googleBtn');
-    if (btn && !btn.dataset.gsiRendered) {
-      google.accounts.id.renderButton(btn, { theme: 'outline', size: 'large' });
-      btn.dataset.gsiRendered = '1';
-    }
-  };
-</script>
-<script src="https://accounts.google.com/gsi/client" async defer onload="window._initGoogle()"></script>
+<link rel="stylesheet" href="styles.css?v=20261029-01" />
+</head>
 <body data-state="idle">
 <!-- Electron frameless window drag bar (hidden on web) -->
 <div id="electronBar" class="electron-bar" style="display:none">
@@ -212,7 +185,7 @@
         <button id="wakeWordBtn" class="pill" type="button" aria-pressed="false">OFF</button>
         <span class="value" id="wakeWordState">tap to enable</span>
       </div>
-      <p class="hint" id="wakeWordHint">When enabled, say â€œCapriâ€ while this page is open and visible. Background listening needs native app support.</p>
+      <p class="hint" id="wakeWordHint">When enabled, say “Capri” while this page is open and visible. Background listening needs native app support.</p>
     </div>
 
     <div class="field">
@@ -331,10 +304,11 @@
       Download C.A.P.R.I v1 APK
     </a>
     <p>Windows desktop app:</p>
-    <a href="https://github.com/cp00004/capri/releases/latest/download/Capri%20Setup%202.1.1.exe" class="pill accent" download>
+    <a href="https://github.com/cp00004/capri/releases/latest" class="pill accent" target="_blank" rel="noopener">
       <img src="assets/update-icon.png" alt="download" style="width:24px;height:24px;vertical-align:middle;margin-right:4px;" />
-      Download Capri PC Setup (.exe)
+      Download Capri for Windows
     </a>
+    <p class="hint">Windows builds are published on GitHub Releases. The Android APK installs straight from this page.</p>
   </div>
 </section>
 
@@ -354,6 +328,6 @@
     document.body.classList.add("ready");
   }, 4500);
 </script>
-<script src="app.js?v=20261028-fix10"></script>
+<script src="app.js?v=20261029-01"></script>
 </body>
 </html>

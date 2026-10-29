@@ -74,6 +74,8 @@ const HOST_USER = os.userInfo().username;
 const DEFAULT_ALLOW_ORIGINS = [
   "https://cp00004.github.io",
   "https://capricorn.de.deplexo.com",
+  "https://deplexo.com",
+  "https://www.deplexo.com",
   "capacitor://localhost",
   "https://localhost",
   "http://localhost",

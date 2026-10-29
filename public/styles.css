@@ -862,6 +862,14 @@ body.surge::after { animation: scan-pop 420ms steps(3, end) 1; }
 .google-slot { display: flex; justify-content: flex-start; }
 .google-slot:empty { display: none; }
 .google-slot iframe { color-scheme: light; }
+.google-slot.google-pulse {
+  animation: google-pulse 0.8s ease-in-out 2;
+  border-radius: 999px;
+}
+@keyframes google-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 45, 108, 0); }
+  50% { box-shadow: 0 0 0 6px rgba(255, 45, 108, 0.28); }
+}
 
 .mono { font-family: var(--mono); letter-spacing: 0.08em; }
 .field a { color: var(--mint); text-decoration: none; border-bottom: 1px solid rgba(109, 255, 190, 0.35); }

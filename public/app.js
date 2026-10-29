@@ -1377,8 +1377,7 @@ function applyProfile(profile) {
     : state.config?.google?.configured
       ? "Sign in once and your memory follows you to any device."
       : "Google sign-in is not configured yet. Open docs/GOOGLE_SIGNIN.md on the PC.";
-  el.signOutBtn.classList.toggle("hidden", !signedIn);
-  el.googleBtn.classList.toggle("hidden", signedIn || Boolean(state.googleReady));
+  syncGoogleUi();
 
   const mem = profile.memory || {};
   const memories = (mem.facts || 0) + (mem.favorites || 0) + (mem.music || 0) + (mem.notes || 0);
@@ -1619,21 +1618,21 @@ async function handleGoogleCredential(response) {
   }
 }
 
-async function renderGoogle(force = false) {
+async function renderGoogle() {
   const google = state.config?.google;
   if (!google?.configured) {
     state.googleReady = false;
-    el.googleBtn.classList.toggle("hidden", Boolean(state.profile?.google));
+    syncGoogleUi();
     return;
   }
   const ok = await loadGoogleScript();
   if (!ok || !window.google?.accounts?.id) {
     state.googleReady = false;
-    el.accountHint.textContent = "Google's script did not load. The PC needs internet access; the button below still tries.";
+    syncGoogleUi();
+    el.accountHint.textContent = "Google's sign-in script did not load. Check your connection and reload.";
     return;
   }
   state.googleReady = true;
-  el.googleBtn.classList.toggle("hidden", Boolean(state.profile?.google));
   if (googleInitializedClientId !== google.clientId) {
     window.google.accounts.id.initialize({
       client_id: google.clientId,
@@ -1643,6 +1642,7 @@ async function renderGoogle(force = false) {
       use_fedcm_for_prompt: true,
     });
     googleInitializedClientId = google.clientId;
+    googleButtonClientId = "";
   }
   if (!state.profile?.google) {
     if (googleButtonClientId !== google.clientId) {
@@ -1661,18 +1661,36 @@ async function renderGoogle(force = false) {
         console.error("[capri] Failed to render Google button:", e);
       }
     }
+    el.googleButton.classList.remove("hidden");
   }
-  // Google silently refuses origins that are not registered on the OAuth
-  // client. If no button iframe appears, say why instead of failing quietly.
+  syncGoogleUi();
+  // If Google refuses to render (origin not registered), don't leave a dead button.
   setTimeout(() => {
-    if (state.profile?.google) return;
-    if (!el.googleButton || el.googleButton.querySelector("iframe")) return;
+    if (state.profile?.google || googleButtonRendered()) return;
     el.accountHint.textContent =
       "Google has not approved this web address for sign-in yet. In Google Cloud Console -> Credentials -> your Web OAuth client, add this site under Authorized JavaScript origins (redirect URIs stay empty), then reload.";
+    syncGoogleUi();
   }, 2500);
 }
 
-el.googleBtn.addEventListener("click", async () => {
+const googleFallbackBtn = document.getElementById("googleFallbackBtn");
+
+function googleButtonRendered() {
+  const slot = el.googleButton;
+  if (!slot || slot.classList.contains("hidden")) return false;
+  return Boolean(slot.querySelector('div[role="button"], iframe'));
+}
+
+function syncGoogleUi() {
+  const signedIn = Boolean(state.profile?.google);
+  const rendered = !signedIn && googleButtonRendered();
+  if (el.googleBtn) el.googleBtn.classList.toggle("hidden", signedIn || rendered);
+  if (el.googleButton) el.googleButton.classList.toggle("hidden", signedIn);
+  if (el.signOutBtn) el.signOutBtn.classList.toggle("hidden", !signedIn);
+  if (googleFallbackBtn) googleFallbackBtn.classList.toggle("hidden", signedIn || rendered);
+}
+
+el.googleBtn?.addEventListener("click", async () => {
   if (!state.config?.google?.configured) {
     showNotice(
       "Google sign-in needs a Web OAuth client id. On the PC open docs/GOOGLE_SIGNIN.md, create one, paste it into .env, restart.",
@@ -1680,16 +1698,23 @@ el.googleBtn.addEventListener("click", async () => {
     );
     return;
   }
-  await renderGoogle(true);
-  // Immediately trigger the One Tap / popup after rendering
+  await renderGoogle();
+  if (googleButtonRendered()) {
+    el.googleButton.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    el.googleButton.classList.add("google-pulse");
+    setTimeout(() => el.googleButton.classList.remove("google-pulse"), 1600);
+    el.googleButton.querySelector('div[role="button"]')?.click();
+    return;
+  }
   if (window.google?.accounts?.id) {
     window.google.accounts.id.prompt();
   }
 });
 
-const googleFallbackBtn = document.getElementById("googleFallbackBtn");
 googleFallbackBtn?.addEventListener("click", () => {
-  if (window.google?.accounts?.id) {
+  if (googleButtonRendered()) {
+    el.googleButton.querySelector('div[role="button"]')?.click();
+  } else if (window.google?.accounts?.id) {
     window.google.accounts.id.prompt();
   } else {
     showNotice("Google's script didn't load. Check your internet connection.", null, null, 8000);
@@ -1697,6 +1722,11 @@ googleFallbackBtn?.addEventListener("click", () => {
 });
 
 el.signOutBtn.addEventListener("click", async () => {
+  try {
+    window.google?.accounts?.id?.disableAutoSelect();
+  } catch {
+    /* older clients */
+  }
   try {
     await api("/api/auth/signout", { method: "POST" });
   } catch {
