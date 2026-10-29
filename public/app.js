@@ -87,7 +87,10 @@ const el = {
   downloadSidebar: $("#downloadSidebar"),
 };
 
+// Determine API base. Use tunnel only on non‑GitHub‑Pages origins.
 const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
+const IS_GITHUB_PAGES = location.hostname.includes('github.io');
+const DEFAULT_BACKEND = IS_GITHUB_PAGES ? "" : DEFAULT_TUNNEL;
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname);
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
