@@ -1241,10 +1241,13 @@ function openOnPhone(args = {}) {
   if (!target) return false;
   showAction(`phone: ${target}`);
 
-  if (window.CapriDevice && typeof window.CapriDevice.open === "function") {
+  const nativeBridge = window.CapriDevice && typeof window.CapriDevice.open === "function";
+  if (nativeBridge) {
     try {
       const reply = String(window.CapriDevice.open(target) || "");
       if (reply.startsWith("ok")) return true;
+      showNotice(`Could not open ${target} on this phone.`, null, null, 5000);
+      return false;
     } catch { /* fall through to browser intents */ }
   }
 
