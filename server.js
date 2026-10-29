@@ -74,6 +74,12 @@ const FREETHEAI_BASE = "https://api.freetheai.org/v1";
 const FREETHEAI_MODEL_CHAIN = [...new Set(String(
   process.env.CAPRI_FREETHEAI_MODELS || "fta/lion/gpt-4.1,fta/olf/gpt-oss:120b,fta/dog/gpt-4.1-mini",
 ).split(",").map((m) => m.trim()).filter(Boolean))];
+const MISTRAL_BASE = "https://api.mistral.ai/v1";
+// Small and medium are not in every free plan (they answer 429), large and
+// ministral-8b do, so the chain skips straight to the ones that work.
+const MISTRAL_MODEL_CHAIN = [...new Set(String(
+  process.env.CAPRI_MISTRAL_MODELS || "mistral-large-4,ministral-8b-latest",
+).split(",").map((m) => m.trim()).filter(Boolean))];
 
 // A key list with commas or newlines gives several free buckets to rotate through.
 function readKeys(...names) {
@@ -89,6 +95,7 @@ const GROQ_KEYS = readKeys("GROQ_API_KEY", "GROQ_API_KEYS");
 const GEMINI_KEYS = readKeys("GEMINI_API_KEY", "GEMINI_API_KEYS");
 const OPENROUTER_KEYS = readKeys("OPENROUTER_API_KEY", "OPENROUTER_API_KEYS");
 const FREETHEAI_KEYS = readKeys("FREETHEAI_API_KEY", "FREETHEAI_API_KEYS");
+const MISTRAL_KEYS = readKeys("MISTRAL_API_KEY", "MISTRAL_API_KEYS");
 const GEMINI_KEY = GEMINI_KEYS[0] || "";
 const GEMINI_MODEL = process.env.CAPRI_GEMINI_MODEL || "gemini-3.5-flash";
 const GEMINI_TTS_MODEL = process.env.CAPRI_TTS_MODEL || "gemini-3.8-flash-tts";
