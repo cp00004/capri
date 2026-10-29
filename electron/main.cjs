@@ -11,7 +11,7 @@
 const {
   app, BrowserWindow, Tray, Menu,
   nativeImage, ipcMain, shell, session,
-  net
+  net: electronNet
 } = require("electron");
 
 const { spawn } = require("child_process");
@@ -73,6 +73,7 @@ let tray   = null;
 let server = null;
 let quitting = false;
 let usingRemote = true;
+let updateChecked = false;
 
 // ── Permissions — grant mic + camera without prompting ───────────────────────
 app.whenReady().then(() => {
@@ -138,6 +139,102 @@ function waitForServer(retries = 40) {
   });
 }
 
+// ── Updater ──────────────────────────────────────────────────────────────────
+const UPDATE_FEED = process.env.CAPRI_UPDATE_FEED || "https://cp00004.github.io/capri/version.json";
+
+function cmpVersion(a, b) {
+  const x = String(a || "").split(".").map((n) => Number(n) || 0);
+  const y = String(b || "").split(".").map((n) => Number(n) || 0);
+  for (let i = 0; i < Math.max(x.length, y.length); i += 1) {
+    const p = x[i] || 0;
+    const q = y[i] || 0;
+    if (p !== q) return p > q ? 1 : -1;
+  }
+  return 0;
+}
+
+function sendUpdate(evt) {
+  try { if (win && !win.isDestroyed()) win.webContents.send("capri-update", evt); } catch { /* window closing */ }
+}
+
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    const request = electronNet.request({ url, redirect: "follow" });
+    request.on("response", (response) => {
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`HTTP ${response.statusCode}`));
+        return;
+      }
+      let body = "";
+      response.on("data", (chunk) => { body += chunk.toString("utf8"); });
+      response.on("end", () => {
+        try { resolve(JSON.parse(body)); } catch (err) { reject(err); }
+      });
+      response.on("error", reject);
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+function downloadFile(url, dest, onProgress) {
+  return new Promise((resolve, reject) => {
+    const request = electronNet.request({ url, redirect: "follow" });
+    request.on("response", (response) => {
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`HTTP ${response.statusCode}`));
+        return;
+      }
+      const rawTotal = response.headers["content-length"];
+      const total = Number(Array.isArray(rawTotal) ? rawTotal[0] : rawTotal) || 0;
+      let received = 0;
+      const out = fs.createWriteStream(dest);
+      response.on("data", (chunk) => {
+        received += chunk.length;
+        out.write(chunk);
+        if (total) onProgress(Math.min(99, Math.round((received / total) * 100)));
+      });
+      response.on("end", () => {
+        out.end(() => resolve({ bytes: received, total }));
+      });
+      response.on("error", (err) => { out.destroy(); reject(err); });
+    });
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+async function checkForUpdates() {
+  if (usingRemote === false) return; // offline fallback, no point
+  try {
+    const feed = await fetchJson(`${UPDATE_FEED}?t=${Date.now()}`);
+    const latest = String(feed?.version || "");
+    const current = app.getVersion();
+    if (!latest || !feed?.windows || cmpVersion(latest, current) <= 0) return;
+
+    console.log(`[capri] update ${current} -> ${latest}`);
+    sendUpdate({ phase: "downloading", version: latest, percent: 0 });
+    const file = path.join(app.getPath("temp"), `Capri-${latest}-Setup.exe`);
+    const { bytes } = await downloadFile(feed.windows, file, (percent) => {
+      sendUpdate({ phase: "downloading", version: latest, percent });
+    });
+    if (bytes < 20 * 1024 * 1024) throw new Error("installer came down short");
+
+    sendUpdate({ phase: "installing", version: latest });
+    const installer = spawn(file, ["/S"], { detached: true, stdio: "ignore", windowsHide: true });
+    installer.on("error", (err) => sendUpdate({ phase: "error", message: err.message }));
+    installer.unref();
+    setTimeout(() => { quitting = true; app.exit(0); }, 1800);
+  } catch (err) {
+    console.warn(`[capri] update check failed: ${err.message}`);
+    sendUpdate({ phase: "error", message: String(err.message || err) });
+  }
+}
+
+ipcMain.handle("capri-version", () => app.getVersion());
+
 // ── Main window ──────────────────────────────────────────────────────────────
 function createWindow() {
   win = new BrowserWindow({
@@ -180,6 +277,13 @@ function createWindow() {
     console.warn(`[capri] remote load failed (${code} ${description}) — using the local build`);
     usingRemote = false;
     win.loadURL(APP_URL).catch(() => {});
+  });
+
+  // Give the page a moment to settle before touching the network again.
+  win.webContents.on("did-finish-load", () => {
+    if (updateChecked) return;
+    updateChecked = true;
+    setTimeout(checkForUpdates, 6000);
   });
 
   // ── Google OAuth popup handling ──────────────────────────────────────────

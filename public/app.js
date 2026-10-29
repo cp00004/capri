@@ -2614,8 +2614,10 @@ function showUpdateScreen({ kicker, title, note, percent = 0, action = null }) {
   el.updateKicker.textContent = kicker;
   el.updateTitle.textContent = title;
   el.updateNote.textContent = note;
-  el.updateFill.style.width = `${Math.min(100, Math.max(0, percent))}%`;
-  el.updatePct.textContent = `${Math.round(percent)}%`;
+  const plain = percent < 0;
+  el.updateScreen.classList.toggle("plain", plain);
+  el.updateFill.style.width = `${plain ? 0 : Math.min(100, Math.max(0, percent))}%`;
+  el.updatePct.textContent = plain ? "" : `${Math.round(percent)}%`;
   el.updateAction.classList.toggle("hidden", !action);
   if (action) el.updateAction.textContent = action.label;
   el.updateScreen.classList.remove("hidden");
@@ -2662,7 +2664,21 @@ function initUpdates() {
     return;
   }
 
-  // The phone build points at the download page instead of self-installing.
+  // Shells built before v4 have no updater: point them at the one-time download.
+  if (IS_DESKTOP_APP) {
+    if (sessionStorage.getItem("capri.updatePrompt")) return;
+    sessionStorage.setItem("capri.updatePrompt", "1");
+    showUpdateScreen({
+      kicker: "A NEWER CAPRI EXISTS",
+      title: "UPDATE TO v4",
+      note: "This build predates auto-update. Grab v4 once and it keeps itself current from then on.",
+      percent: -1,
+      action: { label: "DOWNLOAD v4" },
+    });
+    el.updateAction.onclick = () =>
+      window.capriNative.openTarget("https://github.com/cp00004/capri/releases/download/capri-v4/Capri-v4-Setup.exe");
+    return;
+  }
   if (!IS_NATIVE || updateUi.checked) return;
   updateUi.checked = true;
   fetch(`${UPDATE_FEED}?t=${Date.now()}`, { cache: "no-store" })
@@ -2673,7 +2689,7 @@ function initUpdates() {
         kicker: `CAPRI v${feed.version} IS OUT`,
         title: "NEW BUILD READY",
         note: "Install it over this one and your memory comes with you.",
-        percent: 100,
+        percent: -1,
         action: { label: "UPDATE ON DEPLEXO" },
       });
       el.updateAction.onclick = () => {

@@ -693,6 +693,31 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   let switched = false;
 
   const deviceDefs = [...(mobile ? PHONE_TOOL_DEFS : []), ...(web ? WEB_TOOL_DEFS : [])];
+  // A browser or phone caller never reaches this machine's shell, so advertise
+  // only device + memory tools: fewer schemas means a faster first token.
+  const remote = Boolean(mobile || web);
+  const toolSet = pcLocked || remote ? [...deviceDefs, ...MEMORY_TOOL_DEFS] : [...TOOL_DEFS, ...deviceDefs, ...MEMORY_TOOL_DEFS];
+
+  // "open youtube" is the most common order. Fire it at the device before the
+  // model runs, so the app is already up while she says her line.
+  let quickTarget = "";
+  if (remote && userText) {
+    const quick = String(userText).match(/^\s*(?:hey\s+)?(?:please\s+)?(?:can\s+you\s+)?(?:open|launch|start|go\s+to|pull\s+up|fire\s+up|play)\s+(.{1,60})$/i);
+    if (quick) {
+      const target = quick[1]
+        .replace(/\b(?:on|for)\s+(?:my|the)\s+(?:pc|computer|phone|device|laptop)\b/gi, "")
+        .replace(/[.?!]+$/, "")
+        .trim();
+      if (target && !/\b(?:about|up to you|your eyes|the door)\b/i.test(target)) {
+        quickTarget = target;
+        sse(res, { type: "device_call", name: "open_on_device", label: `open ${target}`, args: { target } });
+        messages.push({
+          role: "system",
+          content: `The device is already opening "${target}" this turn. Do not call a tool. Reply in one short line, in character.`,
+        });
+      }
+    }
+  }
 
   for (let step = 0; step < MAX_STEPS; step++) {
     let upstream;
@@ -700,7 +725,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       upstream = await chatCompletion({
         provider,
         messages,
-        tools: useTools ? (pcLocked ? [...deviceDefs, ...MEMORY_TOOL_DEFS] : [...TOOL_DEFS, ...deviceDefs, ...MEMORY_TOOL_DEFS]) : undefined,
+        tools: useTools ? toolSet : undefined,
         signal: controller.signal,
       });
     } catch (err) {
@@ -833,7 +858,10 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
 
       if ((deviceOpen || pcOpen) && (mobile || web) && target) {
         // The client opens it on its own device; the server has no hands there.
-        sse(res, { type: "device_call", name: "open_on_device", label: actionLabel("open_on_device", args), args: { target } });
+        // Skip the echo when the quick-open pass already launched this target.
+        if (!quickTarget || !target.toLowerCase().includes(quickTarget.toLowerCase())) {
+          sse(res, { type: "device_call", name: "open_on_device", label: actionLabel("open_on_device", args), args: { target } });
+        }
         result = { ok: true, output: `opened ${target} on their device` };
       } else if (deviceOpen) {
         result = { ok: false, error: "open_on_phone is for the phone app; use open_target on the PC" };

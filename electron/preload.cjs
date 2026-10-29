@@ -11,4 +11,9 @@ contextBridge.exposeInMainWorld("capriNative", {
   maximize:   () => ipcRenderer.send("win-maximize"),
   close:      () => ipcRenderer.send("win-close"),
   quit:       () => ipcRenderer.send("win-quit"),
+  version:    () => ipcRenderer.invoke("capri-version"),
+  onUpdate:   (cb) => {
+    if (typeof cb !== "function") return;
+    ipcRenderer.on("capri-update", (_event, data) => cb(data || {}));
+  },
 });
