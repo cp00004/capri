@@ -962,7 +962,23 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         .trim();
       if (target && !/\b(?:about|up to you|your eyes|the door)\b/i.test(target)) {
         quickTarget = target;
-        sse(res, { type: "device_call", name: "open_on_device", label: `open ${target}`, args: { target } });
+        // A web page cannot start a desktop program. When the PC agent is online
+        // the real app goes first - Roblox, Spotify, Discord, Minecraft - and the
+        // browser tab only covers what the PC does not have installed.
+        let launchedOnPc = false;
+        if (HANDS_TOKEN && handsOnline() && !mobile) {
+          const quickRes = await Promise.race([
+            runHandsTool("open_app", { name: target }),
+            new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
+          ]);
+          // null means the PC is still launching: a tab now would duplicate it.
+          launchedOnPc = Boolean(quickRes && quickRes.ok);
+          if (quickRes && !quickRes.ok) {
+            sse(res, { type: "device_call", name: "open_on_device", label: `open ${target}`, args: { target } });
+          }
+        } else {
+          sse(res, { type: "device_call", name: "open_on_device", label: `open ${target}`, args: { target } });
+        }
         // Roblox gets a coin-flip jab instead of a model turn. It lands faster
         // than any relay and never drifts off-script.
         if (banterOn && /\broblox\b/i.test(target) && Math.random() < 0.45) {
@@ -980,7 +996,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
           : "";
         messages.push({
           role: "system",
-          content: `The device is already opening "${target}" this turn. Do not call a tool. Reply in one short line, in character.${angle ? ` Roast them about it: ${angle}` : ""}`,
+          content: `${launchedOnPc ? `The desktop app "${target}" is opening on their PC right now.` : `The device is already opening "${target}" this turn.`} Do not call a tool. Reply in one short line, in character.${angle ? ` Roast them about it: ${angle}` : ""}`,
         });
       }
     }
