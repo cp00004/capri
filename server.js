@@ -818,6 +818,18 @@ function openKey(target) {
     .trim();
 }
 
+// Mistral's newer models stream content as typed chunks instead of a string.
+// Only plain text reaches the speaker; reasoning chunks stay out of her mouth.
+function contentText(value) {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  let out = "";
+  for (const part of value) {
+    if (part && part.type === "text" && typeof part.text === "string") out += part.text;
+  }
+  return out;
+}
+
 async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile, web, userKey }) {
   const hands = `${web ? "" : pcLocked ? LOCKED_HANDS : HANDS_ON}${mobile && !pcLocked ? PHONE_HANDS : ""}${web ? WEB_HANDS : ""}`;
   const messages = [
