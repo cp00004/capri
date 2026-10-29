@@ -370,6 +370,63 @@ const APP_SCHEMES = {
   github: "https://github.com", chatgpt: "https://chatgpt.com",
 };
 
+// Installed games and launchers that `start <name>` cannot resolve on its own.
+const LOCALAPPDATA = process.env.LOCALAPPDATA || "";
+const PROGRAMFILES = process.env.ProgramFiles || "C:\\Program Files";
+const PROGRAMFILES86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+
+function firstExisting(list) {
+  for (const p of list) {
+    try { if (p && fs.existsSync(p)) return p; } catch { /* keep looking */ }
+  }
+  return "";
+}
+
+function robloxExe() {
+  const base = path.join(LOCALAPPDATA, "Roblox", "Versions");
+  try {
+    const dirs = fs.readdirSync(base).filter((d) => /^version-/i.test(d));
+    const hits = dirs
+      .map((d) => path.join(base, d, "RobloxPlayerBeta.exe"))
+      .filter((p) => { try { return fs.existsSync(p); } catch { return false; } })
+      .sort((a, b) => {
+        try { return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs; } catch { return 0; }
+      });
+    return hits[0] || "";
+  } catch {
+    return "";
+  }
+}
+
+const INSTALLED_APPS = {
+  roblox: () => ({ exe: robloxExe(), url: "https://www.roblox.com" }),
+  minecraft: () => ({
+    exe: firstExisting([
+      path.join(PROGRAMFILES86, "Minecraft Launcher", "MinecraftLauncher.exe"),
+      path.join(PROGRAMFILES, "Minecraft Launcher", "MinecraftLauncher.exe"),
+      path.join(LOCALAPPDATA, "Programs", "Minecraft Launcher", "MinecraftLauncher.exe"),
+    ]),
+    url: "https://www.minecraft.net",
+  }),
+  "minecraft launcher": () => INSTALLED_APPS.minecraft(),
+  spotify: () => ({
+    exe: firstExisting([
+      path.join(process.env.APPDATA || "", "Spotify", "Spotify.exe"),
+      path.join(LOCALAPPDATA, "Microsoft", "WindowsApps", "Spotify.exe"),
+    ]),
+    url: "https://open.spotify.com",
+  }),
+  discord: () => ({
+    exe: firstExisting([
+      path.join(LOCALAPPDATA, "Discord", "Update.exe"),
+    ]),
+    args: ["--processStart", "Discord.exe"],
+    url: "https://discord.com/app",
+  }),
+  "epic games": () => ({ url: "https://store.epicgames.com" }),
+  epic: () => ({ url: "https://store.epicgames.com" }),
+};
+
 ipcMain.handle("capri-open", async (_event, target) => {
   const raw = String(target || "").trim();
   if (!raw) return "err:empty";
@@ -379,6 +436,23 @@ ipcMain.handle("capri-open", async (_event, target) => {
     await shell.openExternal(raw);
     return "ok";
   }
+
+  const installed = INSTALLED_APPS[key];
+  if (installed) {
+    const hit = installed();
+    if (hit?.exe) {
+      try {
+        const child = spawn(hit.exe, hit.args || [], { detached: true, stdio: "ignore", windowsHide: true });
+        child.on("error", () => {});
+        child.unref();
+        return "ok";
+      } catch { /* try the site */ }
+    }
+    if (hit?.url) {
+      try { await shell.openExternal(hit.url); return "ok"; } catch { /* fall through */ }
+    }
+  }
+
   if (APP_SCHEMES[key]) {
     try { await shell.openExternal(APP_SCHEMES[key]); return "ok"; } catch { /* fall through */ }
   }

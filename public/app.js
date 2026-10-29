@@ -1436,9 +1436,20 @@ function webUrlFor(target) {
   if (app?.url) return app.url;
   const bare = clean.replace(/^(open|launch|start|go to|the)\s+/i, "").replace(/\s+(app|website|site)$/i, "").trim();
   if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(bare)) return `https://${bare}`;
-  if (app && !app.url) return `https://www.google.com/search?q=${encodeURIComponent(bare)}`;
+  // "open pornhub" / "open porn hub": unknown name, no dot - assume the .com.
+  // Nothing is filtered here on purpose; she opens what you ask for.
+  const guess = bare.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (guess.length >= 4 && guess.length <= 24 && !app && !GENERIC_THINGS.has(guess)) {
+    return `https://www.${guess}.com`;
+  }
   return `https://www.google.com/search?q=${encodeURIComponent(bare)}`;
 }
+
+const GENERIC_THINGS = new Set([
+  "calculator", "clock", "camera", "settings", "photos", "files", "notes",
+  "calendar", "messages", "phone", "mail", "dialer", "alarm", "store",
+  "browser", "music", "video", "game", "games", "search", "folder",
+]);
 
 function openOnDesktop(target) {
   showAction(`open: ${target}`);
@@ -1477,6 +1488,11 @@ const PHONE_APPS = {
   reddit: { pkg: "com.reddit.frontpage", url: "https://www.reddit.com", ios: "reddit://" },
   twitch: { pkg: "tv.twitch.android.app", url: "https://www.twitch.tv", ios: "twitch://" },
   netflix: { pkg: "com.netflix.mediaclient", url: "https://www.netflix.com", ios: "nflx://" },
+  roblox: { pkg: "com.roblox.client", url: "https://www.roblox.com", ios: "roblox://" },
+  minecraft: { pkg: "com.mojang.minecraftpe", url: "https://www.minecraft.net", ios: "minecraft://" },
+  steam: { pkg: "com.valvesoftware.android.steam.community", url: "https://store.steampowered.com", ios: "steam://" },
+  epic: { pkg: "com.epicgames.portal", url: "https://store.epicgames.com", ios: "https://store.epicgames.com" },
+  "epic games": { pkg: "com.epicgames.portal", url: "https://store.epicgames.com", ios: "https://store.epicgames.com" },
   whatsapp: { pkg: "com.whatsapp", url: "https://web.whatsapp.com", ios: "whatsapp://" },
   telegram: { pkg: "org.telegram.messenger", url: "https://web.telegram.org", ios: "tg://" },
   snapchat: { pkg: "com.snapchat.android", url: "https://web.snapchat.com", ios: "snapchat://" },
