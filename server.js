@@ -510,11 +510,12 @@ function friendlyError(status, raw, provider = "groq") {
     /* keep raw */
   }
   if (status === 401) {
+    const where = "Paste a fresh one in Settings → your model key (or fix the server key).";
     return provider === "gemini"
-      ? "Google rejected the Gemini key. Check GEMINI_API_KEY in .env."
+      ? `Google rejected the Gemini key. ${where}`
       : provider === "openrouter"
-        ? "OpenRouter rejected the key. Check OPENROUTER_API_KEY in .env."
-        : "Groq rejected the key. Check GROQ_API_KEY in .env.";
+        ? `OpenRouter rejected the key. ${where}`
+        : `Groq rejected the key. ${where}`;
   }
   if (status === 429) return "Rate limit hit. Give it a minute, choom.";
   if (status === 404) return `Model not available on this key: ${provider === "gemini" ? GEMINI_MODEL : MODEL}`;
@@ -578,6 +579,23 @@ function cappedMessage() {
   }
   const secs = Number.isFinite(soonest) ? Math.max(1, Math.round((soonest - now) / 1000)) : 30;
   return `Every relay I have is capped right now. Give me about ${secs} seconds and ask again.`;
+}
+
+// A person can bring their own free key from Settings; it goes first so their
+// own quota is spent before the server's.
+function userKeyCandidates(raw) {
+  const key = String(raw || "").trim();
+  if (!/^[\x21-\x7e]{20,220}$/.test(key)) return [];
+  if (key.startsWith("gsk_")) {
+    return GROQ_MODEL_CHAIN.map((model) => ({ name: "groq", base: GROQ_BASE, key, model, own: true }));
+  }
+  if (key.startsWith("AIza") || key.startsWith("AQ.")) {
+    return [{ name: "gemini", base: GEMINI_BASE, key, model: GEMINI_MODEL, own: true }];
+  }
+  if (key.startsWith("sk-or-")) {
+    return [{ name: "openrouter", base: OPENROUTER_BASE, key, model: OPENROUTER_MODEL, own: true }];
+  }
+  return [];
 }
 
 // ---------------------------------------------------------------- static
@@ -754,7 +772,7 @@ function executeMemoryTool(name, args, profile, res) {
   return result;
 }
 
-async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile, web }) {
+async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile, web, userKey }) {
   const hands = `${web ? "" : pcLocked ? LOCKED_HANDS : HANDS_ON}${mobile && !pcLocked ? PHONE_HANDS : ""}${web ? WEB_HANDS : ""}`;
   const messages = [
     { role: "system", content: buildSystemPrompt(profile, hands) },
@@ -765,7 +783,8 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   let useTools = true;
   let spoke = false;
   let finalText = "";
-  const candidates = orderCandidates();
+  const ownKey = userKeyCandidates(userKey);
+  const candidates = [...ownKey, ...orderCandidates()];
   if (!candidates.length) throw new Error("No chat key is set. Add GROQ_API_KEY or GEMINI_API_KEY in the hosting panel.");
   let candIdx = 0;
   let attempts = 0;
@@ -1179,7 +1198,8 @@ async function handleChat(req, res, who) {
   sse(res, { type: "profile", profile: profileSummary(profile) });
 
   try {
-    await runAgent({ history, userText, toolsOn, res, controller, profile, source: who.scope, mobile, web });
+    const userKey = req.headers["x-capri-key"];
+    await runAgent({ history, userText, toolsOn, res, controller, profile, source: who.scope, mobile, web, userKey });
   } catch (err) {
     if (err?.name === "AbortError") return res.end();
     sse(res, { type: "error", message: `Connection failed: ${err.message}` });
@@ -1541,7 +1561,7 @@ const handler = async (req, res) => {
     if (trustedOrigin(req)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
-      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Capri-Profile, X-Capri-Device, Bypass-Tunnel-Reminder");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Capri-Profile, X-Capri-Device, X-Capri-Key, Bypass-Tunnel-Reminder");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
       res.setHeader("Access-Control-Expose-Headers", "X-Capri-Pitch, X-Capri-Grit, X-Capri-Engine");
       res.setHeader("Access-Control-Max-Age", "600");

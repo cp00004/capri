@@ -7,6 +7,7 @@ const $ = (sel) => document.querySelector(sel);
 const TOKEN_KEY = "capri.token";
 const API_KEY = "capri.api";
 const SESSION_KEY = "capri.session";
+const OWN_KEY = "capri.modelKey";
 const SERVER_KEY = "capri.server";
 
 const normBase = (v) => String(v || "").trim().replace(/\/+$/, "");
@@ -55,6 +56,9 @@ const el = {
   tearB: $("#tearB"),
   accountName: $("#accountName"),
   accountHint: $("#accountHint"),
+  userKeyInput: $("#userKeyInput"),
+  userKeySave: $("#userKeySave"),
+  userKeyHint: $("#userKeyHint"),
   googleBtn: $("#googleBtn"),
   googleButton: $("#googleButton"),
   signOutBtn: $("#signOutBtn"),
@@ -156,6 +160,8 @@ async function api(url, opts = {}) {
   const headers = new Headers(opts.headers || {});
   if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
   if (state.session) headers.set("X-Capri-Profile", state.session);
+  const ownKey = localStorage.getItem(OWN_KEY);
+  if (ownKey && url.startsWith("/api/chat")) headers.set("X-Capri-Key", ownKey);
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
   const controller = opts.signal ? null : new AbortController();
   const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
@@ -1889,6 +1895,38 @@ el.prefName.addEventListener("keydown", (e) => {
     e.preventDefault();
     el.prefNameSave.click();
   }
+});
+
+function syncUserKeyHint() {
+  const saved = localStorage.getItem(OWN_KEY) || "";
+  if (el.userKeyInput && !el.userKeyInput.value) el.userKeyInput.value = saved;
+  if (!el.userKeyHint) return;
+  if (!saved) {
+    el.userKeyHint.textContent = "Optional. Bring your own free key — console.groq.com/keys or aistudio.google.com/apikey — and your questions stop sharing this server's quota. Kept on this device only.";
+    return;
+  }
+  const who = saved.startsWith("gsk_") ? "Groq" : saved.startsWith("sk-or-") ? "OpenRouter" : "Gemini";
+  el.userKeyHint.textContent = `Using your own ${who} key (${saved.slice(0, 3)}…${saved.slice(-4)}). Saved on this device only. Tap SAVE with an empty box to remove it.`;
+}
+syncUserKeyHint();
+
+el.userKeySave.addEventListener("click", () => {
+  const typed = el.userKeyInput.value.trim();
+  if (!typed) {
+    localStorage.removeItem(OWN_KEY);
+    el.userKeyInput.value = "";
+    syncUserKeyHint();
+    showNotice("Own key removed. Capri is back on the server key.", null, null, 4000);
+    return;
+  }
+  const known = /^(gsk_|AIza|AQ\.|sk-or-)/.test(typed) && typed.length >= 20;
+  if (!known) {
+    showNotice("That doesn't look like a Groq, Gemini or OpenRouter key.", null, null, 6000);
+    return;
+  }
+  localStorage.setItem(OWN_KEY, typed);
+  syncUserKeyHint();
+  showNotice("Key saved. Your questions now spend your own quota first.", null, null, 5000);
 });
 
 el.timeFormat.addEventListener("change", () => {
