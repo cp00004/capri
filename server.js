@@ -944,10 +944,13 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         if (!delta) continue;
 
         if (delta.content) {
-          content += delta.content;
-          finalText += delta.content;
-          spoke = true;
-          sse(res, { type: "delta", text: delta.content });
+          const text = contentText(delta.content);
+          if (text) {
+            content += text;
+            finalText += text;
+            spoke = true;
+            sse(res, { type: "delta", text });
+          }
         }
 
         for (const tc of delta.tool_calls || []) {
