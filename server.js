@@ -183,6 +183,30 @@ const PHONE_TOOL_DEFS = [
   },
 ];
 
+const WEB_HANDS = `
+Browser link:
+- This request comes from the user's own browser. Use open_on_device to open websites and apps for them: youtube, discord, spotify, twitch, gmail, maps, reddit, or any URL. Call it immediately when they say "open X" or "play X".
+- Never say your shell, hands or OS are fried. The browser opens it directly.
+- File, shell and screen tools only exist in the PC app. If the order needs those, say so in one line, in character.`;
+
+const WEB_TOOL_DEFS = [
+  {
+    type: "function",
+    function: {
+      name: "open_on_device",
+      description:
+        "Open a website or app in the user's browser. Use plain names like youtube, discord, spotify, twitch, gmail, maps, or a URL.",
+      parameters: {
+        type: "object",
+        properties: {
+          target: { type: "string", description: "App name, site name or URL." },
+        },
+        required: ["target"],
+      },
+    },
+  },
+];
+
 const MEMORY_RULES = `
 Memory and settings:
 - You have tools that write to your permanent memory. Use them without asking.
@@ -654,8 +678,8 @@ function executeMemoryTool(name, args, profile, res) {
   return result;
 }
 
-async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile }) {
-  const hands = `${pcLocked ? LOCKED_HANDS : HANDS_ON}${mobile && !pcLocked ? PHONE_HANDS : ""}`;
+async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile, web }) {
+  const hands = `${web ? "" : pcLocked ? LOCKED_HANDS : HANDS_ON}${mobile && !pcLocked ? PHONE_HANDS : ""}${web ? WEB_HANDS : ""}`;
   const messages = [
     { role: "system", content: buildSystemPrompt(profile, hands) },
     ...history,
@@ -668,13 +692,15 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   let provider = providerFor(CHAT_PROVIDER);
   let switched = false;
 
+  const deviceDefs = [...(mobile ? PHONE_TOOL_DEFS : []), ...(web ? WEB_TOOL_DEFS : [])];
+
   for (let step = 0; step < MAX_STEPS; step++) {
     let upstream;
     try {
       upstream = await chatCompletion({
         provider,
         messages,
-        tools: useTools ? (pcLocked ? MEMORY_TOOL_DEFS : [...TOOL_DEFS, ...(mobile ? PHONE_TOOL_DEFS : []), ...MEMORY_TOOL_DEFS]) : undefined,
+        tools: useTools ? (pcLocked ? [...deviceDefs, ...MEMORY_TOOL_DEFS] : [...TOOL_DEFS, ...deviceDefs, ...MEMORY_TOOL_DEFS]) : undefined,
         signal: controller.signal,
       });
     } catch (err) {
@@ -800,29 +826,37 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       try { args = JSON.parse(call.function.arguments || "{}"); } catch { args = {}; }
       sse(res, { type: "action", name: call.function.name, label: actionLabel(call.function.name, args) });
 
-      const result = call.function.name === "open_on_phone"
-        ? (mobile
-          ? (sse(res, { type: "device_call", name: "open_on_phone", label: actionLabel("open_on_phone", args), args }),
-            { ok: true, output: `opened ${String(args.target || args.name || "it")} on the phone` })
-          : { ok: false, error: "open_on_phone is for the phone app; use open_target on the PC" })
-        : memoryToolName(call.function.name)
-        ? executeMemoryTool(call.function.name, args, profile, res)
-        : pcLocked
-          ? { ok: false, error: "her hands are locked on this PC" }
-          : HANDS_TOKEN
-            ? await runHandsTool(call.function.name, args)
-            : await executeTool(call.function.name, args).catch(async (e) => {
-              // if tool missing, try extra
-              try {
-                const { executeExtraTool } = await import("./lib/pc.js");
-                if (typeof executeExtraTool === "function") {
-                  return await executeExtraTool(call.function.name, args);
-                }
-              } catch (ex) {
-                // ignore
+      const target = String(args.target ?? args.name ?? args.app ?? args.query ?? args.url ?? "").trim();
+      const deviceOpen = call.function.name === "open_on_phone" || call.function.name === "open_on_device";
+      const pcOpen = ["open_app", "open_target", "search_open"].includes(call.function.name);
+      let result;
+
+      if ((deviceOpen || pcOpen) && (mobile || web) && target) {
+        // The client opens it on its own device; the server has no hands there.
+        sse(res, { type: "device_call", name: "open_on_device", label: actionLabel("open_on_device", args), args: { target } });
+        result = { ok: true, output: `opened ${target} on their device` };
+      } else if (deviceOpen) {
+        result = { ok: false, error: "open_on_phone is for the phone app; use open_target on the PC" };
+      } else if (memoryToolName(call.function.name)) {
+        result = executeMemoryTool(call.function.name, args, profile, res);
+      } else if (pcLocked) {
+        result = { ok: false, error: "her hands are locked on this PC" };
+      } else {
+        result = HANDS_TOKEN
+          ? await runHandsTool(call.function.name, args)
+          : await executeTool(call.function.name, args).catch(async (e) => {
+            // if tool missing, try extra
+            try {
+              const { executeExtraTool } = await import("./lib/pc.js");
+              if (typeof executeExtraTool === "function") {
+                return await executeExtraTool(call.function.name, args);
               }
-              return { ok: false, error: e?.message || String(e) };
-            });
+            } catch (ex) {
+              // ignore
+            }
+            return { ok: false, error: e?.message || String(e) };
+          });
+      }
       const payload = JSON.stringify(result).slice(0, 8000);
       sse(res, {
         type: "tool",
@@ -980,7 +1014,9 @@ async function handleChat(req, res, who) {
     try { if (trimmed) setPreferredName(profile, trimmed); } catch { /* keep old name */ }
   }
 
-  const mobile = /mobile|android|iphone/i.test(String(req.headers["x-capri-device"] || ""));
+  const device = String(req.headers["x-capri-device"] || "").toLowerCase();
+  const mobile = /mobile|android|iphone/.test(device);
+  const web = !mobile && /web/.test(device);
   const toolsOn = !pcLocked;
 
   res.writeHead(200, {
@@ -995,7 +1031,7 @@ async function handleChat(req, res, who) {
   sse(res, { type: "profile", profile: profileSummary(profile) });
 
   try {
-    await runAgent({ history, userText, toolsOn, res, controller, profile, source: who.scope, mobile });
+    await runAgent({ history, userText, toolsOn, res, controller, profile, source: who.scope, mobile, web });
   } catch (err) {
     if (err?.name === "AbortError") return res.end();
     sse(res, { type: "error", message: `Connection failed: ${err.message}` });

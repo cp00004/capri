@@ -81,6 +81,9 @@ const el = {
 const IS_GITHUB_PAGES = location.hostname.includes("github.io");
 const IS_NATIVE = location.protocol === "capacitor:" || (Boolean(window.Capacitor) && location.hostname === "localhost");
 const IS_PHONE = IS_NATIVE || /android|iphone|ipod|ipad|mobile/i.test(navigator.userAgent);
+const IS_DESKTOP_APP = Boolean(window.capriNative?.isElectron);
+// Pages served from a remote host can't touch this machine from the server side.
+const IS_HOSTED_WEB = !IS_NATIVE && !IS_DESKTOP_APP && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
 const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
@@ -133,6 +136,7 @@ async function api(url, opts = {}) {
   if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
   if (state.session) headers.set("X-Capri-Profile", state.session);
   if (IS_PHONE) headers.set("X-Capri-Device", "mobile");
+  else if (IS_HOSTED_WEB) headers.set("X-Capri-Device", "web");
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
   const controller = opts.signal ? null : new AbortController();
   const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
@@ -811,6 +815,9 @@ const wakeWord = {
   starting: false,
   pendingStart: false,
   chimePending: false,
+  chimed: false,
+  capture: "",
+  decideTimer: null,
   recognition: null,
 };
 
@@ -919,7 +926,8 @@ async function startListening() {
   rec.finishing = false;
   rec.startedAt = performance.now();
   rec.silenceSince = rec.startedAt;
-  playListeningChime();
+  if (wakeWord.chimed) wakeWord.chimed = false;
+  else playListeningChime();
 
   const data = new Uint8Array(rec.analyser.fftSize);
 
@@ -966,6 +974,9 @@ function setWakeWordEnabled(enabled) {
   paintWakeWord();
   if (!wakeWord.enabled) {
     wakeWord.pendingStart = false;
+    wakeWord.capture = "";
+    clearTimeout(wakeWord.decideTimer);
+    wakeWord.decideTimer = null;
     const recognition = wakeWord.recognition;
     wakeWord.recognition = null;
     wakeWord.active = false;
@@ -1022,6 +1033,51 @@ function isWakePhrase(text) {
   return false;
 }
 
+// Everything spoken after "Capri", so "Capri open youtube" works in one breath.
+function wakeRemainder(text) {
+  const original = String(text || "").trim();
+  if (!original) return "";
+  const tokens = original.split(/\s+/);
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i].toLowerCase().replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
+    if (!token) continue;
+    let consumed = 1;
+    let hit = WAKE_WORDS.has(token);
+    if (!hit && token === "cap") {
+      const next = (tokens[i + 1] || "").toLowerCase().replace(/[^a-z]/g, "");
+      if (/^(ri|ree|ry|rie)$/.test(next)) { hit = true; consumed = 2; }
+    }
+    if (!hit && token.length >= 4 && token.length <= 7 && editDistance(token, "capri") <= 1) hit = true;
+    if (hit) return tokens.slice(i + consumed).join(" ").replace(/^[\s,.;:!?-]+/, "").trim();
+  }
+  return "";
+}
+
+function finishWake() {
+  clearTimeout(wakeWord.decideTimer);
+  wakeWord.decideTimer = null;
+  if (!wakeWord.pendingStart) return;
+
+  const rest = wakeRemainder(wakeWord.capture);
+  const words = rest.split(/\s+/).filter(Boolean);
+  wakeWord.capture = "";
+
+  const recognition = wakeWord.recognition;
+  wakeWord.recognition = null;
+  wakeWord.active = false;
+  wakeWord.starting = false;
+  try { recognition?.stop(); } catch { /* already stopped */ }
+
+  if (words.length && rest.length >= 3) {
+    wakeWord.pendingStart = false;
+    wakeWord.chimed = false;
+    showHeard(rest);
+    respond(rest);
+    return;
+  }
+  // Only the name was said: the mic opens in onend and records the order.
+}
+
 function startWakeWord() {
   if (!wakeWord.enabled || document.hidden || wakeWord.active || wakeWord.starting || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -1034,6 +1090,8 @@ function startWakeWord() {
   const recognition = new Recognition();
   wakeWord.recognition = recognition;
   wakeWord.starting = true;
+  wakeWord.chimed = false;
+  wakeWord.capture = "";
   recognition.continuous = true;
   recognition.interimResults = true;
   recognition.lang = "en-US";
@@ -1049,14 +1107,21 @@ function startWakeWord() {
   };
   recognition.onresult = (event) => {
     let said = "";
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+    for (let index = 0; index < event.results.length; index += 1) {
       said += ` ${event.results[index][0]?.transcript || ""}`;
     }
     if (!isWakePhrase(said)) return;
-    if (wakeWord.pendingStart) return;
+    const first = !wakeWord.pendingStart;
     wakeWord.pendingStart = true;
-    playListeningChime();
-    try { recognition.stop(); } catch { /* onend will resume */ }
+    wakeWord.capture = said;
+    if (first) {
+      playListeningChime();
+      wakeWord.chimed = true;
+    }
+    const rest = wakeRemainder(said);
+    const enough = rest.split(/\s+/).filter(Boolean).length >= 2;
+    clearTimeout(wakeWord.decideTimer);
+    wakeWord.decideTimer = setTimeout(finishWake, enough ? 200 : 750);
   };
   recognition.onerror = (event) => {
     if (["not-allowed", "service-not-allowed"].includes(event.error)) {
@@ -1072,12 +1137,14 @@ function startWakeWord() {
     wakeWord.active = false;
     wakeWord.starting = false;
     paintWakeWord();
-    // If mic button already took over, don't interfere
-    if (!owned) return;
     if (wakeWord.pendingStart && wakeWord.enabled && !document.hidden) {
+      // The wake utterance ended: open the mic for the order.
       wakeWord.pendingStart = false;
-      setTimeout(() => startListening(), 180);
-    } else if (wakeWord.enabled && !document.hidden) {
+      wakeWord.capture = "";
+      clearTimeout(wakeWord.decideTimer);
+      wakeWord.decideTimer = null;
+      setTimeout(() => startListening(), 260);
+    } else if (owned && wakeWord.enabled && !document.hidden) {
       setTimeout(startWakeWord, 900);
     } else if (!rec.active && !state.streaming) {
       setPhase("idle");
@@ -1105,6 +1172,7 @@ document.addEventListener("visibilitychange", () => {
     try { wakeWord.recognition?.stop(); } catch { /* already stopped */ }
   } else if (wakeWord.pendingStart && wakeWord.enabled) {
     wakeWord.pendingStart = false;
+    wakeWord.capture = "";
     startListening();
   } else if (wakeWord.enabled) {
     startWakeWord();
@@ -1184,6 +1252,40 @@ async function transcribe(blob) {
 }
 
 /* ---------------------------------------------------------------- phone hands */
+
+function openOnDevice(args = {}) {
+  const target = String(args.target ?? args.name ?? args.app ?? args.query ?? args.url ?? "").trim();
+  if (!target) return false;
+
+  if (window.capriNative && typeof window.capriNative.openTarget === "function") {
+    try { window.capriNative.openTarget(target); return true; } catch { /* fall through */ }
+  }
+  if (!IS_PHONE) return openOnDesktop(target);
+  return openOnPhone(args);
+}
+
+function webUrlFor(target) {
+  const clean = String(target || "").trim();
+  if (!clean) return "";
+  if (/^(https?:|mailto:|tel:|sms:)/i.test(clean)) return clean;
+  const app = phoneAppFor(clean);
+  if (app?.url) return app.url;
+  const bare = clean.replace(/^(open|launch|start|go to|the)\s+/i, "").replace(/\s+(app|website|site)$/i, "").trim();
+  if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(bare)) return `https://${bare}`;
+  if (app && !app.url) return `https://www.google.com/search?q=${encodeURIComponent(bare)}`;
+  return `https://www.google.com/search?q=${encodeURIComponent(bare)}`;
+}
+
+function openOnDesktop(target) {
+  showAction(`open: ${target}`);
+  const url = webUrlFor(target);
+  if (!url) return false;
+  try {
+    const opened = window.open(url, "_blank", "noopener");
+    if (opened) return true;
+  } catch { /* popups blocked and the tab stays here */ }
+  try { location.assign(url); return true; } catch { return false; }
+}
 
 const PHONE_APPS = {
   youtube: { pkg: "com.google.android.youtube", url: "https://www.youtube.com", ios: "youtube://" },
@@ -1403,8 +1505,8 @@ async function respond(userText) {
               speech.enqueue(speechBuf.slice(spokenUpTo, boundary).trim());
               spokenUpTo = boundary;
             }
-          } else if (evt.type === "device_call" && evt.name === "open_on_phone") {
-            openOnPhone(evt.args || {});
+          } else if (evt.type === "device_call" && (evt.name === "open_on_phone" || evt.name === "open_on_device")) {
+            openOnDevice(evt.args || {});
           } else if (evt.type === "action") {
             showAction(evt.label || evt.name);
           } else if (evt.type === "tool") {
@@ -2155,6 +2257,9 @@ el.micBtn.addEventListener("click", () => {
     wakeWord.active = false;
     wakeWord.starting = false;
     wakeWord.pendingStart = false;
+    wakeWord.capture = "";
+    clearTimeout(wakeWord.decideTimer);
+    wakeWord.decideTimer = null;
     try { recognition?.stop(); } catch { /* ignore */ }
     // Small delay so recognition.onend doesn't fight us
     setTimeout(() => startListening(), 80);
