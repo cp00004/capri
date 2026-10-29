@@ -80,6 +80,7 @@ const el = {
 // origin. Static builds (GitHub Pages) and the native shell need the tunnel.
 const IS_GITHUB_PAGES = location.hostname.includes("github.io");
 const IS_NATIVE = location.protocol === "capacitor:" || (Boolean(window.Capacitor) && location.hostname === "localhost");
+const IS_PHONE = IS_NATIVE || /android|iphone|ipod|ipad|mobile/i.test(navigator.userAgent);
 const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
 const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
@@ -131,6 +132,7 @@ async function api(url, opts = {}) {
   const headers = new Headers(opts.headers || {});
   if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
   if (state.session) headers.set("X-Capri-Profile", state.session);
+  if (IS_PHONE) headers.set("X-Capri-Device", "mobile");
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 8000);
