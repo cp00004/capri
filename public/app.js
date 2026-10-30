@@ -1229,9 +1229,10 @@ function startWakeWord() {
   }
   if (!wakeWord.enabled || document.hidden || wakeWord.active || wakeWord.starting || cmdRec.active || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Recognition) {
-    setWakeWordEnabled(false);
-    showNotice("Wake-word listening is not supported in this browser. Use the mic button instead.", null, null, 7000);
+  if (!Recognition || wakeWord.micEngine) {
+    // Chrome's recognizer needs Google's speech service; Electron has none, and
+    // Android's WebView has none either. Capri listens with her own mic instead.
+    startMicWake();
     return;
   }
 
