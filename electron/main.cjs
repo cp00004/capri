@@ -910,7 +910,7 @@ function startEyeTimers() {
       const box = eyeWin.getBounds();
       eyeWin.webContents.send("eye-cursor", { x: point.x - box.x, y: point.y - box.y });
     } catch { /* display swap */ }
-  }, 60);
+  }, 32);
   eyeWatchTimer = setInterval(watchScreen, 5000);
 }
 

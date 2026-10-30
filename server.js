@@ -1689,7 +1689,9 @@ async function handleTts(req, res) {
     }
   }
 
-  const wanted = want || "auto";
+  // Default to one voice. Gemini's free tier is a handful of lines a day, so
+  // leading with it made her switch voices the moment the quota ran out.
+  const wanted = want || (GROQ_KEYS[0] ? "orpheus" : "auto");
   const useGemini = (wanted === "auto" || wanted === "gemini") && Boolean(GEMINI_KEY);
 
   if (useGemini) {

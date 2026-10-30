@@ -429,9 +429,11 @@
 
     const ox = cx + px;
     const oy = cy + py;
-    const step = state.dragging ? 1.6 : 1.2;
-    const seam = state.dragging ? 18 : 11;
-    if (Math.hypot(ox - lastStamp.x, oy - lastStamp.y) > step) {
+    const step = state.dragging ? 1.2 : 1.2;
+    const seam = state.dragging ? 22 : 11;
+    // While dragging, stamp every frame: the window follows the cursor, so the
+    // art itself barely shifts and distance alone would keep the trail invisible.
+    if (state.dragging || Math.hypot(ox - lastStamp.x, oy - lastStamp.y) > step) {
       ghosts.push({
         x: ox,
         y: oy,
@@ -442,7 +444,10 @@
       });
       if (ghosts.length > seam) ghosts.shift();
       lastStamp = { x: ox, y: oy };
-      if (state.dragging) spawnShards(3, 1.15);
+      if (state.dragging) {
+        spawnShards(2, 1.0);
+        if (shards.length > 120) shards.splice(0, shards.length - 120);
+      }
     }
 
     drawTrail(now);
@@ -503,17 +508,21 @@
 
   requestAnimationFrame(frame);
 
+  // Forwarded mousemove events do not arrive while the window ignores the mouse,
+  // so the global cursor feed from main is also the hit tester: it can flip the
+  // window back to clickable the moment the pointer crosses the art edge.
   window.capriEye?.onCursor((point) => {
     cursor = point;
     lastCursorAt = performance.now();
+    refreshHit(point.x, point.y);
   });
 
   // Dragging leaves the eye behind for a frame, which reads as a streak.
   window.capriEye?.onMove(({ dx, dy }) => {
     if (!dx && !dy) return;
-    const k = state.dragging ? 0.72 : 0.55;
-    const capX = state.dragging ? 40 : 26;
-    const capY = state.dragging ? 30 : 18;
+    const k = state.dragging ? 0.9 : 0.55;
+    const capX = state.dragging ? 30 : 26;
+    const capY = state.dragging ? 24 : 18;
     impulse.x = Math.max(-capX, Math.min(capX, impulse.x - dx * k));
     impulse.y = Math.max(-capY, Math.min(capY, impulse.y - dy * k));
   });
