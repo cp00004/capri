@@ -3048,7 +3048,14 @@ function initUpdates() {
     if (updateUi.wired) return;
     updateUi.wired = true;
     window.capriNative.onUpdate((evt) => {
-      if (!evt || updateUi.dismissed) return;
+      if (!evt) return;
+      if (evt.phase === "updated") {
+        updateUi.dismissed = false;
+        if (el.updateScreen) el.updateScreen.classList.add("hidden");
+        showNotice(`Capri updated itself to v${evt.version}. Nothing for you to install.`, null, null, 12000);
+        return;
+      }
+      if (updateUi.dismissed) return;
       if (evt.phase === "downloading") {
         showUpdateScreen({
           kicker: `NEW BUILD ${evt.version || ""}`.trim(),

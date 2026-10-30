@@ -458,6 +458,16 @@ function writeUpdateState(state) {
   catch { /* best effort */ }
 }
 
+// Remember what version last ran, so a relaunch after an update can say so.
+function consumeSeenVersion() {
+  const file = path.join(app.getPath("userData"), "seen-version.json");
+  let previous = "";
+  try { previous = String(JSON.parse(fs.readFileSync(file, "utf8")).version || ""); } catch { /* first run */ }
+  try { fs.writeFileSync(file, JSON.stringify({ version: app.getVersion(), at: Date.now() })); }
+  catch { /* best effort */ }
+  return previous;
+}
+
 ipcMain.handle("capri-version", () => app.getVersion());
 
 // ── Google sign-in ───────────────────────────────────────────────────────────
