@@ -326,8 +326,8 @@ public class EyeService extends Service {
 		else idleFloat();
 	}
 
-	// The eye art came on a white card. Flood the white in from the edges so the
-	// bright bits inside the iris stay put.
+	// The eye art came on a white card. Fade the near-white pixels out and crop
+	// the empty border so only the eye is left floating.
 	private Bitmap loadEye() {
 		Bitmap src = BitmapFactory.decodeResource(getResources(), R.drawable.eye_spy);
 		if (src == null) return null;
@@ -341,35 +341,37 @@ public class EyeService extends Service {
 		int h = out.getHeight();
 		int[] px = new int[w * h];
 		out.getPixels(px, 0, w, 0, 0, w, h);
-		boolean[] seen = new boolean[w * h];
-		ArrayDeque<Integer> queue = new ArrayDeque<>();
-		for (int x = 0; x < w; x++) { queue.add(x); queue.add((h - 1) * w + x); }
-		for (int y = 0; y < h; y++) { queue.add(y * w); queue.add(y * w + w - 1); }
-		while (!queue.isEmpty()) {
-			int p = queue.poll();
-			if (seen[p]) continue;
-			seen[p] = true;
-			int c = px[p];
-			int low = Math.min(Color.red(c), Math.min(Color.green(c), Color.blue(c)));
-			if (low <= 224) continue;
-			px[p] = Color.argb(0, 0, 0, 0);
-			int x = p % w;
-			int y = (p - x) / w;
-			if (x > 0) queue.add(p - 1);
-			if (x < w - 1) queue.add(p + 1);
-			if (y > 0) queue.add(p - w);
-			if (y < h - 1) queue.add(p + w);
-		}
-		for (int i = 0; i < px.length; i++) {
-			int c = px[i];
-			int alpha = Color.alpha(c);
-			if (alpha == 0) continue;
-			int low = Math.min(Color.red(c), Math.min(Color.green(c), Color.blue(c)));
-			if (low > 200) px[i] = Color.argb(Math.round(alpha * 0.45f), Color.red(c), Color.green(c), Color.blue(c));
+
+		int x0 = w, y0 = h, x1 = -1, y1 = -1;
+		for (int y = 0; y < h; y++) {
+			for (int x = 0; x < w; x++) {
+				int i = y * w + x;
+				int c = px[i];
+				int low = Math.min(Color.red(c), Math.min(Color.green(c), Color.blue(c)));
+				float t = Math.max(0f, Math.min(1f, (low - 150) / 45f));
+				int alpha = Color.alpha(c);
+				if (t > 0) {
+					alpha = Math.round(alpha * (1f - t));
+					px[i] = Color.argb(alpha, Color.red(c), Color.green(c), Color.blue(c));
+				}
+				if (alpha > 12) {
+					if (x < x0) x0 = x;
+					if (x > x1) x1 = x;
+					if (y < y0) y0 = y;
+					if (y > y1) y1 = y;
+				}
+			}
 		}
 		out.setPixels(px, 0, w, 0, 0, w, h);
-		if (src != out) src.recycle();
-		return out;
+		if (x1 < x0 || y1 < y0) return out;
+		int pad = 6;
+		x0 = Math.max(0, x0 - pad);
+		y0 = Math.max(0, y0 - pad);
+		x1 = Math.min(w - 1, x1 + pad);
+		y1 = Math.min(h - 1, y1 + pad);
+		Bitmap cropped = Bitmap.createBitmap(out, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+		out.recycle();
+		return cropped;
 	}
 
 	private void showLine(String text) {
