@@ -1010,8 +1010,10 @@ Eye Spy:
           }
         }
       }
-      line = cleanBanter(out);
-      if (line) break;
+      const text = cleanBanter(out);
+      if (text && (!line || text.length > line.length)) line = text;
+      // A three-word shrug is a wasted comment; give the next relay a go.
+      if (text && text.split(/\s+/).filter(Boolean).length >= 6) break;
     } catch (err) {
       coolDown(candidate, Number(err?.retryAfter) || 20);
     } finally {
