@@ -94,6 +94,26 @@ function logLine(message) {
   } catch { /* logging must never break the app */ }
 }
 
+// Shortcuts store an absolute exe path inside the versioned install folder, and
+// the old folder is pruned after an update. Retarget the ones that exist so a
+// pinned capri keeps opening the build that is actually running.
+function syncShortcuts() {
+  if (process.platform !== "win32") return;
+  const links = [
+    path.join(app.getPath("desktop"), "Capri.lnk"),
+    path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Capri", "Capri.lnk"),
+  ];
+  const exe = process.execPath;
+  const quote = (value) => `'${String(value).replace(/'/g, "''")}'`;
+  const script = links.map((link) =>
+    `$l=${quote(link)}; if (Test-Path $l) { $s=(New-Object -ComObject WScript.Shell).CreateShortcut($l); ` +
+    `if ($s.TargetPath -ne ${quote(exe)}) { $s.TargetPath=${quote(exe)}; ` +
+    `$s.WorkingDirectory=${quote(path.dirname(exe))}; $s.IconLocation=${quote(exe + ",0")}; $s.Save() } }`
+  ).join("; ");
+  execFile("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+    { windowsHide: true }, (err) => { if (err) logLine(`shortcuts: sync failed (${err.message})`); });
+}
+
 // ── Permissions — grant mic + camera without prompting ───────────────────────
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler(
@@ -1160,6 +1180,7 @@ app.whenReady().then(async () => {
   logLine(`local port ${PORT}`);
   startServer();
   try { createTray(); } catch (err) { console.warn("[capri] tray unavailable:", err.message); }
+  syncShortcuts();
   try {
     const eyeState = readEyeState();
     eyeEnabled = eyeState.enabled !== false;
