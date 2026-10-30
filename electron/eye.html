@@ -43,14 +43,14 @@
     border-radius: 50%;
     overflow: hidden;
     pointer-events: none;
-    -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 66%, rgba(0, 0, 0, 0) 100%);
-    mask-image: radial-gradient(circle at 50% 50%, #000 66%, rgba(0, 0, 0, 0) 100%);
+    -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 72%, rgba(0, 0, 0, 0) 100%);
+    mask-image: radial-gradient(circle at 50% 50%, #000 72%, rgba(0, 0, 0, 0) 100%);
   }
   #aperture::after {
     content: "";
     position: absolute; inset: 0;
     border-radius: 50%;
-    box-shadow: inset 0 0 9px rgba(0, 0, 0, .6), inset 0 0 2px rgba(0, 0, 0, .8);
+    box-shadow: inset 0 0 6px rgba(0, 0, 0, .35);
   }
   #iris {
     position: absolute;
@@ -150,7 +150,7 @@
   // Measured off the cutout: the iris disc centre and radius as fractions of
   // the art box. Detection of "blue pixels" caught the blue shadows in the
   // lashes too, which is why the aperture used to grow into a black disc.
-  const ball = { cx: 0.4817, cy: 0.604, r: 0.0978, size: 49, left: 0, top: 0, max: 5 };
+  const ball = { cx: 0.4817, cy: 0.621, r: 0.0978, size: 49, left: 0, top: 0, max: 5 };
 
   // The art came on a white card. Fade every near-white pixel out and trim the
   // empty border, so only the eye is left floating.
