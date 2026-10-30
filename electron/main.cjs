@@ -858,11 +858,13 @@ function sayEye(text) {
 
 function startEyeTimers() {
   stopEyeTimers();
+  let eyeTick = 0;
   eyeCursorTimer = setInterval(() => {
     if (!eyeWin || eyeWin.isDestroyed() || !eyeWin.isVisible()) return;
     try {
       const point = screen.getCursorScreenPoint();
       const box = eyeWin.getBounds();
+      if (++eyeTick % 25 === 0) logLine(`eye: cursor ${point.x},${point.y} box ${box.x},${box.y} ${box.width}x${box.height}`);
       eyeWin.webContents.send("eye-cursor", { x: point.x - box.x, y: point.y - box.y });
     } catch { /* display swap */ }
   }, 60);
