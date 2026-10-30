@@ -105,6 +105,8 @@ public class EyeService extends Service {
 	private TextToSpeech tts;
 	private boolean ttsReady = false;
 
+	private static boolean running = false;
+
 	public static void start(Context context, String config) {
 		Intent intent = new Intent(context, EyeService.class);
 		intent.setAction(ACTION_START);
@@ -118,6 +120,7 @@ public class EyeService extends Service {
 	}
 
 	public static void stop(Context context) {
+		if (!running) return;
 		Intent intent = new Intent(context, EyeService.class);
 		intent.setAction(ACTION_STOP);
 		try { context.startService(intent); } catch (Exception err) { /* already gone */ }
@@ -134,6 +137,7 @@ public class EyeService extends Service {
 	}
 
 	public static void hide(Context context) {
+		if (!running) return;
 		Intent intent = new Intent(context, EyeService.class);
 		intent.setAction(ACTION_HIDE);
 		try { context.startService(intent); } catch (Exception err) { /* nothing running */ }
@@ -149,6 +153,7 @@ public class EyeService extends Service {
 	@Override
 	public void onCreate() {
 		super.onCreate();
+		running = true;
 		windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
 		handler = new Handler(Looper.getMainLooper());
 		eyeSize = dp(140);
@@ -170,9 +175,11 @@ public class EyeService extends Service {
 			return START_NOT_STICKY;
 		}
 		if (ACTION_HIDE.equals(action)) {
+			// Only the floating view goes away. The service and its foreground
+			// notification stay, so bringing the eye back later is never a
+			// background start Android would refuse.
 			teardown();
-			stopSelf();
-			return START_NOT_STICKY;
+			return START_STICKY;
 		}
 		if (ACTION_SAY.equals(action)) {
 			showLine(intent.getStringExtra(EXTRA_TEXT));
@@ -207,16 +214,26 @@ public class EyeService extends Service {
 				.build();
 		try {
 			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-				int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
-				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-					type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+				// Android 14 throws if a declared foreground type lacks its
+				// runtime grant, so ask only for the mic type once the user has
+				// actually allowed the microphone. Then fall back a step at a time.
+				int special = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+				boolean micGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+						|| checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && micGranted) {
+					try {
+						startForeground(7421, note, special | ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+						return;
+					} catch (Exception err) { /* no mic type on this build */ }
 				}
-				startForeground(7421, note, type);
-			} else {
-				startForeground(7421, note);
+				try {
+					startForeground(7421, note, special);
+					return;
+				} catch (Exception err) { /* fall through to the plain form */ }
 			}
+			startForeground(7421, note);
 		} catch (Exception err) {
-			try { startForeground(7421, note); } catch (Exception again) { /* notification blocked */ }
+			// A hidden notification must not take the whole eye down with it.
 		}
 	}
 
@@ -809,7 +826,10 @@ public class EyeService extends Service {
 
 	@Override
 	public void onDestroy() {
+		running = false;
 		teardown();
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE);
+		else stopForeground(true);
 		if (tts != null) {
 			try { tts.shutdown(); } catch (Exception err) { /* already closed */ }
 			tts = null;

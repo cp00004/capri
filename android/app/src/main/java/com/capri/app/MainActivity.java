@@ -1,6 +1,8 @@
 package com.capri.app;
 
 import android.Manifest;
+import android.app.AlarmManager;
+import android.app.AppOpsManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -8,13 +10,17 @@ import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
 import androidx.core.app.ActivityCompat;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
+
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -26,6 +32,10 @@ import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
 	private static final int CAPRI_PERMISSION_REQUEST = 1723;
+	private final java.util.ArrayDeque<String> grantQueue = new java.util.ArrayDeque<>();
+	private boolean grantFlow = false;
+	private boolean thenRuntime = false;
+	private long lastGrantStep = 0;
 
 	// name -> { package, web fallback }
 	private static final Map<String, String[]> APPS = new HashMap<>();
@@ -63,8 +73,127 @@ public class MainActivity extends BridgeActivity {
 		if (webView != null) {
 			webView.addJavascriptInterface(new DeviceBridge(), "CapriDevice");
 			webView.addJavascriptInterface(new EyeBridge(), "CapriEyes");
+			webView.addJavascriptInterface(new PermBridge(), "CapriPerms");
+			// The page needs the mic without a second tap after the OS dialog.
+			webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
 		}
 
+		requestRuntime(false);
+	}
+
+	// Everything the phone has to hand over before she can actually take over:
+	// mic, notifications, draw-over-other-apps, usage access, exact alarms and a
+	// battery exemption. The page asks here and gets sent to the right screen.
+	private class PermBridge {
+		@JavascriptInterface
+		public String status() {
+			return grantStatus().toString();
+		}
+
+		@JavascriptInterface
+		public String request(String what) {
+			final String which = String.valueOf(what == null ? "" : what).trim().toLowerCase(Locale.US);
+			runOnUiThread(() -> openGrant(which));
+			return grantStatus().toString();
+		}
+
+		@JavascriptInterface
+		public String startEye() {
+			JSONObject cfg = new JSONObject();
+			try { cfg = new JSONObject(EyePrefs.load(MainActivity.this)); } catch (Exception err) { /* defaults */ }
+			EyeService.start(MainActivity.this, cfg.toString());
+			EyeService.show(MainActivity.this, cfg.toString());
+			return grantStatus().toString();
+		}
+	}
+
+	private JSONObject grantStatus() {
+		JSONObject out = new JSONObject();
+		try {
+			boolean mic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+			boolean notes = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+					|| NotificationManagerCompat.from(this).areNotificationsEnabled();
+			boolean overlay = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this);
+			boolean usage = usageAllowed();
+			boolean alarms = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+					|| ((AlarmManager) getSystemService(ALARM_SERVICE)).canScheduleExactAlarms();
+			boolean battery = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+					|| ((PowerManager) getSystemService(POWER_SERVICE)).isIgnoringBatteryOptimizations(getPackageName());
+			out.put("mic", mic);
+			out.put("notifications", notes);
+			out.put("overlay", overlay);
+			out.put("usage", usage);
+			out.put("alarms", alarms);
+			out.put("battery", battery);
+			out.put("core", mic && notes && overlay && usage);
+		} catch (Exception err) {
+			// a missing reading is just a missing grant
+		}
+		return out;
+	}
+
+	private boolean usageAllowed() {
+		try {
+			AppOpsManager ops = (AppOpsManager) getSystemService(APP_OPS_SERVICE);
+			if (ops == null) return false;
+			int mode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+					? ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), getPackageName())
+					: ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), getPackageName());
+			return mode == AppOpsManager.MODE_ALLOWED;
+		} catch (Exception err) {
+			return false;
+		}
+	}
+
+	private void openGrant(String which) {
+		if (which.isEmpty() || which.equals("all")) {
+			startGrantFlow();
+			return;
+		}
+		switch (which) {
+			case "mic":
+			case "notifications":
+				requestRuntime(false);
+				break;
+			case "overlay":
+			case "usage":
+			case "alarms":
+			case "battery":
+				openSettingsPage(which);
+				break;
+			default:
+				openSettingsPage("overlay");
+		}
+	}
+
+	// Full access is not one screen: Android splits these grants across the
+	// dialog and four different settings pages. Walk them one at a time,
+	// starting the next whenever the user comes back.
+	private void startGrantFlow() {
+		grantQueue.clear();
+		grantQueue.add("overlay");
+		grantQueue.add("usage");
+		grantQueue.add("alarms");
+		grantQueue.add("battery");
+		grantFlow = true;
+		lastGrantStep = 0;
+		requestRuntime(true);
+	}
+
+	private void nextGrant() {
+		if (!grantFlow) return;
+		long now = android.os.SystemClock.elapsedRealtime();
+		if (now - lastGrantStep < 900) return;
+		lastGrantStep = now;
+		String next = grantQueue.poll();
+		if (next == null) {
+			grantFlow = false;
+			return;
+		}
+		openSettingsPage(next);
+	}
+
+	private void requestRuntime(boolean thenAll) {
 		ArrayList<String> missing = new ArrayList<>();
 		if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
 			missing.add(Manifest.permission.RECORD_AUDIO);
@@ -73,8 +202,56 @@ public class MainActivity extends BridgeActivity {
 				&& ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
 			missing.add(Manifest.permission.POST_NOTIFICATIONS);
 		}
-		if (!missing.isEmpty()) {
-			ActivityCompat.requestPermissions(this, missing.toArray(new String[0]), CAPRI_PERMISSION_REQUEST);
+		if (missing.isEmpty()) {
+			if (thenAll) nextGrant();
+			return;
+		}
+		thenRuntime = thenAll;
+		ActivityCompat.requestPermissions(this, missing.toArray(new String[0]), CAPRI_PERMISSION_REQUEST);
+	}
+
+	@Override
+	public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+		super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+		if (requestCode == CAPRI_PERMISSION_REQUEST && thenRuntime) {
+			thenRuntime = false;
+			nextGrant();
+		}
+	}
+
+	private void openSettingsPage(String which) {
+		try {
+			Intent intent;
+			switch (which) {
+				case "usage":
+					intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+					intent.setData(Uri.parse("package:" + getPackageName()));
+					break;
+				case "alarms":
+					intent = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+							? new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:" + getPackageName()))
+							: new Intent(Settings.ACTION_SETTINGS);
+					break;
+				case "battery":
+					intent = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+							? new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName()))
+							: new Intent(Settings.ACTION_SETTINGS);
+					break;
+				case "notifications":
+					intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+					intent.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
+					break;
+				case "overlay":
+				default:
+					intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+			}
+			intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+			startActivity(intent);
+		} catch (Exception err) {
+			try {
+				startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + getPackageName()))
+						.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+			} catch (Exception again) { /* no settings app */ }
 		}
 	}
 
@@ -126,7 +303,8 @@ public class MainActivity extends BridgeActivity {
 
 		@JavascriptInterface
 		public void hide() {
-			EyeService.hide(MainActivity.this);
+			if (EyePrefs.enabled(MainActivity.this)) EyeService.hide(MainActivity.this);
+			else EyeService.stop(MainActivity.this);
 		}
 
 		@JavascriptInterface
@@ -163,7 +341,9 @@ public class MainActivity extends BridgeActivity {
 	@Override
 	public void onResume() {
 		super.onResume();
-		EyeService.hide(this);
+		if (EyePrefs.enabled(this)) EyeService.hide(this);
+		else EyeService.stop(this);
+		if (grantFlow) new android.os.Handler(getMainLooper()).postDelayed(this::nextGrant, 700);
 	}
 
 	private String launch(String raw) {

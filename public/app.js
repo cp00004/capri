@@ -910,6 +910,92 @@ eyeSpyBtn?.addEventListener('click', () => {
   if (!next) { try { window.CapriEyes?.hide?.(); } catch { /* not android */ } }
 });
 
+/* ---------------------------------------------------------------- phone access */
+
+// Android hands these grants out one screen at a time: two dialog permissions
+// and four pages buried in Settings. The native side walks you through them in
+// order; this block just shows what is still missing and lets you jump.
+const phoneField = document.getElementById('phoneField');
+const phoneState = document.getElementById('phoneState');
+const phoneHint = document.getElementById('phoneHint');
+const PHONE_CHIPS = {
+  mic: ['phoneMicBtn', 'phoneMicLabel'],
+  notifications: ['phoneNotesBtn', 'phoneNotesLabel'],
+  overlay: ['phoneEyeBtn', 'phoneEyeLabel'],
+  usage: ['phoneUsageBtn', 'phoneUsageLabel'],
+  alarms: ['phoneAlarmBtn', 'phoneAlarmLabel'],
+  battery: ['phoneBatteryBtn', 'phoneBatteryLabel'],
+};
+
+function phoneBridge() {
+  return IS_NATIVE ? window.CapriPerms : null;
+}
+
+function readPhoneGrants() {
+  try {
+    const bridge = phoneBridge();
+    if (!bridge?.status) return null;
+    return JSON.parse(bridge.status() || '{}');
+  } catch {
+    return null;
+  }
+}
+
+function paintPhoneAccess() {
+  if (!phoneField) return;
+  const grants = readPhoneGrants();
+  phoneField.style.display = grants ? '' : 'none';
+  if (!grants) return;
+  for (const [key, ids] of Object.entries(PHONE_CHIPS)) {
+    const btn = document.getElementById(ids[0]);
+    const label = document.getElementById(ids[1]);
+    const on = Boolean(grants[key]);
+    if (btn) btn.classList.toggle('is-on', on);
+    if (label) label.dataset.on = on ? '1' : '0';
+  }
+  const missing = ['mic', 'notifications', 'overlay', 'usage', 'alarms', 'battery'].filter((k) => !grants[k]);
+  phoneState.textContent = missing.length ? `${6 - missing.length}/6 granted` : 'full access';
+  phoneState.classList.toggle('bad', missing.includes('mic') || missing.includes('overlay'));
+  if (phoneHint) {
+    phoneHint.textContent = missing.length
+      ? `Still needed: ${missing.join(', ')}. Tap a chip to open its screen.`
+      : 'Everything is granted. She can hear you, draw the eye and comment on apps.';
+  }
+  return grants;
+}
+
+const phoneAllBtn = document.getElementById('phoneAllBtn');
+phoneAllBtn?.addEventListener('click', () => {
+  const bridge = phoneBridge();
+  if (!bridge?.request) {
+    showNotice('Phone access is only on the Android build.', null, null, 5000);
+    return;
+  }
+  try { bridge.request('all'); } catch { /* older build */ }
+  showNotice('Android will ask for these one at a time. Keep tapping Allow.', null, null, 9000);
+  setTimeout(paintPhoneAccess, 900);
+});
+
+for (const key of Object.keys(PHONE_CHIPS)) {
+  document.getElementById(PHONE_CHIPS[key][0])?.addEventListener('click', () => {
+    const bridge = phoneBridge();
+    const grants = readPhoneGrants() || {};
+    if (grants[key]) {
+      // Android will not re-prompt for a granted permission; send them to the
+      // page that can actually revoke or widen it.
+      try { bridge?.request?.(key); } catch { /* older build */ }
+      return;
+    }
+    try { bridge?.request?.(key); } catch { /* older build */ }
+    setTimeout(paintPhoneAccess, 900);
+  });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) setTimeout(paintPhoneAccess, 400);
+});
+paintPhoneAccess();
+
 // The floating eye hears you and answers through this same chat turn, so
 // timers, memory and notifications behave exactly as in the app window.
 function wireEyeVoice() {
@@ -970,9 +1056,12 @@ function scheduleReminder(args) {
   const seconds = Math.max(3, Math.min(86400, Math.round(Number(args?.seconds) || 0)));
   const message = String(args?.message || "Time is up.").slice(0, 160);
   // The phone arms a real alarm so the timer still goes off with the app shut.
+  // The method lives on the eye bridge on Android and on the device bridge in
+  // the desktop shell, so try both.
   let armed = false;
-  if (typeof window.CapriDevice?.scheduleReminder === "function") {
-    try { window.CapriDevice.scheduleReminder(seconds, message); armed = true; } catch { /* web page */ }
+  for (const bridge of [window.CapriEyes, window.CapriDevice]) {
+    if (typeof bridge?.scheduleReminder !== "function") continue;
+    try { bridge.scheduleReminder(seconds, message); armed = true; break; } catch { /* try the other shell */ }
   }
   if (!armed) {
     setTimeout(() => {
@@ -1107,6 +1196,20 @@ async function startListening(force = false) {
   setPhase("listening");
   clearHeard();
 
+  // On the phone the WebView only opens the mic once Android has actually
+  // granted it. Ask through the native bridge first instead of bouncing off a
+  // generic NotAllowedError and telling the user to "allow it for this page".
+  if (IS_NATIVE) {
+    const grants = readPhoneGrants();
+    if (grants && grants.mic === false) {
+      try { window.CapriPerms?.request?.('mic'); } catch { /* older build */ }
+      rec.starting = false;
+      setPhase("idle");
+      showNotice("Tap Allow on the microphone prompt - then press MIC again.", null, null, 7000);
+      return;
+    }
+  }
+
   try {
     rec.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -1124,9 +1227,14 @@ async function startListening(force = false) {
     rec.starting = false;
     rec.cancelStart = false;
     setPhase("idle");
+    if (IS_NATIVE && err?.name === "NotAllowedError") {
+      try { window.CapriPerms?.request?.("mic"); } catch { /* older build */ }
+    }
     showNotice(
       err?.name === "NotAllowedError"
-        ? "Microphone blocked. Allow it for this page, then try again."
+        ? (IS_NATIVE
+            ? "Android has not handed over the mic yet. Allow it, then press MIC again."
+            : "Microphone blocked. Allow it for this page, then try again.")
         : `Mic unavailable: ${err?.message || err}`,
       null, null, 9000
     );
@@ -1435,12 +1543,25 @@ async function startMicWake() {
   } catch (err) {
     micWake.busy = false;
     if (err?.name === "NotAllowedError") {
+      // On the phone the grant usually lands a moment after the prompt; asking
+      // and retrying beats switching her ear off for good.
+      if (IS_NATIVE) {
+        if ((micWake.grantAsks || 0) < 3) {
+          micWake.grantAsks = (micWake.grantAsks || 0) + 1;
+          try { window.CapriPerms?.request?.("mic"); } catch { /* older build */ }
+          showNotice("Allow the microphone - the ear switches back on by itself.", null, null, 7000);
+          clearTimeout(micWake.retryTimer);
+          micWake.retryTimer = setTimeout(() => { if (wakeWord.enabled) startMicWake(); }, 3000);
+        }
+        return;
+      }
       setWakeWordEnabled(false);
       showNotice("Microphone blocked, so I cannot listen for the wake word. Allow it and turn the ear back on.", null, null, 9000);
     }
     return;
   }
   micWake.busy = false;
+  micWake.grantAsks = 0;
   if (!wakeWord.enabled || document.hidden) {
     micWake.stream.getTracks().forEach((track) => track.stop());
     micWake.stream = null;
@@ -3217,6 +3338,17 @@ async function boot() {
   if (wakeWord.enabled && !document.hidden && !eyeLive) startWakeWord();
   paintEyeSpy();
   wireEyeVoice();
+  paintPhoneAccess();
+  if (IS_NATIVE) {
+    const grants = readPhoneGrants();
+    if (grants && !grants.core && localStorage.getItem("capri.phoneAsked") !== "1") {
+      localStorage.setItem("capri.phoneAsked", "1");
+      setTimeout(() => {
+        showNotice("Capri needs phone access before she can hear you or float outside the app.", null, null, 9000);
+        if (el.settings?.classList.contains("hidden")) openSheet(el.settings);
+      }, 1600);
+    }
+  }
   initUpdates();
 }
 

@@ -222,6 +222,25 @@
       <p class="hint">When Capri is out of the way she leaves an eye floating on your screen: it drifts and looks around on its own, trails behind your cursor, and drags anywhere. Tap MIC or just say “Capri …” and she answers from the eye. Off means no eye and no watching.</p>
     </div>
 
+    <div class="field" id="phoneField" style="display:none">
+      <span class="label">phone access</span>
+      <div class="row wrap">
+        <span class="value" id="phoneState">checking…</span>
+        <button id="phoneAllBtn" class="pill" type="button">GIVE FULL ACCESS</button>
+      </div>
+      <div class="row wrap">
+        <button id="phoneMicBtn" class="pill" type="button"><span class="led"></span><span id="phoneMicLabel">MIC</span></button>
+        <button id="phoneNotesBtn" class="pill" type="button"><span class="led"></span><span id="phoneNotesLabel">NOTIFICATIONS</span></button>
+        <button id="phoneEyeBtn" class="pill" type="button"><span class="led"></span><span id="phoneEyeLabel">DRAW OVER APPS</span></button>
+      </div>
+      <div class="row wrap">
+        <button id="phoneUsageBtn" class="pill" type="button"><span class="led"></span><span id="phoneUsageLabel">APP WATCHING</span></button>
+        <button id="phoneAlarmBtn" class="pill" type="button"><span class="led"></span><span id="phoneAlarmLabel">ALARMS</span></button>
+        <button id="phoneBatteryBtn" class="pill" type="button"><span class="led"></span><span id="phoneBatteryLabel">BATTERY</span></button>
+      </div>
+      <p class="hint" id="phoneHint">Android asks for these one screen at a time. Tap a chip to open its screen.</p>
+    </div>
+
     <div class="field">
       <span class="label">auto-publish</span>
       <div class="row wrap">
