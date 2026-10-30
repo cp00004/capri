@@ -670,6 +670,20 @@ function createWindow() {
   win.on("hide", () => { showEye(); });
   win.on("show", () => { hideEye(); });
 
+  // Losing focus counts as stepping away too, as long as it sticks for a beat.
+  let eyeBlurTimer = null;
+  win.on("blur", () => {
+    clearTimeout(eyeBlurTimer);
+    eyeBlurTimer = setTimeout(() => {
+      if (!win || win.isDestroyed() || win.isFocused() || win.isMinimized()) return;
+      showEye();
+    }, 1800);
+  });
+  win.on("focus", () => {
+    clearTimeout(eyeBlurTimer);
+    hideEye();
+  });
+
   win.on("closed", () => { win = null; });
 }
 
