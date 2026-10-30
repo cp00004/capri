@@ -257,6 +257,7 @@ Memory and settings:
 - Music, artists, genres, foods, colours, places, people, routines: save them. The next time they talk to you, use the memory naturally. Never recite the list.
 - Never say "I saved that to memory" like a database. Say something in character, or just do it.
 - Setting: app_banter (on/off, default on). If on, tease/comment on apps/websites you open AND needle them about what you can see them doing. If off, stay quiet about all of it.
+- Timers: any "remind me", "set a timer", "alarm" order goes through set_reminder with the delay in seconds and your own wording. The app fires a system notification. Confirm in one short line.
 `;
 
 const SYSTEM_PROMPT = `${PERSONA}${MEMORY_RULES}`;
@@ -727,6 +728,7 @@ function actionLabel(name, args) {
   if (name === "remember_fact") return String(args?.fact || "remembering").slice(0, 90);
   if (name === "set_preference") return `${String(args?.key || "setting")} = ${JSON.stringify(args?.value ?? "").slice(0, 60)}`;
   if (name === "get_time") return "reading the clock";
+  if (name === "set_reminder") return `reminder: ${String(args?.message || "").slice(0, 50)}`;
   if (!args) return name;
   if (name === "run_shell" || name === "powershell_object") return String(args.command || "").slice(0, 110);
   return String(args.path || args.target || args.from || args.keys || "").slice(0, 100) || name;
@@ -782,6 +784,21 @@ const MEMORY_TOOL_DEFS = [
       name: "get_time",
       description: "Read the PC's real clock and date in the user's configured format.",
       parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_reminder",
+      description: "Set a timer, alarm or reminder. Use for 'remind me in ten minutes', 'set a timer', 'wake me in an hour'. The app fires a system notification carrying your message when it goes off.",
+      parameters: {
+        type: "object",
+        properties: {
+          seconds: { type: "number", description: "Delay from now, in seconds." },
+          message: { type: "string", description: "The reminder itself, under 120 characters, in your voice." },
+        },
+        required: ["seconds", "message"],
+      },
     },
   },
 ];
@@ -1279,6 +1296,12 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         result = { ok: true, output: `opened ${target} on their device` };
       } else if (deviceOpen) {
         result = { ok: false, error: "open_on_phone is for the phone app; use open_target on the PC" };
+      } else if (call.function.name === "set_reminder") {
+        // The device owns the clock: hand it the delay and let it wake itself.
+        const seconds = Math.max(3, Math.min(86_400, Math.round(Number(args.seconds) || 0)));
+        const message = String(args.message || "Time is up.").replace(/\s+/g, " ").trim().slice(0, 160);
+        sse(res, { type: "device_call", name: "set_reminder", label: `reminder in ${seconds}s`, args: { seconds, message } });
+        result = { ok: true, output: `reminder armed for ${seconds} seconds from now` };
       } else if (memoryToolName(call.function.name)) {
         result = executeMemoryTool(call.function.name, args, profile, res);
       } else if (pcLocked) {
