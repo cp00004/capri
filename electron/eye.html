@@ -12,18 +12,21 @@
   #wrap {
     position: relative;
     width: 100%; height: 100%;
-    display: flex; align-items: center; justify-content: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    padding-top: 10px;
   }
+
   #drag {
     -webkit-app-region: drag;
     position: relative;
     cursor: grab;
-    filter: drop-shadow(0 0 18px rgba(77, 255, 157, .45)) drop-shadow(0 0 42px rgba(255, 79, 216, .22));
+    filter: drop-shadow(0 0 14px rgba(77, 255, 157, .45)) drop-shadow(0 0 34px rgba(255, 79, 216, .22));
     transition: filter .3s ease;
   }
-  #drag.locked { cursor: default; }
-  #drag.busy { filter: drop-shadow(0 0 24px rgba(255, 79, 216, .7)); }
-  #eye { display: block; width: 240px; height: auto; animation: float 6s ease-in-out infinite; will-change: transform; }
+  #drag.locked { cursor: default; -webkit-app-region: no-drag; }
+  #drag.busy { filter: drop-shadow(0 0 22px rgba(255, 79, 216, .7)); }
+
+  #eye { display: block; width: 260px; height: auto; animation: float 6s ease-in-out infinite; will-change: transform; }
   #drag.blink #eye { animation: float 6s ease-in-out infinite, blink 4.6s ease-in-out infinite; }
 
   @keyframes float {
@@ -38,7 +41,7 @@
 
   #scan {
     position: absolute; inset: 12% 6%;
-    background: linear-gradient(180deg, transparent 0%, rgba(77,255,157,.18) 48%, transparent 52%);
+    background: linear-gradient(180deg, transparent 0%, rgba(77,255,157,.20) 48%, transparent 52%);
     background-size: 100% 220%;
     animation: scan 3.4s linear infinite;
     mix-blend-mode: screen;
@@ -46,15 +49,30 @@
   }
   @keyframes scan { from { background-position: 0 -120%; } to { background-position: 0 220%; } }
 
+  #spark {
+    position: absolute; left: 50%; top: 42%;
+    width: 8px; height: 8px; margin: -4px 0 0 -4px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #ff4fd8 0%, rgba(255,79,216,0) 70%);
+    opacity: 0;
+    animation: spark 5.5s ease-in-out infinite;
+    pointer-events: none; mix-blend-mode: screen;
+  }
+  @keyframes spark {
+    0%, 80%, 100% { opacity: 0; scale: .6; }
+    85% { opacity: .9; scale: 1.6; }
+    92% { opacity: .3; scale: 2.4; }
+  }
+
   #bubble {
-    position: absolute; right: 96%; bottom: 22%;
-    max-width: 230px; min-width: 120px;
-    padding: 9px 11px;
-    background: rgba(7, 0, 12, .92);
+    position: absolute; left: 6px; right: 6px; bottom: 4px;
+    max-height: 108px; overflow: hidden;
+    padding: 8px 10px;
+    background: rgba(7, 0, 12, .93);
     border: 1px solid rgba(77, 255, 157, .55);
     border-left: 2px solid var(--pink);
     box-shadow: 0 0 22px rgba(77, 255, 157, .18);
-    opacity: 0; translate: 10px 0;
+    opacity: 0; translate: 0 8px;
     transition: opacity .25s ease, translate .25s ease;
     pointer-events: none;
   }
@@ -62,17 +80,17 @@
   #bubble b { display: block; font-size: 9px; letter-spacing: 2px; color: var(--mint); margin-bottom: 3px; }
 
   #controls {
-    position: absolute; top: 2px; left: 50%; translate: -50% 0;
+    position: absolute; top: 0; left: 50%; translate: -50% 0;
     display: flex; gap: 4px; opacity: 0; transition: opacity .2s ease;
-    -webkit-app-region: no-drag;
+    -webkit-app-region: no-drag; z-index: 3;
   }
   #wrap:hover #controls { opacity: 1; }
   #controls button {
     -webkit-app-region: no-drag;
-    width: 22px; height: 22px; padding: 0;
+    height: 20px; padding: 0 6px;
     background: rgba(7, 0, 12, .85); color: var(--mint);
     border: 1px solid rgba(77, 255, 157, .5);
-    font: 11px/20px system-ui; cursor: pointer;
+    font: 10px/18px system-ui; letter-spacing: 1px; cursor: pointer;
   }
   #controls button:hover { background: rgba(77, 255, 157, .18); }
   #controls button.on { color: #07000c; background: var(--mint); }
@@ -84,15 +102,15 @@
       <button id="pin" title="Pin in place">PIN</button>
       <button id="close" title="Hide the eye">X</button>
     </div>
-    <div id="bubble"><b>CAPRI // EYE</b><span id="line"></span></div>
     <div id="drag">
-      <img id="eye" alt="" />
+      <img id="eye" alt="Capri eye" />
       <div id="scan"></div>
+      <div id="spark"></div>
     </div>
+    <div id="bubble"><b>CAPRI // EYE</b><span id="line"></span></div>
   </div>
 
 <script>
-  const wrap = document.getElementById("wrap");
   const drag = document.getElementById("drag");
   const img = document.getElementById("eye");
   const bubble = document.getElementById("bubble");
@@ -100,37 +118,50 @@
   const pin = document.getElementById("pin");
   const close = document.getElementById("close");
 
-  // The art came on a white card. Knock the white out so the eye can float on
-  // top of whatever is on screen.
-  function cutWhite(source) {
-    const base = new Image();
-    base.onload = () => {
-      const canvas = document.createElement("canvas");
-      canvas.width = source.naturalWidth;
-      canvas.height = source.naturalHeight;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(source, 0, 0);
-      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const px = data.data;
-      for (let i = 0; i < px.length; i += 4) {
-        const r = px[i], g = px[i + 1], b = px[i + 2];
-        const low = Math.min(r, g, b);
-        if (low > 232) {
-          // fully white, plus a short feather so edges stay clean
-          const t = Math.min(1, (low - 200) / 32);
-          px[i + 3] = Math.round(px[i + 3] * (1 - t));
-        }
-      }
-      ctx.putImageData(data, 0, 0);
-      img.src = canvas.toDataURL("image/png");
-    };
-    base.src = source.src;
-  }
-  img.addEventListener("load", () => {
-    if (!img.dataset.done) {
-      img.dataset.done = "1";
-      cutWhite(img);
+  // The art came on a white card. Flood the white in from the border and knock
+  // only that out, so the bright highlights inside the iris survive.
+  function cutWhite(image) {
+    const scale = Math.min(1, 720 / image.naturalWidth);
+    const w = Math.max(1, Math.round(image.naturalWidth * scale));
+    const h = Math.max(1, Math.round(image.naturalHeight * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(image, 0, 0, w, h);
+    const frame = ctx.getImageData(0, 0, w, h);
+    const px = frame.data;
+    const palish = (i) => Math.min(px[i], px[i + 1], px[i + 2]) > 224;
+    const seen = new Uint8Array(w * h);
+    const stack = [];
+    for (let x = 0; x < w; x++) { stack.push(x, (h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { stack.push(y * w, y * w + w - 1); }
+    while (stack.length) {
+      const p = stack.pop();
+      if (seen[p]) continue;
+      seen[p] = 1;
+      const i = p * 4;
+      if (!palish(i)) continue;
+      px[i + 3] = 0;
+      const x = p % w;
+      const y = (p - x) / w;
+      if (x > 0) stack.push(p - 1);
+      if (x < w - 1) stack.push(p + 1);
+      if (y > 0) stack.push(p - w);
+      if (y < h - 1) stack.push(p + w);
     }
+    // Soften the anti-aliased ring the flood leaves behind.
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 3] && Math.min(px[i], px[i + 1], px[i + 2]) > 200) px[i + 3] = Math.round(px[i + 3] * 0.45);
+    }
+    ctx.putImageData(frame, 0, 0);
+    img.src = canvas.toDataURL("image/png");
+  }
+
+  img.addEventListener("load", () => {
+    if (img.dataset.done) return;
+    img.dataset.done = "1";
+    cutWhite(img);
   });
   img.src = "../public/assets/eye-spy.png";
 
@@ -140,13 +171,13 @@
 
   function follow() {
     raf = 0;
+    if (state.locked) { drag.style.transform = ""; return; }
     const rect = drag.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
     const dx = Math.max(-1, Math.min(1, (last.x - cx) / (rect.width * 1.6)));
     const dy = Math.max(-1, Math.min(1, (last.y - cy) / (rect.height * 9)));
     drag.style.transform = `translate(${(dx * 9).toFixed(1)}px, ${(dy * 5).toFixed(1)}px) rotate(${(dx * 1.6).toFixed(2)}deg)`;
-    if (!state.locked) drag.style.translate = "";
   }
   window.capriEye?.onCursor((point) => {
     last = point;
@@ -170,12 +201,12 @@
     drag.classList.toggle("locked", state.locked);
     pin.classList.toggle("on", state.locked);
     pin.textContent = state.locked ? "PINNED" : "PIN";
+    if (state.locked) drag.style.transform = "";
   });
 
   pin.addEventListener("click", () => window.capriEye?.setPinned(!state.locked));
   close.addEventListener("click", () => window.capriEye?.hide());
 
-  // Idle tricks: blink now and then, and let the bubble breathe.
   setInterval(() => {
     drag.classList.add("blink");
     setTimeout(() => drag.classList.remove("blink"), 700);

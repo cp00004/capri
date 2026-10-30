@@ -62,6 +62,7 @@ public class MainActivity extends BridgeActivity {
 		WebView webView = getBridge() != null ? getBridge().getWebView() : null;
 		if (webView != null) {
 			webView.addJavascriptInterface(new DeviceBridge(), "CapriDevice");
+			webView.addJavascriptInterface(new EyeBridge(), "CapriEyes");
 		}
 
 		ArrayList<String> missing = new ArrayList<>();
@@ -86,6 +87,83 @@ public class MainActivity extends BridgeActivity {
 				return "err:" + err.getMessage();
 			}
 		}
+	}
+
+	// The eye, plus the bits of the shell the web page cannot reach: system
+	// notifications and alarms that outlive the app.
+	private class EyeBridge {
+		@JavascriptInterface
+		public boolean hasOverlay() {
+			return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(MainActivity.this);
+		}
+
+		@JavascriptInterface
+		public void requestOverlay() {
+			try {
+				Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+				intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+				startActivity(intent);
+			} catch (Exception err) {
+				// no settings page on this build
+			}
+		}
+
+		@JavascriptInterface
+		public void setConfig(String config) {
+			EyePrefs.save(MainActivity.this, config);
+		}
+
+		@JavascriptInterface
+		public void show() {
+			if (hasOverlay()) EyeService.show(MainActivity.this, EyePrefs.load(MainActivity.this));
+		}
+
+		@JavascriptInterface
+		public void start(String config) {
+			EyePrefs.save(MainActivity.this, config);
+			if (hasOverlay()) EyeService.show(MainActivity.this, config);
+		}
+
+		@JavascriptInterface
+		public void hide() {
+			EyeService.hide(MainActivity.this);
+		}
+
+		@JavascriptInterface
+		public void stop() {
+			EyeService.stop(MainActivity.this);
+		}
+
+		@JavascriptInterface
+		public void say(String text) {
+			EyeService.say(MainActivity.this, text);
+		}
+
+		@JavascriptInterface
+		public void notify(String title, String body) {
+			Alerts.show(MainActivity.this, title, body);
+		}
+
+		@JavascriptInterface
+		public void scheduleReminder(int seconds, String message) {
+			Alerts.schedule(MainActivity.this, seconds, message);
+		}
+	}
+
+	@Override
+	protected void onUserLeaveHint() {
+		// Fires while we still count as foreground, so the overlay service is
+		// allowed to start. The eye is already off in the app itself.
+		super.onUserLeaveHint();
+		if (EyePrefs.enabled(this) && (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this))) {
+			EyeService.show(this, EyePrefs.load(this));
+		}
+	}
+
+	@Override
+	public void onResume() {
+		super.onResume();
+		EyeService.hide(this);
 	}
 
 	private String launch(String raw) {

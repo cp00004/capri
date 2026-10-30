@@ -692,7 +692,7 @@ function createWindow() {
 // follows the cursor, drags anywhere, and cuts in with a comment once you have
 // been parked on the same window long enough.
 const EYE_W = 300;
-const EYE_H = 280;
+const EYE_H = 300;
 let eyeWin = null;
 let eyeEnabled = true;
 let eyeBanter = true;
@@ -879,7 +879,7 @@ ipcMain.handle("capri-notify", (_event, payload) => {
 ipcMain.on("capri-eye-config", (_event, cfg) => {
   eyeEnabled = cfg?.enabled !== false;
   eyeBanter = cfg?.banter !== false;
-  writeEyeState({ enabled: eyeEnabled });
+  writeEyeState({ enabled: eyeEnabled, banter: eyeBanter });
   if (!eyeEnabled) hideEye();
 });
 
@@ -1058,6 +1058,11 @@ app.whenReady().then(async () => {
   logLine(`local port ${PORT}`);
   startServer();
   try { createTray(); } catch (err) { console.warn("[capri] tray unavailable:", err.message); }
+  try {
+    const eyeState = readEyeState();
+    eyeEnabled = eyeState.enabled !== false;
+    eyeBanter = eyeState.banter !== false;
+  } catch { /* first run */ }
   // Show the window quickly; the bundled server is the fallback, not a gate.
   await Promise.race([waitForServer(), new Promise((r) => setTimeout(r, 2500))]);
   createWindow();

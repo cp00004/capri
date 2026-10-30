@@ -837,7 +837,13 @@ const eyeSpyState = document.getElementById('eyeSpyState');
 function eyeSpyOn() { return localStorage.getItem('capri.eyeSpy') !== '0'; }
 
 function eyeConfig() {
-  return { enabled: eyeSpyOn(), banter: localStorage.getItem('capri.appBanter') !== '0' };
+  return {
+    enabled: eyeSpyOn(),
+    banter: localStorage.getItem('capri.appBanter') !== '0',
+    base: state.apiBase || '',
+    token: state.token || '',
+    session: state.session || '',
+  };
 }
 
 // Two native shells, one switch: Electron talks over IPC, the Android build
@@ -859,8 +865,27 @@ function paintEyeSpy() {
 paintEyeSpy();
 
 eyeSpyBtn?.addEventListener('click', () => {
-  localStorage.setItem('capri.eyeSpy', eyeSpyOn() ? '0' : '1');
+  const next = !eyeSpyOn();
+  localStorage.setItem('capri.eyeSpy', next ? '1' : '0');
   paintEyeSpy();
+  if (next && window.CapriEyes?.hasOverlay && !window.CapriEyes.hasOverlay()) {
+    showNotice("Let Capri draw over other apps so the eye can follow you.", null, null, 8000);
+    try { window.CapriEyes.requestOverlay(); } catch { /* older build */ }
+  }
+  if (!next) { try { window.CapriEyes?.hide?.(); } catch { /* not android */ } }
+});
+
+// Android: the eye belongs on screen while Capri is out of the way.
+document.addEventListener('visibilitychange', () => {
+  if (IS_DESKTOP_APP || !window.CapriEyes) return;
+  try {
+    if (document.hidden && eyeSpyOn()) {
+      if (window.CapriEyes.hasOverlay?.()) window.CapriEyes.show();
+      else window.CapriEyes.start(JSON.stringify(eyeConfig()));
+    } else if (!document.hidden) {
+      window.CapriEyes.hide();
+    }
+  } catch { /* web page, not the apk */ }
 });
 
 /* ---------------------------------------------------------------- reminders */
@@ -885,14 +910,20 @@ function notifyUser(title, body) {
 function scheduleReminder(args) {
   const seconds = Math.max(3, Math.min(86400, Math.round(Number(args?.seconds) || 0)));
   const message = String(args?.message || "Time is up.").slice(0, 160);
-  const fire = () => {
-    notifyUser("Capri", message);
-    showAction(`timer up: ${message}`);
-    showNotice(message, null, null, 9000);
-    if (state.voiceOn) speech.enqueue(message);
-    burstGlitch(1.1);
-  };
-  setTimeout(fire, seconds * 1000);
+  // The phone arms a real alarm so the timer still goes off with the app shut.
+  let armed = false;
+  if (typeof window.CapriDevice?.scheduleReminder === "function") {
+    try { window.CapriDevice.scheduleReminder(seconds, message); armed = true; } catch { /* web page */ }
+  }
+  if (!armed) {
+    setTimeout(() => {
+      notifyUser("Capri", message);
+      showAction(`timer up: ${message}`);
+      showNotice(message, null, null, 9000);
+      if (state.voiceOn) speech.enqueue(message);
+      burstGlitch(1.1);
+    }, seconds * 1000);
+  }
   showAction(`timer set: ${seconds}s`);
 }
 
@@ -3081,6 +3112,7 @@ async function boot() {
     typer.reset(cfg?.local ? "Capricorn is awake. Say the word." : "Capricorn is on the line.");
   }
   if (wakeWord.enabled && !document.hidden) startWakeWord();
+  paintEyeSpy();
   initUpdates();
 }
 
