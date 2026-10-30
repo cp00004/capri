@@ -730,6 +730,9 @@ function createEye() {
     fullscreenable: false,
     skipTaskbar: true,
     alwaysOnTop: true,
+    // The eye must never steal the keyboard from whatever the user is doing.
+    focusable: false,
+    acceptFirstMouse: true,
     show: false,
     title: "Capri",
     icon: ICON,
