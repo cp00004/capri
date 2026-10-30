@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Capri eye</title>
+<title>Capri</title>
 <style>
   :root { --mint: #4dff9d; --pink: #ff4fd8; }
   * { box-sizing: border-box; }
@@ -13,31 +13,24 @@
     position: relative;
     width: 100%; height: 100%;
     display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
-    padding-top: 10px;
   }
 
-  #drag {
+  #trail { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+
+  #stage {
     -webkit-app-region: drag;
     position: relative;
+    z-index: 2;
+    margin-top: 18px;
     cursor: grab;
     filter: drop-shadow(0 0 14px rgba(77, 255, 157, .45)) drop-shadow(0 0 34px rgba(255, 79, 216, .22));
     transition: filter .3s ease;
+    will-change: transform;
   }
-  #drag.locked { cursor: default; -webkit-app-region: no-drag; }
-  #drag.busy { filter: drop-shadow(0 0 22px rgba(255, 79, 216, .7)); }
+  #stage.locked { cursor: default; -webkit-app-region: no-drag; }
+  #stage.busy { filter: drop-shadow(0 0 22px rgba(255, 79, 216, .7)); }
 
-  #eye { display: block; width: 260px; height: auto; animation: float 6s ease-in-out infinite; will-change: transform; }
-  #drag.blink #eye { animation: float 6s ease-in-out infinite, blink 4.6s ease-in-out infinite; }
-
-  @keyframes float {
-    0%, 100% { translate: 0 0; }
-    50% { translate: 0 -5px; }
-  }
-  @keyframes blink {
-    0%, 92%, 100% { scale: 1 1; }
-    94% { scale: 1 .12; }
-    96% { scale: 1 .12; }
-  }
+  #eye { display: block; width: 250px; height: auto; will-change: transform; transform-origin: 50% 50%; }
 
   #scan {
     position: absolute; left: 8%; right: 8%; height: 16px; top: 20%;
@@ -66,7 +59,7 @@
 
   #bubble {
     position: absolute; left: 6px; right: 6px; bottom: 4px;
-    max-height: 108px; overflow: hidden;
+    max-height: 112px; overflow: hidden;
     padding: 8px 10px;
     background: rgba(7, 0, 12, .93);
     border: 1px solid rgba(77, 255, 157, .55);
@@ -75,14 +68,16 @@
     opacity: 0; translate: 0 8px;
     transition: opacity .25s ease, translate .25s ease;
     pointer-events: none;
+    z-index: 4;
   }
   #bubble.show { opacity: 1; translate: 0 0; }
   #bubble b { display: block; font-size: 9px; letter-spacing: 2px; color: var(--mint); margin-bottom: 3px; }
+  #bubble b i { font-style: normal; color: var(--pink); }
 
   #controls {
     position: absolute; top: 0; left: 50%; translate: -50% 0;
     display: flex; gap: 4px; opacity: 0; transition: opacity .2s ease;
-    -webkit-app-region: no-drag; z-index: 3;
+    -webkit-app-region: no-drag; z-index: 5;
   }
   #wrap:hover #controls { opacity: 1; }
   #controls button {
@@ -94,29 +89,45 @@
   }
   #controls button:hover { background: rgba(77, 255, 157, .18); }
   #controls button.on { color: #07000c; background: var(--mint); }
+  #controls button.rec { color: #07000c; background: var(--pink); border-color: var(--pink); }
+  #mic { min-width: 40px; }
 </style>
 </head>
 <body>
   <div id="wrap">
+    <canvas id="trail"></canvas>
     <div id="controls">
+      <button id="mic" title="Talk to Capri">MIC</button>
+      <button id="ear" title="Listen for the wake word">EAR</button>
       <button id="pin" title="Pin in place">PIN</button>
       <button id="close" title="Hide the eye">X</button>
     </div>
-    <div id="drag">
+    <div id="stage">
       <img id="eye" alt="Capri eye" />
       <div id="scan"></div>
       <div id="spark"></div>
     </div>
-    <div id="bubble"><b>CAPRI // EYE</b><span id="line"></span></div>
+    <div id="bubble"><b>CAPRI // EYE <i id="mode"></i></b><span id="line"></span></div>
   </div>
 
 <script>
-  const drag = document.getElementById("drag");
+  const stage = document.getElementById("stage");
   const img = document.getElementById("eye");
   const bubble = document.getElementById("bubble");
   const line = document.getElementById("line");
+  const modeTag = document.getElementById("mode");
   const pin = document.getElementById("pin");
   const close = document.getElementById("close");
+  const mic = document.getElementById("mic");
+  const ear = document.getElementById("ear");
+  const canvas = document.getElementById("trail");
+  const ctx = canvas.getContext("2d");
+
+  const wakeOn = { on: true };
+  const cfg = { base: "", token: "", session: "" };
+  const state = { locked: false, bubbleTimer: null, askTimer: null, live: true };
+
+  /* ---------------------------------------------------------- eye cutout */
 
   // The art came on a white card. Fade every near-white pixel out and trim the
   // empty border, so only the eye is left floating.
@@ -124,19 +135,19 @@
     const scale = Math.min(1, 720 / image.naturalWidth);
     const w = Math.max(1, Math.round(image.naturalWidth * scale));
     const h = Math.max(1, Math.round(image.naturalHeight * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(image, 0, 0, w, h);
-    const frame = ctx.getImageData(0, 0, w, h);
+    const work = document.createElement("canvas");
+    work.width = w;
+    work.height = h;
+    const c = work.getContext("2d");
+    c.drawImage(image, 0, 0, w, h);
+    const frame = c.getImageData(0, 0, w, h);
     const px = frame.data;
     for (let i = 0; i < px.length; i += 4) {
       const low = Math.min(px[i], px[i + 1], px[i + 2]);
       const t = Math.min(1, Math.max(0, (low - 150) / 45));
       if (t > 0) px[i + 3] = Math.round(px[i + 3] * (1 - t));
     }
-    ctx.putImageData(frame, 0, 0);
+    c.putImageData(frame, 0, 0);
 
     let x0 = w, y0 = h, x1 = -1, y1 = -1;
     for (let y = 0; y < h; y++) {
@@ -149,7 +160,7 @@
         }
       }
     }
-    if (x1 < x0 || y1 < y0) { img.src = canvas.toDataURL("image/png"); return; }
+    if (x1 < x0 || y1 < y0) { img.src = work.toDataURL("image/png"); return; }
     const pad = 6;
     x0 = Math.max(0, x0 - pad);
     y0 = Math.max(0, y0 - pad);
@@ -158,63 +169,408 @@
     const out = document.createElement("canvas");
     out.width = x1 - x0 + 1;
     out.height = y1 - y0 + 1;
-    out.getContext("2d").drawImage(canvas, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
-    img.src = out.toDataURL("image/png");
+    out.getContext("2d").drawImage(work, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    img.dataset.src = out.toDataURL("image/png");
+    img.src = img.dataset.src;
+    sprite.image = img;
   }
 
+  const sprite = { image: null, w: 250, h: 160 };
+
   img.addEventListener("load", () => {
+    sprite.w = 250;
+    sprite.h = Math.max(1, Math.round(250 * img.naturalHeight / img.naturalWidth));
+    sprite.image = img;
     if (img.dataset.done) return;
     img.dataset.done = "1";
     cutWhite(img);
   });
   img.src = "../public/assets/eye-spy.png";
 
-  const state = { locked: false, bubbleTimer: null };
-  let last = { x: 0, y: 0 };
-  let raf = 0;
+  /* ------------------------------------------------------ self-movement */
 
-  function follow() {
-    raf = 0;
-    if (state.locked) { drag.style.transform = ""; return; }
-    const rect = drag.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    const dx = Math.max(-1, Math.min(1, (last.x - cx) / (rect.width * 1.6)));
-    const dy = Math.max(-1, Math.min(1, (last.y - cy) / (rect.height * 9)));
-    drag.style.transform = `translate(${(dx * 9).toFixed(1)}px, ${(dy * 5).toFixed(1)}px) rotate(${(dx * 1.6).toFixed(2)}deg)`;
+  // The eyeball has a life of its own: it wanders to a new spot every few
+  // seconds, leans toward the cursor, and lags behind when the window is
+  // dragged. Ghost frames trail the motion.
+  const gaze = { x: 0, y: 0, rot: 0, tx: 0, ty: 0, trot: 0, next: 0 };
+  const impulse = { x: 0, y: 0 };
+  let cursor = null;      // window-relative pointer
+  let lastCursorAt = 0;
+  const ghosts = [];
+  let lastStamp = { x: 0, y: 0, rot: 0 };
+
+  function newGazeTarget() {
+    const mood = Math.random();
+    const spread = mood > 0.85 ? 16 : 10;
+    gaze.tx = (Math.random() * 2 - 1) * spread;
+    gaze.ty = (Math.random() * 2 - 1) * 6;
+    gaze.trot = (Math.random() * 2 - 1) * 3.4;
+    gaze.next = performance.now() + 2000 + Math.random() * 2800;
   }
+  newGazeTarget();
+
+  function stageBox() {
+    return stage.getBoundingClientRect();
+  }
+
+  function frame(now) {
+    const box = stageBox();
+    const cx = window.innerWidth / 2;
+    const cy = box.top + box.height / 2;
+
+    if (now > gaze.next) newGazeTarget();
+
+    let tx = gaze.tx;
+    let ty = gaze.ty;
+    let trot = gaze.trot;
+
+    // Lean toward the cursor while it is moving around this window.
+    if (cursor && now - lastCursorAt < 2600 && !state.locked) {
+      const dx = Math.max(-1, Math.min(1, (cursor.x - cx) / (box.width * 1.4)));
+      const dy = Math.max(-1, Math.min(1, (cursor.y - cy) / (box.height * 7)));
+      tx = tx * 0.35 + dx * 13;
+      ty = ty * 0.35 + dy * 7;
+      trot = trot * 0.4 + dx * 2.2;
+    }
+
+    gaze.x += (tx - gaze.x) * 0.055;
+    gaze.y += (ty - gaze.y) * 0.055;
+    gaze.rot += (trot - gaze.rot) * 0.06;
+
+    impulse.x *= 0.9;
+    impulse.y *= 0.9;
+
+    const px = gaze.x + impulse.x;
+    const py = gaze.y + impulse.y;
+    stage.style.transform = `translate(${px.toFixed(2)}px, ${py.toFixed(2)}px) rotate(${gaze.rot.toFixed(2)}deg)`;
+    // The stage transform shifts its own box, so keep the notional center.
+    const ox = cx + px;
+    const oy = cy + py;
+
+    if (Math.hypot(ox - lastStamp.x, oy - lastStamp.y) > 1.1) {
+      ghosts.push({ x: ox, y: oy, rot: gaze.rot, life: 1 });
+      if (ghosts.length > 16) ghosts.shift();
+      lastStamp = { x: ox, y: oy };
+    }
+
+    drawTrail(now);
+    requestAnimationFrame(frame);
+  }
+
+  function drawTrail() {
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(window.innerWidth * dpr)) {
+      canvas.width = Math.round(window.innerWidth * dpr);
+      canvas.height = Math.round(window.innerHeight * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+    if (!sprite.image || !sprite.image.complete || !sprite.image.naturalWidth) return;
+    if (!sprite.w) return;
+
+    for (let i = ghosts.length - 1; i >= 0; i--) {
+      const g = ghosts[i];
+      g.life *= 0.9;
+      if (g.life < 0.06) { ghosts.splice(i, 1); continue; }
+      ctx.save();
+      ctx.globalAlpha = 0.26 * g.life * g.life;
+      ctx.translate(g.x, g.y);
+      ctx.rotate((g.rot * Math.PI) / 180);
+      ctx.drawImage(sprite.image, -sprite.w / 2, -sprite.h / 2, sprite.w, sprite.h);
+      ctx.restore();
+    }
+  }
+
+  requestAnimationFrame(frame);
+
   window.capriEye?.onCursor((point) => {
-    last = point;
-    if (!raf) raf = requestAnimationFrame(follow);
+    cursor = point;
+    lastCursorAt = performance.now();
   });
+
+  // Dragging the window leaves the eye behind for a frame, which reads as a
+  // streak with a trail instead of a rigid sticker.
+  window.capriEye?.onMove(({ dx, dy }) => {
+    if (!dx && !dy) return;
+    impulse.x = Math.max(-26, Math.min(26, impulse.x - dx * 0.55));
+    impulse.y = Math.max(-18, Math.min(18, impulse.y - dy * 0.55));
+  });
+
+  /* ------------------------------------------------------------- blink */
+
+  function blink() {
+    img.animate(
+      [{ transform: "scaleY(1)" }, { transform: "scaleY(0.08)" }, { transform: "scaleY(1)" }],
+      { duration: 190, easing: "ease-in-out" }
+    );
+  }
+  (function scheduleBlink() {
+    setTimeout(() => { blink(); if (Math.random() > 0.7) setTimeout(blink, 240); scheduleBlink(); }, 3200 + Math.random() * 5200);
+  })();
+
+  /* ------------------------------------------------------------- speech */
+
+  function setMode(text) { modeTag.textContent = text ? `// ${text}` : ""; }
 
   window.capriEye?.onSay(({ text, sticky }) => {
     if (!text) { bubble.classList.remove("show"); return; }
     line.textContent = text;
     bubble.classList.add("show");
-    drag.classList.add("busy");
+    stage.classList.add("busy");
+    setMode("");
     clearTimeout(state.bubbleTimer);
     state.bubbleTimer = setTimeout(() => {
       bubble.classList.remove("show");
-      drag.classList.remove("busy");
+      stage.classList.remove("busy");
     }, sticky ? 16000 : 11000);
+  });
+
+  window.capriEye?.onConfig((data) => {
+    Object.assign(cfg, data || {});
+    if (state.live && wakeOn.on) wakeRec.on ? null : startWake();
+  });
+
+  // Hidden eye means no mic: stop listening the moment the overlay goes away.
+  window.capriEye?.onLive((live) => {
+    state.live = Boolean(live);
+    if (!state.live) {
+      stopWakeChunk();
+      if (talk.active) stopTalk();
+    } else if (wakeOn.on) {
+      setTimeout(startWake, 400);
+    }
   });
 
   window.capriEye?.onPinned((locked) => {
     state.locked = Boolean(locked);
-    drag.classList.toggle("locked", state.locked);
+    stage.classList.toggle("locked", state.locked);
     pin.classList.toggle("on", state.locked);
     pin.textContent = state.locked ? "PINNED" : "PIN";
-    if (state.locked) drag.style.transform = "";
   });
 
   pin.addEventListener("click", () => window.capriEye?.setPinned(!state.locked));
   close.addEventListener("click", () => window.capriEye?.hide());
 
-  setInterval(() => {
-    drag.classList.add("blink");
-    setTimeout(() => drag.classList.remove("blink"), 700);
-  }, 7000 + Math.random() * 5000);
+  /* -------------------------------------------------------------- voice */
+
+  const MIMES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  function pickMime() {
+    if (typeof MediaRecorder === "undefined") return "";
+    return MIMES.find((m) => MediaRecorder.isTypeSupported(m)) || "";
+  }
+
+  const talk = { active: false, chunks: [], recorder: null, stream: null, stopTimer: null, heard: false };
+  const wakeRec = { on: false, chunks: [], recorder: null, stream: null, timer: null, busy: false };
+
+  async function ask(text) {
+    const clean = String(text || "").replace(/\s+/g, " ").trim();
+    if (!clean) return;
+    setMode("heard");
+    line.textContent = clean;
+    bubble.classList.add("show");
+    clearTimeout(state.bubbleTimer);
+    state.bubbleTimer = setTimeout(() => bubble.classList.remove("show"), 8000);
+    window.capriEye?.ask(clean);
+    stage.classList.add("busy");
+    clearTimeout(state.askTimer);
+    state.askTimer = setTimeout(() => { stage.classList.remove("busy"); setMode(""); }, 20000);
+  }
+
+  async function transcribe(blob) {
+    if (!cfg.base) return "";
+    const headers = { "Content-Type": blob.type || "audio/webm" };
+    if (cfg.token) headers.Authorization = `Bearer ${cfg.token}`;
+    if (cfg.session) headers["X-Capri-Profile"] = cfg.session;
+    try {
+      const res = await fetch(`${cfg.base}/api/stt`, { method: "POST", headers, body: blob });
+      if (!res.ok) return "";
+      const data = await res.json().catch(() => ({}));
+      return String(data.text || "").trim();
+    } catch {
+      return "";
+    }
+  }
+
+  async function startTalk() {
+    if (talk.active) return stopTalk();
+    if (typeof MediaRecorder === "undefined") { setMode("no mic"); return; }
+    stopWakeChunk();
+    try {
+      talk.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    } catch {
+      setMode("mic blocked");
+      return;
+    }
+    const mime = pickMime();
+    talk.chunks = [];
+    talk.recorder = mime ? new MediaRecorder(talk.stream, { mimeType: mime }) : new MediaRecorder(talk.stream);
+    talk.recorder.ondataavailable = (e) => { if (e.data && e.data.size) talk.chunks.push(e.data); };
+    talk.recorder.onstop = async () => {
+      const blob = new Blob(talk.chunks, { type: talk.recorder.mimeType || "audio/webm" });
+      talk.stream?.getTracks().forEach((t) => t.stop());
+      talk.stream = null;
+      talk.active = false;
+      mic.classList.remove("rec");
+      mic.textContent = "MIC";
+      setMode("");
+      if (blob.size < 2000) return;
+      setMode("thinking");
+      const text = await transcribe(blob);
+      if (!text) { setMode("heard noise"); setTimeout(() => setMode(""), 2500); return; }
+      ask(text);
+      resumeWake();
+    };
+    talk.recorder.start(120);
+    talk.active = true;
+    mic.classList.add("rec");
+    mic.textContent = "STOP";
+    setMode("listening");
+    clearTimeout(talk.stopTimer);
+    talk.stopTimer = setTimeout(() => stopTalk(), 16000);
+  }
+
+  function stopTalk() {
+    clearTimeout(talk.stopTimer);
+    if (!talk.active || !talk.recorder || talk.recorder.state === "inactive") return;
+    try { talk.recorder.stop(); } catch { /* already stopped */ }
+  }
+
+  mic.addEventListener("click", startTalk);
+
+  /* Wake word: recorded in short clips while the eye is up, read by her own
+     /api/stt, so "Capri ..." works even when Capri's window is away. */
+  async function startWake() {
+    if (!wakeOn.on || wakeRec.on || talk.active || !state.live) return;
+    if (typeof MediaRecorder === "undefined" || !cfg.base) return;
+    try {
+      wakeRec.stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+    } catch {
+      wakeOn.on = false;
+      ear.classList.remove("on");
+      setMode("mic blocked");
+      return;
+    }
+    const mime = pickMime();
+    wakeRec.chunks = [];
+    wakeRec.recorder = mime ? new MediaRecorder(wakeRec.stream, { mimeType: mime }) : new MediaRecorder(wakeRec.stream);
+    wakeRec.recorder.ondataavailable = (e) => { if (e.data && e.data.size) wakeRec.chunks.push(e.data); };
+    wakeRec.recorder.start(120);
+    wakeRec.on = true;
+    ear.classList.add("on");
+    setMode("ear on");
+    clearTimeout(wakeRec.timer);
+    wakeRec.timer = setTimeout(stopWakeChunk, 3400);
+  }
+
+  function stopWakeChunk() {
+    clearTimeout(wakeRec.timer);
+    wakeRec.on = false;
+    const rec = wakeRec.recorder;
+    if (!rec || rec.state === "inactive") return;
+    rec.onstop = async () => {
+      const blob = new Blob(wakeRec.chunks, { type: rec.mimeType || "audio/webm" });
+      wakeRec.stream?.getTracks().forEach((t) => t.stop());
+      wakeRec.stream = null;
+      wakeRec.chunks = [];
+      wakeRec.busy = false;
+      if (blob.size > 1200) {
+        const text = await transcribe(blob);
+        if (text && isWakePhrase(text)) {
+          const rest = wakeRemainder(text);
+          chime();
+          if (rest.split(/\s+/).filter(Boolean).length >= 2) ask(rest);
+          else { setTimeout(startTalk, 250); return; }
+        }
+      }
+      if (!talk.active && wakeOn.on && state.live) setTimeout(startWake, 320);
+    };
+    try { rec.stop(); } catch { /* already stopped */ }
+  }
+
+  function resumeWake() {
+    if (wakeOn.on && !talk.active && !wakeRec.on) setTimeout(startWake, 500);
+  }
+
+  ear.addEventListener("click", () => {
+    wakeOn.on = !wakeOn.on;
+    ear.classList.toggle("on", wakeOn.on);
+    if (wakeOn.on) startWake();
+    else { stopWakeChunk(); ear.classList.remove("on"); setMode(""); }
+  });
+
+  function chime() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ac = new Ctx();
+      const osc = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(740, ac.currentTime);
+      osc.frequency.setValueAtTime(980, ac.currentTime + 0.075);
+      gain.gain.setValueAtTime(0.001, ac.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.07, ac.currentTime + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.18);
+      osc.connect(gain).connect(ac.destination);
+      osc.onended = () => ac.close().catch(() => {});
+      osc.start();
+      osc.stop(ac.currentTime + 0.19);
+    } catch { /* optional */ }
+  }
+
+  const WAKE_WORDS = new Set(["capri", "capry", "caprie", "caprea", "copri", "kepri", "caprice", "gabri", "kapri"]);
+  function editDistance(a, b) {
+    const m = a.length, n = b.length;
+    const row = new Array(n + 1);
+    for (let j = 0; j <= n; j++) row[j] = j;
+    for (let i = 1; i <= m; i++) {
+      let prev = row[0];
+      row[0] = i;
+      for (let j = 1; j <= n; j++) {
+        const tmp = row[j];
+        row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = tmp;
+      }
+    }
+    return row[n];
+  }
+  function isWakePhrase(text) {
+    const clean = String(text || "").toLowerCase().replace(/[^a-z0-9' ]+/g, " ").replace(/\s+/g, " ").trim();
+    if (!clean || /\bcapricorn\b/.test(clean)) return false;
+    const tokens = clean.split(" ");
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i].replace(/^'+|'+$/g, "");
+      if (!token) continue;
+      if (WAKE_WORDS.has(token)) return true;
+      if (token === "cap" && ["ri", "ree", "ry", "rie"].includes(tokens[i + 1])) return true;
+      if (token.length >= 4 && token.length <= 7 && editDistance(token, "capri") <= 1) return true;
+    }
+    return false;
+  }
+  function wakeRemainder(text) {
+    const tokens = String(text || "").trim().split(/\s+/);
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i].toLowerCase().replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
+      if (!token) continue;
+      let consumed = 1;
+      let hit = WAKE_WORDS.has(token);
+      if (!hit && token === "cap") {
+        const next = (tokens[i + 1] || "").toLowerCase().replace(/[^a-z]/g, "");
+        if (/^(ri|ree|ry|rie)$/.test(next)) { hit = true; consumed = 2; }
+      }
+      if (!hit && token.length >= 4 && token.length <= 7 && editDistance(token, "capri") <= 1) hit = true;
+      if (hit) return tokens.slice(i + consumed).join(" ").replace(/^[\s,.;:!?-]+/, "").trim();
+    }
+    return "";
+  }
+
+  // The eye window may open while the mic is in use by Capri's window; retry
+  // a moment later instead of giving up for good.
+  setTimeout(() => { if (wakeOn.on && state.live) startWake(); }, 1500);
 </script>
 </body>
 </html>
