@@ -1610,6 +1610,19 @@ async function groqTts(text, voice) {
   return { buffer: Buffer.from(await upstream.arrayBuffer()), type: "audio/wav" };
 }
 
+// A dropped voice mid-sentence is worse than a slow one: retry the same engine
+// before anyone else gets a turn.
+async function retryOnce(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    const status = Number(err?.status) || 0;
+    if (status && status !== 408 && status !== 429 && status < 500) throw err;
+    await new Promise((r) => setTimeout(r, 260));
+    return fn();
+  }
+}
+
 async function handleTts(req, res) {
   let body;
   try {
@@ -1620,13 +1633,15 @@ async function handleTts(req, res) {
 
   const text = String(body.text ?? "").trim().slice(0, 1600);
   const asked = String(body.voice ?? "");
+  // She keeps one voice: the client pins the engine that answered first.
+  const want = String(body.engine ?? "").trim().toLowerCase();
   const profile = profileFromRequest(req) || localProfile();
   const setting = asked || String(profile.settings?.voice || "capri");
   const preset = VOICE_BY_ID.get(setting);
   const geminiName = preset?.name || (asked && /^[A-Za-z]{3,20}$/.test(asked) ? asked : "Leda");
   if (!text) return json(res, 400, { error: "Empty text." });
 
-  const cacheKey = `${setting}|${text}`;
+  const cacheKey = `${setting}|${want}|${text}`;
   const cached = ttsCache.get(cacheKey);
   if (cached) {
     res.writeHead(200, { ...cached.headers, "Content-Length": cached.buffer.length, "Cache-Control": "no-store" });
@@ -1674,29 +1689,40 @@ async function handleTts(req, res) {
     }
   }
 
-  if (GEMINI_KEY) {
+  const wanted = want || "auto";
+  const useGemini = (wanted === "auto" || wanted === "gemini") && Boolean(GEMINI_KEY);
+
+  if (useGemini) {
     try {
-      const audio = await geminiTts(text, geminiName);
+      const audio = await retryOnce(() => geminiTts(text, geminiName));
       return finish(audio.buffer, audio.type, "gemini");
     } catch (err) {
       console.warn(`  voice: Gemini failed (${err.status || "?"}) ${String(err.message).slice(0, 180)}`);
-      /* fall through to Orpheus, then the browser voice */
+      // A pinned engine must fail loudly; the client decides to move her voice,
+      // never a single sentence in the middle of a reply.
+      if (wanted === "gemini") return json(res, 502, { error: "tts_failed", engine: "gemini", message: err.message });
     }
   }
 
-  try {
-    const audio = await groqTts(text, preset?.orpheus || "diana");
-    return finish(audio.buffer, audio.type, "orpheus");
-  } catch (err) {
-    if (err.terms) {
-      return json(res, 200, {
-        error: "terms",
-        message: err.message,
-        fix: "Accept the Orpheus terms once at https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english",
-      });
+  if (wanted === "browser") return json(res, 200, { error: "engine_browser" });
+
+  if (wanted !== "gemini") {
+    try {
+      const audio = await retryOnce(() => groqTts(text, preset?.orpheus || "diana"));
+      return finish(audio.buffer, audio.type, "orpheus");
+    } catch (err) {
+      if (err.terms) {
+        return json(res, 200, {
+          error: "terms",
+          message: err.message,
+          fix: "Accept the Orpheus terms once at https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english",
+        });
+      }
+      return json(res, 502, { error: "tts_failed", engine: "orpheus", message: err.message });
     }
-    return json(res, 502, { error: "tts_failed", message: err.message });
   }
+
+  return json(res, 502, { error: "tts_failed", message: "No voice engine answered." });
 }
 
 // ---------------------------------------------------------------- stt
