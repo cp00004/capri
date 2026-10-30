@@ -340,8 +340,8 @@
 
     const ox = cx + px;
     const oy = cy + py;
-    const step = state.dragging ? 2.2 : 1.2;
-    const seam = state.dragging ? 5 : 11;
+    const step = state.dragging ? 1.8 : 1.2;
+    const seam = state.dragging ? 16 : 11;
     if (Math.hypot(ox - lastStamp.x, oy - lastStamp.y) > step) {
       ghosts.push({ x: ox, y: oy, rot: gaze.rot, life: 1, color: state.dragging ? (ghostColor++ % 2 ? "pink" : "mint") : "" });
       if (ghosts.length > seam) ghosts.shift();
@@ -365,12 +365,12 @@
 
     for (let i = ghosts.length - 1; i >= 0; i--) {
       const g = ghosts[i];
-      g.life *= g.color ? 0.9 : 0.86;
+      g.life *= g.color ? 0.92 : 0.86;
       if (g.life < 0.06) { ghosts.splice(i, 1); continue; }
       const art = g.color === "pink" ? sprite.pink : g.color === "mint" ? sprite.mint : sprite.image;
       if (!art) continue;
       ctx.save();
-      ctx.globalAlpha = (g.color ? 0.34 : 0.13) * g.life * g.life;
+      ctx.globalAlpha = (g.color ? 0.4 : 0.13) * g.life * g.life;
       ctx.translate(g.x, g.y);
       ctx.rotate((g.rot * Math.PI) / 180);
       ctx.drawImage(art, -sprite.w / 2, -sprite.h / 2, sprite.w, sprite.h);
@@ -388,8 +388,11 @@
   // Dragging leaves the eye behind for a frame, which reads as a streak.
   window.capriEye?.onMove(({ dx, dy }) => {
     if (!dx && !dy) return;
-    impulse.x = Math.max(-26, Math.min(26, impulse.x - dx * 0.55));
-    impulse.y = Math.max(-18, Math.min(18, impulse.y - dy * 0.55));
+    const k = state.dragging ? 0.72 : 0.55;
+    const capX = state.dragging ? 40 : 26;
+    const capY = state.dragging ? 30 : 18;
+    impulse.x = Math.max(-capX, Math.min(capX, impulse.x - dx * k));
+    impulse.y = Math.max(-capY, Math.min(capY, impulse.y - dy * k));
   });
 
   /* ------------------------------------------------------------- drag */

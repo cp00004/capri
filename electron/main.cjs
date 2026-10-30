@@ -801,11 +801,6 @@ function createEye() {
     }
     lastPos = [x, y];
   });
-  eyeWin.on("resize", () => {
-    if (!eyeWin || eyeWin.isDestroyed()) return;
-    const b = eyeWin.getBounds();
-    logLine(`eye: resized ${b.width}x${b.height} at ${b.x},${b.y}`);
-  });
   eyeWin.on("closed", () => { eyeWin = null; });
   return eyeWin;
 }
@@ -863,13 +858,11 @@ function sayEye(text) {
 
 function startEyeTimers() {
   stopEyeTimers();
-  let eyeTick = 0;
   eyeCursorTimer = setInterval(() => {
     if (!eyeWin || eyeWin.isDestroyed() || !eyeWin.isVisible()) return;
     try {
       const point = screen.getCursorScreenPoint();
       const box = eyeWin.getBounds();
-      if (++eyeTick % 25 === 0) logLine(`eye: cursor ${point.x},${point.y} box ${box.x},${box.y} ${box.width}x${box.height}`);
       eyeWin.webContents.send("eye-cursor", { x: point.x - box.x, y: point.y - box.y });
     } catch { /* display swap */ }
   }, 60);
