@@ -602,6 +602,10 @@ function createWindow() {
 
   // Give the page a moment to settle before touching the network again.
   win.webContents.on("did-finish-load", () => {
+    const previous = consumeSeenVersion();
+    if (previous && previous !== app.getVersion()) {
+      setTimeout(() => sendUpdate({ phase: "updated", version: app.getVersion(), from: previous }), 1200);
+    }
     if (updateChecked) return;
     updateChecked = true;
     setTimeout(checkForUpdates, 6000);
