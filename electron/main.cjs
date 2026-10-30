@@ -1023,10 +1023,14 @@ ipcMain.on("eye-drag", (_event, { dx, dy } = {}) => {
   const nextY = Math.round(y + (Number(dy) || 0));
   const area = screen.getDisplayNearestPoint({ x: nextX, y: nextY }).workArea;
   // Keep a sliver of the eye reachable on whatever display it is heading for.
-  eyeWin.setPosition(
-    Math.max(area.x - EYE_W + 60, Math.min(area.x + area.width - 60, nextX)),
-    Math.max(area.y - EYE_H + 60, Math.min(area.y + area.height - 60, nextY))
-  );
+  // setBounds, not setPosition: moving alone lets the DPI rounding inflate the
+  // window a pixel per move until the overlay covers the whole screen.
+  eyeWin.setBounds({
+    x: Math.max(area.x - EYE_W + 60, Math.min(area.x + area.width - 60, nextX)),
+    y: Math.max(area.y - EYE_H + 60, Math.min(area.y + area.height - 60, nextY)),
+    width: EYE_W,
+    height: EYE_H,
+  });
 });
 
 ipcMain.on("eye-drag-end", () => {
