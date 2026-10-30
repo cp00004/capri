@@ -886,7 +886,10 @@ function eyeConfig() {
 function pushEyeSpy() {
   const cfg = eyeConfig();
   try { window.capriNative?.eyeSpy?.(cfg); } catch { /* older shell */ }
-  try { window.CapriEyes?.setConfig?.(cfg); } catch { /* not on android */ }
+  // The Android bridge only takes strings; an object arrives on the Java side
+  // as "[object Object]" and every field falls back to empty, which left the
+  // eye's server address blank.
+  try { window.CapriEyes?.setConfig?.(JSON.stringify(cfg)); } catch { /* not on android */ }
   return cfg;
 }
 
