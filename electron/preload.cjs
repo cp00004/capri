@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld("capriNative", {
   quit:       () => ipcRenderer.send("win-quit"),
   version:    () => ipcRenderer.invoke("capri-version"),
   googleSignIn: () => ipcRenderer.invoke("capri-google-signin"),
+  notify: (body, title) => ipcRenderer.invoke("capri-notify", { body: String(body || ""), title: title || "Capri" }),
+  eyeSpy: (config) => ipcRenderer.send("capri-eye-config", config || {}),
   onUpdate:   (cb) => {
     if (typeof cb !== "function") return;
     ipcRenderer.on("capri-update", (_event, data) => cb(data || {}));

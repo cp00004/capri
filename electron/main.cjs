@@ -10,11 +10,11 @@
 
 const {
   app, BrowserWindow, Tray, Menu,
-  nativeImage, ipcMain, shell, session,
+  nativeImage, ipcMain, shell, session, screen, Notification,
   net: electronNet
 } = require("electron");
 
-const { spawn } = require("child_process");
+const { spawn, execFile } = require("child_process");
 
 // ----- Single instance lock -----
 const gotLock = app.requestSingleInstanceLock();
@@ -322,9 +322,19 @@ function extractZip(zip, dir) {
 
 function pruneOldVersions(keepDir) {
   try {
+    // Keep the running build plus the newest other one. A taskbar pin points at
+    // an exe inside one of these folders: deleting every old one left the pin
+    // with a dead path and no icon.
+    const others = fs.readdirSync(UPD_ROOT)
+      .filter((name) => {
+        const full = path.join(UPD_ROOT, name);
+        return full !== keepDir && name !== "current.json" && name !== "handoff.json" && fs.existsSync(path.join(full, "Capri.exe"));
+      })
+      .sort((a, b) => cmpVersion(b, a));
+    const keep = new Set(others.slice(0, 1).map((name) => path.join(UPD_ROOT, name)));
     for (const name of fs.readdirSync(UPD_ROOT)) {
       const full = path.join(UPD_ROOT, name);
-      if (full === keepDir || name === "current.json" || name === "handoff.json") continue;
+      if (full === keepDir || name === "current.json" || name === "handoff.json" || keep.has(full)) continue;
       try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* in use */ }
     }
   } catch { /* nothing unpacked yet */ }
@@ -655,8 +665,216 @@ function createWindow() {
     }
   });
 
+  win.on("minimize", () => { showEye(); });
+  win.on("restore", () => { hideEye(); });
+  win.on("hide", () => { showEye(); });
+  win.on("show", () => { hideEye(); });
+
   win.on("closed", () => { win = null; });
 }
+
+// ── Eye Spy overlay ──────────────────────────────────────────────────────────
+// A frameless, always-on-top eye that appears when Capri is out of the way. It
+// follows the cursor, drags anywhere, and cuts in with a comment once you have
+// been parked on the same window long enough.
+const EYE_W = 300;
+const EYE_H = 280;
+let eyeWin = null;
+let eyeEnabled = true;
+let eyeBanter = true;
+let eyeCursorTimer = null;
+let eyeWatchTimer = null;
+let eyeTrack = { key: "", since: 0, said: "" };
+let eyeLastSay = 0;
+let eyeBusy = false;
+
+const eyeStateFile = () => path.join(app.getPath("userData"), "eye-spy.json");
+const readEyeState = () => readJson(eyeStateFile()) || {};
+function writeEyeState(patch) {
+  writeJson(eyeStateFile(), { ...readEyeState(), ...patch });
+}
+
+function eyeBounds() {
+  const saved = readEyeState();
+  const area = screen.getPrimaryDisplay().workArea;
+  const x = Number.isFinite(saved.x) ? saved.x : area.x + area.width - EYE_W - 24;
+  const y = Number.isFinite(saved.y) ? saved.y : Math.round(area.y + area.height / 2 - EYE_H / 2);
+  return { x, y, width: EYE_W, height: EYE_H };
+}
+
+function createEye() {
+  if (eyeWin && !eyeWin.isDestroyed()) return eyeWin;
+  eyeWin = new BrowserWindow({
+    ...eyeBounds(),
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    hasShadow: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    show: false,
+    title: "Capri",
+    icon: ICON,
+    webPreferences: {
+      preload: path.join(__dirname, "eye-preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  try { eyeWin.setAlwaysOnTop(true, "screen-saver"); } catch { /* older windows */ }
+  try { eyeWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* ignore */ }
+  eyeWin.loadFile(path.join(__dirname, "eye.html")).catch((err) => logLine(`eye page failed: ${err.message}`));
+  eyeWin.webContents.on("did-finish-load", () => {
+    eyeWin?.webContents.send("eye-pinned", Boolean(readEyeState().pinned));
+  });
+  eyeWin.on("moved", () => {
+    if (!eyeWin || eyeWin.isDestroyed()) return;
+    const [x, y] = eyeWin.getPosition();
+    writeEyeState({ x, y });
+  });
+  eyeWin.on("closed", () => { eyeWin = null; });
+  return eyeWin;
+}
+
+function showEye() {
+  if (!eyeEnabled) return;
+  const eye = createEye();
+  if (eye.isVisible()) return;
+  eye.setBounds(eyeBounds());
+  eye.showInactive();
+  startEyeTimers();
+}
+
+function hideEye() {
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  eyeWin.hide();
+  stopEyeTimers();
+}
+
+function sayEye(text) {
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  if (!eyeWin.isVisible()) return;
+  eyeWin.webContents.send("eye-say", { text: String(text || "") });
+}
+
+function startEyeTimers() {
+  stopEyeTimers();
+  eyeCursorTimer = setInterval(() => {
+    if (!eyeWin || eyeWin.isDestroyed() || !eyeWin.isVisible()) return;
+    try {
+      const point = screen.getCursorScreenPoint();
+      const box = eyeWin.getBounds();
+      eyeWin.webContents.send("eye-cursor", { x: point.x - box.x, y: point.y - box.y });
+    } catch { /* display swap */ }
+  }, 60);
+  eyeWatchTimer = setInterval(watchScreen, 5000);
+}
+
+function stopEyeTimers() {
+  clearInterval(eyeCursorTimer);
+  clearInterval(eyeWatchTimer);
+  eyeCursorTimer = null;
+  eyeWatchTimer = null;
+}
+
+// What is actually in front on the PC right now: process name and window title.
+function foregroundApp() {
+  return new Promise((resolve) => {
+    const ps = [
+      `Add-Type -Namespace CapriWin -Name Api -MemberDefinition '[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow(); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint pid); [DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetWindowText(System.IntPtr hWnd, System.Text.StringBuilder text, int count);'`,
+      `$h = [CapriWin.Api]::GetForegroundWindow()`,
+      `$procId = 0`,
+      `[void][CapriWin.Api]::GetWindowThreadProcessId($h, [ref]$procId)`,
+      `$sb = New-Object System.Text.StringBuilder 512`,
+      `[void][CapriWin.Api]::GetWindowText($h, $sb, 512)`,
+      `$name = try { (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch { "" }`,
+      `Write-Output ($name + "|" + $sb.ToString())`,
+    ].join("; ");
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 8000 }, (err, stdout) => {
+      if (err) return resolve(null);
+      const raw = String(stdout || "").trim();
+      const cut = raw.indexOf("|");
+      if (cut < 0) return resolve(null);
+      resolve({ name: raw.slice(0, cut).trim(), title: raw.slice(cut + 1).trim() });
+    });
+  });
+}
+
+async function eyeComment(app_) {
+  const target = `${APP_URL}/api/banter`;
+  try {
+    const res = await fetch(target, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ app: app_.name, title: app_.title }),
+    });
+    if (!res.ok) return;
+    const data = await res.json().catch(() => ({}));
+    const line = String(data.line || "").trim();
+    if (!line) return;
+    eyeLastSay = Date.now();
+    sayEye(line);
+    notify("Capri", line);
+    logLine(`eye: ${app_.name} -> "${line.slice(0, 60)}"`);
+  } catch { /* the comment is a bonus, never an error dialog */ }
+}
+
+async function watchScreen() {
+  if (!eyeEnabled || !eyeBanter || eyeBusy) return;
+  if (!eyeWin || eyeWin.isDestroyed() || !eyeWin.isVisible()) return;
+  eyeBusy = true;
+  try {
+    const appNow = await foregroundApp();
+    if (!appNow || !appNow.title) return;
+    if (/^(capri|electron)$/i.test(appNow.name)) { eyeTrack = { key: "", since: 0, said: "" }; return; }
+    const key = `${appNow.name}|${appNow.title}`.slice(0, 180);
+    const now = Date.now();
+    if (key !== eyeTrack.key) {
+      eyeTrack = { key, since: now, said: "" };
+      return;
+    }
+    const dwell = now - eyeTrack.since;
+    if (dwell < 40_000) return;
+    if (eyeTrack.said === key) return;
+    if (now - eyeLastSay < 120_000) return;
+    eyeTrack.said = key;
+    await eyeComment(appNow);
+  } finally {
+    eyeBusy = false;
+  }
+}
+
+function notify(title, body) {
+  try {
+    if (!Notification.isSupported()) return;
+    const note = new Notification({ title: String(title || "Capri"), body: String(body || ""), icon: ICON });
+    note.on("click", () => { showWindow(); });
+    note.show();
+  } catch { /* notifications are optional */ }
+}
+
+ipcMain.handle("capri-notify", (_event, payload) => {
+  notify(payload?.title || "Capri", payload?.body || "");
+  return true;
+});
+
+ipcMain.on("capri-eye-config", (_event, cfg) => {
+  eyeEnabled = cfg?.enabled !== false;
+  eyeBanter = cfg?.banter !== false;
+  writeEyeState({ enabled: eyeEnabled });
+  if (!eyeEnabled) hideEye();
+});
+
+ipcMain.on("eye-hide", () => { hideEye(); });
+
+ipcMain.on("eye-set-pinned", (_event, pinned) => {
+  writeEyeState({ pinned: Boolean(pinned) });
+  if (eyeWin && !eyeWin.isDestroyed()) eyeWin.webContents.send("eye-pinned", Boolean(pinned));
+});
 
 // ── System tray ──────────────────────────────────────────────────────────────
 function createTray() {
@@ -815,6 +1033,7 @@ ipcMain.handle("capri-open", async (_event, target) => {
 
 // ── App lifecycle ────────────────────────────────────────────────────────────
 app.whenReady().then(async () => {
+  if (process.platform === "win32") app.setAppUserModelId("com.capricorn.capri");
   logLine(`start v${app.getVersion()} pid=${process.pid} electron=${process.versions.electron}`);
   if (handoffToNewer()) return;
   pruneOldVersions(readCurrent()?.dir || "");
