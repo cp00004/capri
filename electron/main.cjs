@@ -78,6 +78,7 @@ let restarts = 0;
 let quitting = false;
 let usingRemote = true;
 let updateChecked = false;
+let lastUpdateCheckAt = 0;
 
 // Packaged builds have no console, so startup problems go to a file the user
 // can send us instead of a blank window.
@@ -373,6 +374,8 @@ async function installOverlay(feed, latest) {
 
 async function checkForUpdates() {
   if (usingRemote === false) return; // offline fallback, no point
+  if (Date.now() - lastUpdateCheckAt < 5 * 60_000) return;
+  lastUpdateCheckAt = Date.now();
   try {
     const feed = await fetchJson(`${UPDATE_FEED}?t=${Date.now()}`);
     const latest = String(feed?.version || "");
@@ -629,6 +632,8 @@ function createWindow() {
     if (updateChecked) return;
     updateChecked = true;
     setTimeout(checkForUpdates, 6000);
+    // A copy left open for hours should still find the new build on its own.
+    setInterval(checkForUpdates, 30 * 60_000);
   });
 
   // ── Google OAuth popup handling ──────────────────────────────────────────
