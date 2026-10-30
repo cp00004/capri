@@ -693,6 +693,9 @@ function createWindow() {
     clearTimeout(eyeBlurTimer);
     eyeDismissed = false;
     if (!readEyeState().pinned) hideEye();
+    // Coming back to a window that has been open for hours is a good moment to
+    // notice a build published in the meantime. Throttled inside.
+    checkForUpdates().catch(() => {});
   });
 
   win.on("closed", () => { win = null; });
