@@ -3454,12 +3454,12 @@ function initUpdates() {
       showUpdateScreen({
         kicker: `CAPRI v${feed.version} IS OUT`,
         title: "NEW BUILD READY",
-        note: "Install it over this one and your memory comes with you.",
+        note: "Download the APK and install it over this one - your sign-in and memory stay.",
         percent: -1,
-        action: { label: "UPDATE ON DEPLEXO" },
+        action: { label: "DOWNLOAD APK" },
       });
       el.updateAction.onclick = () => {
-        const url = feed.page || STORE_URL;
+        const url = feed.apk || feed.page || STORE_URL;
         if (window.CapriDevice?.open) window.CapriDevice.open(url);
         else window.open(url, "_system");
       };
