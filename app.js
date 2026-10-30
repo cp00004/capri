@@ -1307,7 +1307,7 @@ async function startMicWake() {
 
     // Her own voice, a take in progress, or a reply owns the mic right now.
     if (rec.active || rec.starting || cmdRec.active || state.streaming || state.phase === "thinking" || speech.busy || micWake.busy) {
-      micWake.speaking = false;
+      if (micWake.speaking) endMicClip(); // drop the half-clip instead of leaking it
       return;
     }
 
