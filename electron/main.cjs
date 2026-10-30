@@ -1007,6 +1007,27 @@ ipcMain.on("capri-eye-reply", (_event, text) => {
 
 ipcMain.on("eye-hide", () => { eyeDismissed = true; hideEye(); });
 
+// The overlay moves itself: the renderer reports screen-space pointer deltas,
+// because a native drag region cannot coexist with the eye's own transforms.
+ipcMain.on("eye-drag", (_event, { dx, dy } = {}) => {
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  const [x, y] = eyeWin.getPosition();
+  const nextX = Math.round(x + (Number(dx) || 0));
+  const nextY = Math.round(y + (Number(dy) || 0));
+  const area = screen.getDisplayNearestPoint({ x: nextX, y: nextY }).workArea;
+  // Keep a sliver of the eye reachable on whatever display it is heading for.
+  eyeWin.setPosition(
+    Math.max(area.x - EYE_W + 60, Math.min(area.x + area.width - 60, nextX)),
+    Math.max(area.y - EYE_H + 60, Math.min(area.y + area.height - 60, nextY))
+  );
+});
+
+ipcMain.on("eye-drag-end", () => {
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  const [x, y] = eyeWin.getPosition();
+  writeEyeState({ x, y });
+});
+
 ipcMain.on("eye-set-pinned", (_event, pinned) => {
   writeEyeState({ pinned: Boolean(pinned) });
   if (eyeWin && !eyeWin.isDestroyed()) eyeWin.webContents.send("eye-pinned", Boolean(pinned));
