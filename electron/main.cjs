@@ -789,6 +789,13 @@ function showEye() {
   startEyeTimers();
   sendEyeLive(true);
   logLine("eye: shown");
+  try {
+    const d = screen.getPrimaryDisplay();
+    logLine(`eye: display ${d.size.width}x${d.size.height} scale=${d.scaleFactor} bounds=${JSON.stringify(eye.getBounds())}`);
+    eye.webContents.executeJavaScript("({w:innerWidth,h:innerHeight,dpr:devicePixelRatio,wrap:document.getElementById('wrap').getBoundingClientRect().width,eye:document.getElementById('eye').getBoundingClientRect().width})")
+      .then((info) => logLine(`eye: css ${JSON.stringify(info)}`))
+      .catch(() => {});
+  } catch { /* diagnostics only */ }
 }
 
 function hideEye() {
