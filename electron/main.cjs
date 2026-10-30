@@ -33,10 +33,15 @@ const path  = require("path");
 const fs    = require("fs");
 const http  = require("http");
 
+// Toasts and the taskbar take their identity from this, not from the page title.
+app.setName("Capri");
+if (process.platform === "win32") app.setAppUserModelId("com.capricorn.capri");
+
 // ── Paths ────────────────────────────────────────────────────────────────────
 const ROOT    = path.join(__dirname, "..");
 const SERVER  = path.join(ROOT, "server.js");
 const ICON    = path.join(ROOT, "public", "assets", "icon-512.png");
+const EYE_ICON = path.join(ROOT, "public", "assets", "eye-icon.png");
 const net = require('net');
 // Walk upward until two consecutive ports can be bound - the server takes PORT
 // and PORT+1 for plain http and https. A socket bound to 127.0.0.1 still lets
@@ -580,6 +585,8 @@ function createWindow() {
       nodeIntegration:  false,
       // Allow mic access in renderer
       allowRunningInsecureContent: false,
+      // A minimized window still hosts her clock, voice and notifications.
+      backgroundThrottling: false,
     },
   });
   win.setMenuBarVisibility(false);
@@ -670,23 +677,22 @@ function createWindow() {
     }
   });
 
-  win.on("minimize", () => { showEye(); });
-  win.on("restore", () => { hideEye(); });
-  win.on("hide", () => { showEye(); });
-  win.on("show", () => { hideEye(); });
+  win.on("minimize", () => syncEye());
+  win.on("restore", () => syncEye());
+  win.on("hide", () => syncEye());
+  win.on("show", () => syncEye());
 
-  // Losing focus counts as stepping away too, as long as it sticks for a beat.
+  // Clicking away to the browser counts as stepping away too: the eye comes out
+  // after a short beat, not only when the window is minimized.
   let eyeBlurTimer = null;
   win.on("blur", () => {
     clearTimeout(eyeBlurTimer);
-    eyeBlurTimer = setTimeout(() => {
-      if (!win || win.isDestroyed() || win.isFocused() || win.isMinimized()) return;
-      showEye();
-    }, 1800);
+    eyeBlurTimer = setTimeout(syncEye, 900);
   });
   win.on("focus", () => {
     clearTimeout(eyeBlurTimer);
-    hideEye();
+    eyeDismissed = false;
+    if (!readEyeState().pinned) hideEye();
   });
 
   win.on("closed", () => { win = null; });
@@ -696,11 +702,13 @@ function createWindow() {
 // A frameless, always-on-top eye that appears when Capri is out of the way. It
 // follows the cursor, drags anywhere, and cuts in with a comment once you have
 // been parked on the same window long enough.
-const EYE_W = 300;
-const EYE_H = 300;
+const EYE_W = 360;
+const EYE_H = 360;
 let eyeWin = null;
 let eyeEnabled = true;
 let eyeBanter = true;
+let eyeDismissed = false;
+const eyeApi = { base: "", token: "", session: "" };
 let eyeCursorTimer = null;
 let eyeWatchTimer = null;
 let eyeTrack = { key: "", since: 0, said: "" };
@@ -740,7 +748,7 @@ function createEye() {
     acceptFirstMouse: true,
     show: false,
     title: "Capri",
-    icon: ICON,
+    icon: EYE_ICON,
     webPreferences: {
       preload: path.join(__dirname, "eye-preload.cjs"),
       contextIsolation: true,
@@ -751,12 +759,19 @@ function createEye() {
   try { eyeWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* ignore */ }
   eyeWin.loadFile(path.join(__dirname, "eye.html")).catch((err) => logLine(`eye page failed: ${err.message}`));
   eyeWin.webContents.on("did-finish-load", () => {
+    sendEyeConfig();
     eyeWin?.webContents.send("eye-pinned", Boolean(readEyeState().pinned));
+    eyeWin?.webContents.send("eye-live", Boolean(eyeWin?.isVisible()));
   });
+  let lastPos = null;
   eyeWin.on("moved", () => {
     if (!eyeWin || eyeWin.isDestroyed()) return;
     const [x, y] = eyeWin.getPosition();
     writeEyeState({ x, y });
+    if (lastPos) {
+      try { eyeWin.webContents.send("eye-move", { dx: x - lastPos[0], dy: y - lastPos[1] }); } catch { /* closing */ }
+    }
+    lastPos = [x, y];
   });
   eyeWin.on("closed", () => { eyeWin = null; });
   return eyeWin;
@@ -769,12 +784,39 @@ function showEye() {
   eye.setBounds(eyeBounds());
   eye.showInactive();
   startEyeTimers();
+  sendEyeLive(true);
 }
 
 function hideEye() {
   if (!eyeWin || eyeWin.isDestroyed()) return;
+  sendEyeLive(false);
   eyeWin.hide();
   stopEyeTimers();
+}
+
+// One source of truth: the eye belongs on screen only while Capri is not the
+// window in front. Blur, minimize, tray and display changes all land here.
+function syncEye() {
+  if (!eyeEnabled || !win || win.isDestroyed()) { hideEye(); return; }
+  const away = !win.isFocused() || win.isMinimized() || !win.isVisible();
+  if (!away) {
+    eyeDismissed = false;
+    if (!readEyeState().pinned) hideEye();
+    return;
+  }
+  if (eyeDismissed) return;
+  showEye();
+}
+
+function sendEyeLive(live) {
+  try { eyeWin?.webContents.send("eye-live", Boolean(live)); } catch { /* closing */ }
+  // Her window's own wake listener steps aside while the eye owns the mic.
+  try { win?.webContents.send("capri-eye-live", Boolean(live)); } catch { /* closing */ }
+}
+
+function sendEyeConfig() {
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  try { eyeWin.webContents.send("eye-config", { ...eyeApi }); } catch { /* closing */ }
 }
 
 function sayEye(text) {
@@ -801,6 +843,24 @@ function stopEyeTimers() {
   clearInterval(eyeWatchTimer);
   eyeCursorTimer = null;
   eyeWatchTimer = null;
+}
+
+// Process names are not what a person calls the app; the comments should say
+// "Google Chrome", not "chrome".
+const APP_NAMES = {
+  chrome: "Google Chrome", msedge: "Microsoft Edge", firefox: "Firefox", brave: "Brave",
+  opera: "Opera", vivaldi: "Vivaldi", code: "Visual Studio Code", cursor: "Cursor",
+  discord: "Discord", steam: "Steam", spotify: "Spotify", explorer: "File Explorer",
+  notepad: "Notepad", winword: "Microsoft Word", excel: "Microsoft Excel", powerpnt: "PowerPoint",
+  outlook: "Outlook", teams: "Microsoft Teams", "ms-teams": "Microsoft Teams", telegram: "Telegram",
+  whatsapp: "WhatsApp", robloxplayerbeta: "Roblox", javaw: "Minecraft", epicgameslauncher: "Epic Games",
+  "battle.net": "Battle.net", obs64: "OBS", photoshop: "Photoshop", premierepro: "Premiere Pro",
+  sublime_text: "Sublime Text", windows_terminal: "Windows Terminal", cmd: "Command Prompt",
+  powershell: "PowerShell", nvidia: "NVIDIA App", geforceexperience: "GeForce Experience",
+};
+function friendlyApp(name) {
+  const raw = String(name || "").trim();
+  return APP_NAMES[raw.toLowerCase()] || raw;
 }
 
 // What is actually in front on the PC right now: process name and window title.
@@ -852,7 +912,8 @@ async function watchScreen() {
   try {
     const appNow = await foregroundApp();
     if (!appNow || !appNow.title) return;
-    if (/^(capri|electron)$/i.test(appNow.name)) { eyeTrack = { key: "", since: 0, said: "" }; return; }
+    if (/^(capri|capri-desktop|electron)$/i.test(appNow.name)) { eyeTrack = { key: "", since: 0, said: "" }; return; }
+    appNow.name = friendlyApp(appNow.name);
     const key = `${appNow.name}|${appNow.title}`.slice(0, 180);
     const now = Date.now();
     if (key !== eyeTrack.key) {
@@ -873,7 +934,12 @@ async function watchScreen() {
 function notify(title, body) {
   try {
     if (!Notification.isSupported()) return;
-    const note = new Notification({ title: String(title || "Capri"), body: String(body || ""), icon: ICON });
+    const note = new Notification({
+      title: String(title || "Capri"),
+      body: String(body || ""),
+      icon: EYE_ICON,
+      silent: false,
+    });
     note.on("click", () => { showWindow(); });
     note.show();
   } catch { /* notifications are optional */ }
@@ -887,11 +953,28 @@ ipcMain.handle("capri-notify", (_event, payload) => {
 ipcMain.on("capri-eye-config", (_event, cfg) => {
   eyeEnabled = cfg?.enabled !== false;
   eyeBanter = cfg?.banter !== false;
+  if (typeof cfg?.base === "string") eyeApi.base = cfg.base.replace(/\/+$/, "");
+  if (typeof cfg?.token === "string") eyeApi.token = cfg.token;
+  if (typeof cfg?.session === "string") eyeApi.session = cfg.session;
   writeEyeState({ enabled: eyeEnabled, banter: eyeBanter });
   if (!eyeEnabled) hideEye();
+  else if (eyeWin && !eyeWin.isDestroyed()) sendEyeConfig();
 });
 
-ipcMain.on("eye-hide", () => { hideEye(); });
+// Orders spoken to the eye run through her real chat turn, so timers, memory
+// and device calls behave exactly as when the window is in front.
+ipcMain.on("eye-ask", (_event, text) => {
+  const line = String(text || "").replace(/\s+/g, " ").trim().slice(0, 600);
+  if (!line) return;
+  try { win?.webContents.send("capri-eye-ask", line); } catch { /* window gone */ }
+});
+
+ipcMain.on("capri-eye-reply", (_event, text) => {
+  const line = String(text || "").replace(/\s+/g, " ").trim();
+  if (line) sayEye(line);
+});
+
+ipcMain.on("eye-hide", () => { eyeDismissed = true; hideEye(); });
 
 ipcMain.on("eye-set-pinned", (_event, pinned) => {
   writeEyeState({ pinned: Boolean(pinned) });
@@ -1071,6 +1154,7 @@ app.whenReady().then(async () => {
     eyeEnabled = eyeState.enabled !== false;
     eyeBanter = eyeState.banter !== false;
   } catch { /* first run */ }
+  setInterval(syncEye, 2000);
   // Show the window quickly; the bundled server is the fallback, not a gate.
   await Promise.race([waitForServer(), new Promise((r) => setTimeout(r, 2500))]);
   createWindow();

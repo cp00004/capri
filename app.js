@@ -965,6 +965,10 @@ const wakeWord = {
 };
 if (IS_DESKTOP_APP) localStorage.setItem("capri.wakeWord.engine", "1");
 
+// True while the floating eye is on screen. It listens for "Capri" itself, so
+// this window must not hold a second mic open.
+let eyeLive = false;
+
 const PREFERRED_MIME = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
 function pickMime() {
@@ -1526,7 +1530,7 @@ function startWakeWord() {
     setTimeout(startWakeWord, (wakeWord.suppressedUntil - Date.now()) + 50);
     return;
   }
-  if (!wakeWord.enabled || document.hidden || wakeWord.active || wakeWord.starting || cmdRec.active || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
+  if (!wakeWord.enabled || document.hidden || eyeLive || wakeWord.active || wakeWord.starting || cmdRec.active || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition || wakeWord.micEngine || IS_DESKTOP_APP) {
     // Chrome's recognizer needs Google's speech service; Electron has none, and
@@ -2107,6 +2111,7 @@ async function respond(userText) {
       state.history.push({ role: "assistant", content: finalText });
       state.history = state.history.slice(-16);
       if (document.hidden) notifyUser("Capri", finalText.slice(0, 180));
+      try { window.capriNative?.eyeReply?.(finalText); } catch { /* older shell */ }
     }
 
     if (!finalText && !failed) {
@@ -3111,8 +3116,9 @@ async function boot() {
   if (!state.history.length) {
     typer.reset(cfg?.local ? "Capricorn is awake. Say the word." : "Capricorn is on the line.");
   }
-  if (wakeWord.enabled && !document.hidden) startWakeWord();
+  if (wakeWord.enabled && !document.hidden && !eyeLive) startWakeWord();
   paintEyeSpy();
+  wireEyeVoice();
   initUpdates();
 }
 
