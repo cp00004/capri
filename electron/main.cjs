@@ -801,6 +801,11 @@ function createEye() {
     }
     lastPos = [x, y];
   });
+  eyeWin.on("resize", () => {
+    if (!eyeWin || eyeWin.isDestroyed()) return;
+    const b = eyeWin.getBounds();
+    logLine(`eye: resized ${b.width}x${b.height} at ${b.x},${b.y}`);
+  });
   eyeWin.on("closed", () => { eyeWin = null; });
   return eyeWin;
 }
