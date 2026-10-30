@@ -101,7 +101,7 @@ const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.0.8";
+const APP_VERSION = "4.0.9";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -847,7 +847,11 @@ const rec = {
 };
 
 const wakeWord = {
-  enabled: localStorage.getItem("capri.wakeWord") !== "0",
+  // Builds before 4.0.9 switched the ear off on desktop because Google's speech
+  // service is missing there. Wake once on the new engine, then respect the switch.
+  enabled:
+    localStorage.getItem("capri.wakeWord") !== "0" ||
+    (IS_DESKTOP_APP && localStorage.getItem("capri.wakeWord.engine") !== "1"),
   active: false,
   starting: false,
   pendingStart: false,
@@ -857,7 +861,9 @@ const wakeWord = {
   decideTimer: null,
   recognition: null,
   suppressedUntil: 0,
+  micEngine: false,
 };
+if (IS_DESKTOP_APP) localStorage.setItem("capri.wakeWord.engine", "1");
 
 const PREFERRED_MIME = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
 
@@ -896,7 +902,7 @@ function playListeningChime() {
 async function startListening(force = false) {
   if (rec.active || rec.starting) return;
   if (!force && (state.phase === "thinking" || state.streaming)) return;
-  if (wakeWord.active || wakeWord.starting) {
+  if ((wakeWord.active || wakeWord.starting) && !wakeWord.micEngine) {
     if (!force) {
       wakeWord.pendingStart = true;
       wakeWord.recognition?.stop();
@@ -1019,7 +1025,7 @@ async function startListening(force = false) {
 
 function paintWakeWord() {
   if (!el.wakeWordBtn || !el.wakeWordState || !el.wakeWordHint) return;
-  const supported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+  const supported = Boolean(window.SpeechRecognition || window.webkitSpeechRecognition) || micWakeSupported();
   el.wakeWordBtn.disabled = !supported;
   el.wakeWordBtn.classList.toggle("is-on", wakeWord.enabled);
   el.wakeWordBtn.setAttribute("aria-pressed", String(wakeWord.enabled));
@@ -1046,6 +1052,7 @@ function setWakeWordEnabled(enabled) {
     wakeWord.active = false;
     wakeWord.starting = false;
     try { recognition?.stop(); } catch { /* already stopped */ }
+    stopMicWake();
     if (!rec.active && !state.streaming) setPhase("idle");
     return;
   }
@@ -1157,7 +1164,7 @@ function stopCommandRec() {
 
 function listenForCommand() {
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Recognition) return startListening();
+  if (!Recognition || wakeWord.micEngine) return startListening();
   if (rec.active || rec.starting || cmdRec.active || state.streaming || state.phase === "thinking") return;
 
   const r = new Recognition();
@@ -1221,6 +1228,198 @@ function listenForCommand() {
   }
 }
 
+/* ---------------------------------------------------------------- mic wake word
+   SpeechRecognition talks to Google's speech service, which Electron and the
+   Android WebView do not ship. There Capri listens herself: a cheap loudness gate,
+   then the three seconds around the speech go through her own /api/stt. */
+
+const micWake = {
+  stream: null,
+  ctx: null,
+  analyser: null,
+  raf: null,
+  recorder: null,
+  on: false,
+  busy: false,
+  speaking: false,
+  startedAt: 0,
+  quietAt: 0,
+  cooldownUntil: 0,
+  warned: false,
+};
+
+const MIC_WAKE_RMS = 0.018;
+const MIC_WAKE_MIN_MS = 550;
+const MIC_WAKE_MAX_MS = 3000;
+const MIC_WAKE_QUIET_MS = 450;
+
+function micWakeSupported() {
+  return Boolean(navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined");
+}
+
+async function startMicWake() {
+  if (!wakeWord.enabled || document.hidden || !micWakeSupported()) return;
+  wakeWord.micEngine = true;
+  if (micWake.on || micWake.busy) {
+    paintWakeWord();
+    return;
+  }
+  micWake.busy = true;
+  try {
+    micWake.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch (err) {
+    micWake.busy = false;
+    if (err?.name === "NotAllowedError") {
+      setWakeWordEnabled(false);
+      showNotice("Microphone blocked, so I cannot listen for the wake word. Allow it and turn the ear back on.", null, null, 9000);
+    }
+    return;
+  }
+  micWake.busy = false;
+  if (!wakeWord.enabled || document.hidden) {
+    micWake.stream.getTracks().forEach((track) => track.stop());
+    micWake.stream = null;
+    return;
+  }
+
+  micWake.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const source = micWake.ctx.createMediaStreamSource(micWake.stream);
+  micWake.analyser = micWake.ctx.createAnalyser();
+  micWake.analyser.fftSize = 1024;
+  source.connect(micWake.analyser);
+
+  wakeWord.starting = false;
+  wakeWord.active = true;
+  micWake.on = true;
+  paintWakeWord();
+  if (wakeWord.chimePending) {
+    wakeWord.chimePending = false;
+    playListeningChime();
+  }
+
+  const data = new Uint8Array(micWake.analyser.fftSize);
+  const tick = () => {
+    if (!micWake.on) return;
+    if (!wakeWord.enabled) return stopMicWake();
+    micWake.raf = requestAnimationFrame(tick);
+
+    // Her own voice, a take in progress, or a reply owns the mic right now.
+    if (rec.active || rec.starting || cmdRec.active || state.streaming || state.phase === "thinking" || speech.busy || micWake.busy) {
+      micWake.speaking = false;
+      return;
+    }
+
+    micWake.analyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 1) {
+      const v = (data[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / data.length);
+    const now = performance.now();
+    if (!micWake.speaking) {
+      if (rms > MIC_WAKE_RMS && now > micWake.cooldownUntil) beginMicClip();
+      return;
+    }
+    if (rms > MIC_WAKE_RMS) micWake.quietAt = now;
+    const length = now - micWake.startedAt;
+    if (length > MIC_WAKE_MIN_MS && now - micWake.quietAt > MIC_WAKE_QUIET_MS) endMicClip();
+    else if (length > MIC_WAKE_MAX_MS) endMicClip();
+  };
+  micWake.raf = requestAnimationFrame(tick);
+}
+
+function stopMicWake() {
+  micWake.on = false;
+  micWake.speaking = false;
+  cancelAnimationFrame(micWake.raf);
+  micWake.raf = null;
+  try { micWake.recorder?.stop(); } catch { /* already stopped */ }
+  micWake.recorder = null;
+  if (micWake.stream) micWake.stream.getTracks().forEach((track) => track.stop());
+  micWake.stream = null;
+  if (micWake.ctx) { micWake.ctx.close().catch(() => {}); micWake.ctx = null; }
+  micWake.analyser = null;
+  wakeWord.active = false;
+  paintWakeWord();
+}
+
+function beginMicClip() {
+  if (!micWake.stream || micWake.speaking) return;
+  const mime = pickMime();
+  let recorder;
+  try {
+    recorder = mime ? new MediaRecorder(micWake.stream, { mimeType: mime }) : new MediaRecorder(micWake.stream);
+  } catch {
+    micWake.cooldownUntil = performance.now() + 1200;
+    return;
+  }
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  recorder.onstop = () => {
+    micWake.speaking = false;
+    micWake.cooldownUntil = performance.now() + 600;
+    const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+    if (blob.size > 1500) checkWakeClip(blob);
+  };
+  micWake.recorder = recorder;
+  micWake.speaking = true;
+  micWake.startedAt = performance.now();
+  micWake.quietAt = micWake.startedAt;
+  try {
+    recorder.start(120);
+  } catch {
+    micWake.speaking = false;
+    micWake.recorder = null;
+  }
+}
+
+function endMicClip() {
+  const recorder = micWake.recorder;
+  if (!recorder || recorder.state === "inactive") return;
+  try { recorder.stop(); } catch { /* already stopped */ }
+}
+
+async function checkWakeClip(blob) {
+  if (!wakeWord.enabled) return;
+  let text = "";
+  try {
+    const res = await api("/api/stt", {
+      method: "POST",
+      headers: { "Content-Type": blob.type || "audio/webm" },
+      body: blob,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (!micWake.warned) {
+        micWake.warned = true;
+        showNotice("I can hear you but cannot reach your PC to read it. Wake word needs the link up.", null, null, 9000);
+      }
+      return;
+    }
+    text = String(data.text || "").trim();
+  } catch {
+    if (!micWake.warned) {
+      micWake.warned = true;
+      showNotice("Wake word needs the PC link. Tap the mic for now.", null, null, 8000);
+    }
+    return;
+  }
+  if (!text || !isWakePhrase(text)) return;
+
+  const rest = wakeRemainder(text);
+  wakeWord.chimed = false;
+  playListeningChime();
+  if (rest.split(/\s+/).filter(Boolean).length >= 2) {
+    showHeard(rest);
+    respond(rest);
+    return;
+  }
+  startListening(true);
+}
+
 function startWakeWord() {
   if (Date.now() < (wakeWord.suppressedUntil || 0)) {
     // A tap is being served right now; re-arm after it.
@@ -1229,9 +1428,10 @@ function startWakeWord() {
   }
   if (!wakeWord.enabled || document.hidden || wakeWord.active || wakeWord.starting || cmdRec.active || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Recognition) {
-    setWakeWordEnabled(false);
-    showNotice("Wake-word listening is not supported in this browser. Use the mic button instead.", null, null, 7000);
+  if (!Recognition || wakeWord.micEngine || IS_DESKTOP_APP) {
+    // Chrome's recognizer needs Google's speech service; Electron has none, and
+    // Android's WebView has none either. Capri listens with her own mic instead.
+    startMicWake();
     return;
   }
 
@@ -1285,13 +1485,13 @@ function startWakeWord() {
       localStorage.setItem("capri.wakeWord", "0");
       paintWakeWord();
       showNotice("Allow microphone access for wake-word listening, then turn it on again.", null, null, 8000);
-    } else if (event.error === "network" && IS_DESKTOP_APP) {
-      // Electron ships without Google's speech service, so this window cannot
-      // run the wake word. The mic button still records and transcribes.
-      wakeWord.enabled = false;
-      localStorage.setItem("capri.wakeWord", "0");
+    } else if (event.error === "network") {
+      // No Google speech service in Electron or the Android WebView. Swap to
+      // Capri's own mic engine instead of switching the ear off for good.
+      wakeWord.micEngine = true;
       paintWakeWord();
-      showNotice("This window can't hear the wake word. Tap the mic and talk.", null, null, 9000);
+      showNotice("Google's speech service is not in this window, so Capri listens with her own mic.", null, null, 9000);
+      setTimeout(startMicWake, 300);
     }
   };
   recognition.onend = () => {
@@ -1334,6 +1534,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     try { wakeWord.recognition?.stop(); } catch { /* already stopped */ }
     if (cmdRec.active) stopCommandRec();
+    if (micWake.on) stopMicWake();
   } else if (wakeWord.pendingStart && wakeWord.enabled) {
     wakeWord.pendingStart = false;
     wakeWord.capture = "";
@@ -2847,7 +3048,14 @@ function initUpdates() {
     if (updateUi.wired) return;
     updateUi.wired = true;
     window.capriNative.onUpdate((evt) => {
-      if (!evt || updateUi.dismissed) return;
+      if (!evt) return;
+      if (evt.phase === "updated") {
+        updateUi.dismissed = false;
+        if (el.updateScreen) el.updateScreen.classList.add("hidden");
+        showNotice(`Capri updated itself to v${evt.version}. Nothing for you to install.`, null, null, 12000);
+        return;
+      }
+      if (updateUi.dismissed) return;
       if (evt.phase === "downloading") {
         showUpdateScreen({
           kicker: `NEW BUILD ${evt.version || ""}`.trim(),
