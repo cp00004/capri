@@ -875,6 +875,30 @@ eyeSpyBtn?.addEventListener('click', () => {
   if (!next) { try { window.CapriEyes?.hide?.(); } catch { /* not android */ } }
 });
 
+// The floating eye hears you and answers through this same chat turn, so
+// timers, memory and notifications behave exactly as in the app window.
+function wireEyeVoice() {
+  const bridge = window.capriNative;
+  if (!bridge) return;
+  bridge.onEyeLive?.((live) => {
+    eyeLive = Boolean(live);
+    if (eyeLive) {
+      try { wakeWord.recognition?.stop(); } catch { /* already stopped */ }
+      wakeWord.active = false;
+      wakeWord.starting = false;
+    } else if (wakeWord.enabled && !document.hidden) {
+      resumeWakeWord();
+    }
+  });
+  bridge.onEyeAsk?.((text) => {
+    const line = String(text || "").replace(/\s+/g, " ").trim();
+    if (!line) return;
+    try { activeAbort?.abort(); } catch { /* nothing running */ }
+    showHeard(line);
+    respond(line);
+  });
+}
+
 // Android: the eye belongs on screen while Capri is out of the way.
 document.addEventListener('visibilitychange', () => {
   if (IS_DESKTOP_APP || !window.CapriEyes) return;
