@@ -7,6 +7,7 @@ const $ = (sel) => document.querySelector(sel);
 const TOKEN_KEY = "capri.token";
 const API_KEY = "capri.api";
 const SESSION_KEY = "capri.session";
+const VOICE_ENGINE_KEY = "capri.voiceEngine";
 const OWN_KEY = "capri.modelKey";
 const SERVER_KEY = "capri.server";
 
@@ -101,7 +102,7 @@ const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.2.2";
+const APP_VERSION = "4.2.3";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -125,6 +126,8 @@ const state = {
   orpheusAvailable: false,
   orpheusVoice: localStorage.getItem("capri.voice") || "capri",
   voicePreset: localStorage.getItem("capri.voicePreset") || "capri",
+  // One voice for good: whichever engine answered first keeps answering.
+  voiceEngine: localStorage.getItem(VOICE_ENGINE_KEY) || "",
   browserVoice: null,
   orpheusVoices: ["diana", "hannah", "autumn", "tara", "leah", "mia", "zoe"],
   portrait: "assets/capri-portrait.png",
@@ -627,26 +630,56 @@ function playBlob(blob, { pitch = 0.96, grit = 0.14 } = {}) {
   });
 }
 
-async function prepareSpeech(text) {
+async function prepareSpeech(text, attempt = 0) {
   if (!state.voiceOn || state.voicePreset === "system") return null;
+  if (state.voiceEngine === "browser") return null;
   try {
     const res = await api("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice: state.voicePreset }),
+      body: JSON.stringify({
+        text,
+        voice: state.voicePreset,
+        engine: state.voiceEngine || undefined,
+      }),
     });
 
     const type = res.headers.get("content-type") || "";
     if (res.ok && type.startsWith("audio")) {
+      const engine = res.headers.get("X-Capri-Engine") || "";
+      if (engine && engine !== state.voiceEngine) {
+        state.voiceEngine = engine;
+        localStorage.setItem(VOICE_ENGINE_KEY, engine);
+      }
       return {
         blob: await res.blob(),
         pitch: Number(res.headers.get("X-Capri-Pitch") || 0.96),
         grit: Number(res.headers.get("X-Capri-Grit") || 0.14),
-        engine: res.headers.get("X-Capri-Engine") || "",
+        engine,
       };
     }
 
     const data = await res.json().catch(() => ({}));
+    if (data.error === "engine_browser") {
+      state.voiceEngine = "browser";
+      localStorage.setItem(VOICE_ENGINE_KEY, "browser");
+      return null;
+    }
+    if (data.error === "tts_failed" && attempt < 2) {
+      // The pinned engine is down. Move her to the next one and stay there —
+      // never one neural sentence followed by a browser sentence.
+      const next = !state.voiceEngine || state.voiceEngine === "gemini" ? "orpheus"
+        : state.voiceEngine === "orpheus" ? "gemini"
+        : "browser";
+      if (next !== "browser") {
+        state.voiceEngine = next;
+        localStorage.setItem(VOICE_ENGINE_KEY, next);
+        return prepareSpeech(text, attempt + 1);
+      }
+      state.voiceEngine = "browser";
+      localStorage.setItem(VOICE_ENGINE_KEY, "browser");
+      return null;
+    }
     if (data.error === "terms") {
       showNotice(
         "Neural voice needs a one-time terms click. On the system voice until then:",
@@ -840,7 +873,9 @@ function eyeConfig() {
   return {
     enabled: eyeSpyOn(),
     banter: localStorage.getItem('capri.appBanter') !== '0',
-    base: state.apiBase || '',
+    // The eye loads from disk, so a relative backend is useless there. Local
+    // builds hand it the server origin; hosted builds pass their tunnel.
+    base: state.apiBase || (LOCAL_HOST ? location.origin : ''),
     token: state.token || '',
     session: state.session || '',
   };
@@ -1987,16 +2022,16 @@ function lastSentenceEnd(text) {
 // sit waiting for a full sentence while the text is already on screen.
 function firstSpeechBoundary(text, from = 0) {
   const chunk = text.slice(from);
-  if (chunk.length < 18) return 0;
+  if (chunk.length < 12) return 0;
   const hard = chunk.match(/[.!?]["')\\]]?\s/g);
   if (hard) return from + chunk.lastIndexOf(hard[hard.length - 1]) + hard[hard.length - 1].length;
   const soft = chunk.match(/[,;:]\s/g);
-  if (soft && chunk.length >= 22) {
+  if (soft && chunk.length >= 14) {
     return from + chunk.lastIndexOf(soft[soft.length - 1]) + soft[soft.length - 1].length;
   }
-  if (chunk.length >= 44) {
-    const space = chunk.lastIndexOf(" ", 60);
-    if (space >= 20) return from + space + 1;
+  if (chunk.length >= 30) {
+    const space = chunk.lastIndexOf(" ", 46);
+    if (space >= 10) return from + space + 1;
   }
   return 0;
 }
@@ -2506,6 +2541,29 @@ el.publishNow.addEventListener("click", async () => {
 let googleLoader = null;
 let googleInitializedClientId = "";
 let googleButtonClientId = "";
+const GOOGLE_EMAIL_KEY = "capri.googleEmail";
+
+// The session token outlives the page: a new build, a new port or a cleared
+// web store still finds the same Google profile on disk.
+async function keepSession(token) {
+  const value = String(token || "");
+  if (!value) return;
+  state.session = value;
+  localStorage.setItem(SESSION_KEY, value);
+  try { await window.capriNative?.saveSession?.(value); } catch { /* browser build */ }
+}
+
+async function restoreSession() {
+  if (state.session) return state.session;
+  try {
+    const disk = String((await window.capriNative?.loadSession?.()) || "");
+    if (disk) {
+      state.session = disk;
+      localStorage.setItem(SESSION_KEY, disk);
+    }
+  } catch { /* browser build */ }
+  return state.session;
+}
 
 function loadGoogleScript() {
   if (window.google?.accounts?.id) return Promise.resolve(true);
@@ -2538,6 +2596,8 @@ async function handleGoogleCredential(response) {
     }
     state.session = data.token;
     localStorage.setItem(SESSION_KEY, data.token);
+    try { await window.capriNative?.saveSession?.(data.token); } catch { /* browser build */ }
+    localStorage.setItem(GOOGLE_EMAIL_KEY, data.profile.email || "");
     await boot();
     showNotice(`Signed in as ${data.profile.name || data.profile.email}. Memory is tied to this account now.`, null, null, 6000);
     speech.enqueue("There you are. I remember you.");
@@ -2566,10 +2626,14 @@ async function renderGoogle() {
   }
   state.googleReady = true;
   if (googleInitializedClientId !== google.clientId) {
+    const known = localStorage.getItem(GOOGLE_EMAIL_KEY) || "";
     window.google.accounts.id.initialize({
       client_id: google.clientId,
       callback: handleGoogleCredential,
-      auto_select: false,
+      // In the desktop shell the Google cookie jar survives updates, so a known
+      // account can be re-attached silently instead of asking for a new login.
+      auto_select: Boolean(known) && IS_DESKTOP_APP,
+      login_hint: known || undefined,
       cancel_on_tap_outside: true,
       use_fedcm_for_prompt: true,
     });
@@ -2577,6 +2641,11 @@ async function renderGoogle() {
     googleButtonClientId = "";
   }
   if (!state.profile?.google) {
+    if (IS_DESKTOP_APP && localStorage.getItem(GOOGLE_EMAIL_KEY)) {
+      // One-tap with auto_select: returns a fresh credential when the account is
+      // still signed into the embedded browser, and stays quiet when it is not.
+      try { window.google.accounts.id.prompt(); } catch { /* older GSI */ }
+    }
     if (googleButtonClientId !== google.clientId) {
       el.googleButton.innerHTML = "";
       try {
@@ -2728,6 +2797,8 @@ el.signOutBtn.addEventListener("click", async () => {
   }
   state.session = "";
   localStorage.removeItem(SESSION_KEY);
+  localStorage.removeItem(GOOGLE_EMAIL_KEY);
+  try { await window.capriNative?.clearSession?.(); } catch { /* browser build */ }
   showNotice("Signed out. This device is back on the local profile.", null, null, 5000);
   await boot();
 });
@@ -3053,6 +3124,8 @@ async function boot() {
     localStorage.setItem(SERVER_KEY, DEFAULT_BACKEND);
   }
   if (!state.config) showNotice("Connecting to Capri…", null, null, 0);
+  // A token saved next to the app survives the update that wiped localStorage.
+  if (!state.session) await restoreSession();
   let cfg = null;
   try {
     cfg = await fetchConfig();
@@ -3119,6 +3192,7 @@ async function boot() {
         else if (!me.ok) {
           state.session = "";
           localStorage.removeItem(SESSION_KEY);
+          try { await window.capriNative?.clearSession?.(); } catch { /* browser build */ }
         }
       } catch {
         /* keep the cached session until the PC answers again */

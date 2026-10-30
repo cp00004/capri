@@ -132,13 +132,51 @@ app.whenReady().then(() => {
 });
 
 // ── Server ───────────────────────────────────────────────────────────────────
+// Profiles, sessions and her memory belong next to the app, not inside the
+// versioned install folder: an update replaces that folder and would otherwise
+// log the user out of Google on every release.
+function prepareDataDir() {
+  const dir = path.join(app.getPath("userData"), "data");
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const target = path.join(dir, ".capri-users.json");
+    if (!fs.existsSync(target)) {
+      const candidates = [path.join(ROOT, ".capri-users.json")];
+      const versions = path.join(process.env.LOCALAPPDATA || "", "Capri", "versions");
+      try {
+        for (const name of fs.readdirSync(versions)) candidates.push(path.join(versions, name, "resources", "app", ".capri-users.json"));
+      } catch { /* no previous install */ }
+      let newest = null;
+      for (const file of candidates) {
+        try {
+          const stat = fs.statSync(file);
+          if (!stat.isFile()) continue;
+          if (!newest || stat.mtimeMs > newest.mtimeMs) newest = { file, mtimeMs: stat.mtimeMs };
+        } catch { /* missing */ }
+      }
+      if (newest) fs.copyFileSync(newest.file, target);
+    }
+    return dir;
+  } catch {
+    return "";
+  }
+}
+
 function startServer() {
   if (server) return;
 
+  const dataDir = prepareDataDir();
   // server.js is ESM — spawn with plain node (package.json has "type":"module")
   server = spawn(NODE, [SERVER], {
     cwd:   ROOT,
-    env:   { ...process.env, ELECTRON_RUN_AS_NODE: "1", PORT: String(PORT), ELECTRON: "1", FORCE_COLOR: "0" },
+    env:   {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      PORT: String(PORT),
+      ELECTRON: "1",
+      FORCE_COLOR: "0",
+      ...(dataDir ? { CAPRI_DATA_DIR: dataDir } : {}),
+    },
     stdio: "pipe",
     shell: false,
   });
@@ -725,8 +763,8 @@ function createWindow() {
 // A frameless, always-on-top eye that appears when Capri is out of the way. It
 // follows the cursor, drags anywhere, and cuts in with a comment once you have
 // been parked on the same window long enough.
-const EYE_W = 360;
-const EYE_H = 360;
+const EYE_W = 300;
+const EYE_H = 292;
 let eyeWin = null;
 let eyeEnabled = true;
 let eyeBanter = true;
@@ -782,6 +820,9 @@ function createEye() {
   });
   try { eyeWin.setAlwaysOnTop(true, "screen-saver"); } catch { /* older windows */ }
   try { eyeWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* ignore */ }
+  // Only the drawn eye and its buttons swallow a click. Everything else in the
+  // window is see-through to whatever is underneath.
+  try { eyeWin.setIgnoreMouseEvents(true, { forward: true }); } catch { /* older electron */ }
   eyeWin.loadFile(path.join(__dirname, "eye.html")).catch((err) => logLine(`eye page failed: ${err.message}`));
   eyeWin.webContents.on("console-message", (_event, level, message) => {
     if (level >= 2) logLine(`eye console: ${message}`);
@@ -810,8 +851,10 @@ function showEye() {
   const eye = createEye();
   if (eye.isVisible()) return;
   eye.setBounds(eyeBounds());
+  try { eye.setIgnoreMouseEvents(true, { forward: true }); } catch { /* older electron */ }
   eye.showInactive();
   startEyeTimers();
+  sendEyeConfig();
   sendEyeLive(true);
   logLine("eye: shown");
 }
@@ -821,6 +864,7 @@ function hideEye() {
   if (!eyeWin.isVisible()) { stopEyeTimers(); return; }
   sendEyeLive(false);
   eyeWin.hide();
+  try { eyeWin.setIgnoreMouseEvents(true, { forward: true }); } catch { /* older electron */ }
   stopEyeTimers();
   logLine("eye: hidden");
 }
@@ -847,7 +891,8 @@ function sendEyeLive(live) {
 
 function sendEyeConfig() {
   if (!eyeWin || eyeWin.isDestroyed()) return;
-  try { eyeWin.webContents.send("eye-config", { ...eyeApi }); } catch { /* closing */ }
+  // The overlay is a local file, so it cannot rely on relative API paths.
+  try { eyeWin.webContents.send("eye-config", { ...eyeApi, base: eyeApi.base || APP_URL }); } catch { /* closing */ }
 }
 
 function sayEye(text) {
@@ -981,6 +1026,18 @@ ipcMain.handle("capri-notify", (_event, payload) => {
   return true;
 });
 
+// The Google session lives beside the app so an update cannot sign the user out.
+const sessionFile = () => path.join(app.getPath("userData"), "session.json");
+ipcMain.handle("capri-session-save", async (_event, token) => {
+  writeJson(sessionFile(), { token: String(token || ""), at: new Date().toISOString() });
+  return true;
+});
+ipcMain.handle("capri-session-load", () => String(readJson(sessionFile())?.token || ""));
+ipcMain.handle("capri-session-clear", () => {
+  try { fs.unlinkSync(sessionFile()); } catch { /* already gone */ }
+  return true;
+});
+
 ipcMain.on("capri-eye-config", (_event, cfg) => {
   eyeEnabled = cfg?.enabled !== false;
   eyeBanter = cfg?.banter !== false;
@@ -1035,6 +1092,65 @@ ipcMain.on("eye-drag-end", () => {
 ipcMain.on("eye-set-pinned", (_event, pinned) => {
   writeEyeState({ pinned: Boolean(pinned) });
   if (eyeWin && !eyeWin.isDestroyed()) eyeWin.webContents.send("eye-pinned", Boolean(pinned));
+});
+
+// The renderer hit-tests the art's own pixels and tells us when a click should
+// pass through, so the transparent margin stops swallowing the cursor.
+ipcMain.on("eye-click-through", (_event, ignore) => {
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  try { eyeWin.setIgnoreMouseEvents(Boolean(ignore), { forward: true }); } catch { /* older electron */ }
+});
+
+// Leave a glitch burst where she was, then set her down somewhere else.
+function spawnWarp(bounds) {
+  const w = 300;
+  const h = 240;
+  let warp;
+  try {
+    warp = new BrowserWindow({
+      x: Math.round(bounds.x + bounds.width / 2 - w / 2),
+      y: Math.round(bounds.y + bounds.height / 2 - h / 2),
+      width: w,
+      height: h,
+      frame: false,
+      transparent: true,
+      backgroundColor: "#00000000",
+      hasShadow: false,
+      resizable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      focusable: false,
+      show: false,
+      title: "Capri",
+      webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false },
+    });
+  } catch (err) {
+    logLine(`warp failed: ${err.message}`);
+    return;
+  }
+  try { warp.setIgnoreMouseEvents(true); } catch { /* older electron */ }
+  try { warp.setAlwaysOnTop(true, "screen-saver"); } catch { /* older windows */ }
+  warp.loadFile(path.join(__dirname, "warp.html")).catch(() => {});
+  warp.once("ready-to-show", () => { try { warp.showInactive(); } catch { /* gone */ } });
+  setTimeout(() => { try { if (!warp.isDestroyed()) warp.destroy(); } catch { /* gone */ } }, 1200);
+}
+
+ipcMain.on("eye-teleport", () => {
+  if (!eyeWin || eyeWin.isDestroyed() || !eyeWin.isVisible()) return;
+  const old = eyeWin.getBounds();
+  const area = screen.getDisplayNearestPoint({ x: old.x, y: old.y }).workArea;
+  const spanX = Math.max(40, area.width - EYE_W - 24);
+  const spanY = Math.max(40, area.height - EYE_H - 24);
+  let x = old.x;
+  let y = old.y;
+  for (let i = 0; i < 24; i++) {
+    const nx = Math.round(area.x + 12 + Math.random() * spanX);
+    const ny = Math.round(area.y + 12 + Math.random() * spanY);
+    if (Math.hypot(nx - old.x, ny - old.y) > Math.min(300, area.width * 0.3)) { x = nx; y = ny; break; }
+  }
+  spawnWarp(old);
+  eyeWin.setBounds({ x, y, width: EYE_W, height: EYE_H });
+  writeEyeState({ x, y });
 });
 
 // ── System tray ──────────────────────────────────────────────────────────────

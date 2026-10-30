@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld("capriNative", {
   notify: (body, title) => ipcRenderer.invoke("capri-notify", { body: String(body || ""), title: title || "Capri" }),
   eyeSpy: (config) => ipcRenderer.send("capri-eye-config", config || {}),
   eyeReply: (text) => ipcRenderer.send("capri-eye-reply", String(text || "")),
+  saveSession: (token) => ipcRenderer.invoke("capri-session-save", String(token || "")),
+  loadSession: () => ipcRenderer.invoke("capri-session-load"),
+  clearSession: () => ipcRenderer.invoke("capri-session-clear"),
   onEyeAsk: (cb) => {
     if (typeof cb === "function") ipcRenderer.on("capri-eye-ask", (_event, text) => cb(String(text || "")));
   },
