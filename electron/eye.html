@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Capri eye</title>
+<style>
+  :root { --mint: #4dff9d; --pink: #ff4fd8; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; user-select: none; }
+  body { font: 12px/1.35 "Segoe UI", system-ui, sans-serif; color: #eaf6ff; }
+
+  #wrap {
+    position: relative;
+    width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #drag {
+    -webkit-app-region: drag;
+    position: relative;
+    cursor: grab;
+    filter: drop-shadow(0 0 18px rgba(77, 255, 157, .45)) drop-shadow(0 0 42px rgba(255, 79, 216, .22));
+    transition: filter .3s ease;
+  }
+  #drag.locked { cursor: default; }
+  #drag.busy { filter: drop-shadow(0 0 24px rgba(255, 79, 216, .7)); }
+  #eye { display: block; width: 240px; height: auto; animation: float 6s ease-in-out infinite; will-change: transform; }
+  #drag.blink #eye { animation: float 6s ease-in-out infinite, blink 4.6s ease-in-out infinite; }
+
+  @keyframes float {
+    0%, 100% { translate: 0 0; }
+    50% { translate: 0 -5px; }
+  }
+  @keyframes blink {
+    0%, 92%, 100% { scale: 1 1; }
+    94% { scale: 1 .12; }
+    96% { scale: 1 .12; }
+  }
+
+  #scan {
+    position: absolute; inset: 12% 6%;
+    background: linear-gradient(180deg, transparent 0%, rgba(77,255,157,.18) 48%, transparent 52%);
+    background-size: 100% 220%;
+    animation: scan 3.4s linear infinite;
+    mix-blend-mode: screen;
+    pointer-events: none;
+  }
+  @keyframes scan { from { background-position: 0 -120%; } to { background-position: 0 220%; } }
+
+  #bubble {
+    position: absolute; right: 96%; bottom: 22%;
+    max-width: 230px; min-width: 120px;
+    padding: 9px 11px;
+    background: rgba(7, 0, 12, .92);
+    border: 1px solid rgba(77, 255, 157, .55);
+    border-left: 2px solid var(--pink);
+    box-shadow: 0 0 22px rgba(77, 255, 157, .18);
+    opacity: 0; translate: 10px 0;
+    transition: opacity .25s ease, translate .25s ease;
+    pointer-events: none;
+  }
+  #bubble.show { opacity: 1; translate: 0 0; }
+  #bubble b { display: block; font-size: 9px; letter-spacing: 2px; color: var(--mint); margin-bottom: 3px; }
+
+  #controls {
+    position: absolute; top: 2px; left: 50%; translate: -50% 0;
+    display: flex; gap: 4px; opacity: 0; transition: opacity .2s ease;
+    -webkit-app-region: no-drag;
+  }
+  #wrap:hover #controls { opacity: 1; }
+  #controls button {
+    -webkit-app-region: no-drag;
+    width: 22px; height: 22px; padding: 0;
+    background: rgba(7, 0, 12, .85); color: var(--mint);
+    border: 1px solid rgba(77, 255, 157, .5);
+    font: 11px/20px system-ui; cursor: pointer;
+  }
+  #controls button:hover { background: rgba(77, 255, 157, .18); }
+  #controls button.on { color: #07000c; background: var(--mint); }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="controls">
+      <button id="pin" title="Pin in place">PIN</button>
+      <button id="close" title="Hide the eye">X</button>
+    </div>
+    <div id="bubble"><b>CAPRI // EYE</b><span id="line"></span></div>
+    <div id="drag">
+      <img id="eye" alt="" />
+      <div id="scan"></div>
+    </div>
+  </div>
+
+<script>
+  const wrap = document.getElementById("wrap");
+  const drag = document.getElementById("drag");
+  const img = document.getElementById("eye");
+  const bubble = document.getElementById("bubble");
+  const line = document.getElementById("line");
+  const pin = document.getElementById("pin");
+  const close = document.getElementById("close");
+
+  // The art came on a white card. Knock the white out so the eye can float on
+  // top of whatever is on screen.
+  function cutWhite(source) {
+    const base = new Image();
+    base.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = source.naturalWidth;
+      canvas.height = source.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(source, 0, 0);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const px = data.data;
+      for (let i = 0; i < px.length; i += 4) {
+        const r = px[i], g = px[i + 1], b = px[i + 2];
+        const low = Math.min(r, g, b);
+        if (low > 232) {
+          // fully white, plus a short feather so edges stay clean
+          const t = Math.min(1, (low - 200) / 32);
+          px[i + 3] = Math.round(px[i + 3] * (1 - t));
+        }
+      }
+      ctx.putImageData(data, 0, 0);
+      img.src = canvas.toDataURL("image/png");
+    };
+    base.src = source.src;
+  }
+  img.addEventListener("load", () => {
+    if (!img.dataset.done) {
+      img.dataset.done = "1";
+      cutWhite(img);
+    }
+  });
+  img.src = "../public/assets/eye-spy.png";
+
+  const state = { locked: false, bubbleTimer: null };
+  let last = { x: 0, y: 0 };
+  let raf = 0;
+
+  function follow() {
+    raf = 0;
+    const rect = drag.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = Math.max(-1, Math.min(1, (last.x - cx) / (rect.width * 1.6)));
+    const dy = Math.max(-1, Math.min(1, (last.y - cy) / (rect.height * 9)));
+    drag.style.transform = `translate(${(dx * 9).toFixed(1)}px, ${(dy * 5).toFixed(1)}px) rotate(${(dx * 1.6).toFixed(2)}deg)`;
+    if (!state.locked) drag.style.translate = "";
+  }
+  window.capriEye?.onCursor((point) => {
+    last = point;
+    if (!raf) raf = requestAnimationFrame(follow);
+  });
+
+  window.capriEye?.onSay(({ text, sticky }) => {
+    if (!text) { bubble.classList.remove("show"); return; }
+    line.textContent = text;
+    bubble.classList.add("show");
+    drag.classList.add("busy");
+    clearTimeout(state.bubbleTimer);
+    state.bubbleTimer = setTimeout(() => {
+      bubble.classList.remove("show");
+      drag.classList.remove("busy");
+    }, sticky ? 16000 : 11000);
+  });
+
+  window.capriEye?.onPinned((locked) => {
+    state.locked = Boolean(locked);
+    drag.classList.toggle("locked", state.locked);
+    pin.classList.toggle("on", state.locked);
+    pin.textContent = state.locked ? "PINNED" : "PIN";
+  });
+
+  pin.addEventListener("click", () => window.capriEye?.setPinned(!state.locked));
+  close.addEventListener("click", () => window.capriEye?.hide());
+
+  // Idle tricks: blink now and then, and let the bubble breathe.
+  setInterval(() => {
+    drag.classList.add("blink");
+    setTimeout(() => drag.classList.remove("blink"), 700);
+  }, 7000 + Math.random() * 5000);
+</script>
+</body>
+</html>
