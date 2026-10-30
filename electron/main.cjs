@@ -788,13 +788,16 @@ function showEye() {
   eye.showInactive();
   startEyeTimers();
   sendEyeLive(true);
+  logLine("eye: shown");
 }
 
 function hideEye() {
   if (!eyeWin || eyeWin.isDestroyed()) return;
+  if (!eyeWin.isVisible()) { stopEyeTimers(); return; }
   sendEyeLive(false);
   eyeWin.hide();
   stopEyeTimers();
+  logLine("eye: hidden");
 }
 
 // One source of truth: the eye belongs on screen only while Capri is not the
