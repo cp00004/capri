@@ -758,6 +758,9 @@ function createEye() {
   try { eyeWin.setAlwaysOnTop(true, "screen-saver"); } catch { /* older windows */ }
   try { eyeWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* ignore */ }
   eyeWin.loadFile(path.join(__dirname, "eye.html")).catch((err) => logLine(`eye page failed: ${err.message}`));
+  eyeWin.webContents.on("console-message", (_event, level, message) => {
+    if (level >= 2) logLine(`eye console: ${message}`);
+  });
   eyeWin.webContents.on("did-finish-load", () => {
     sendEyeConfig();
     eyeWin?.webContents.send("eye-pinned", Boolean(readEyeState().pinned));

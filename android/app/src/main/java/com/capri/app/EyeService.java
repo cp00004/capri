@@ -1,5 +1,6 @@
 package com.capri.app;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -9,6 +10,8 @@ import android.app.usage.UsageEvents;
 import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -17,11 +20,13 @@ import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.media.MediaRecorder;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.provider.Settings;
+import android.speech.tts.TextToSpeech;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -39,6 +44,9 @@ import androidx.core.app.NotificationManagerCompat;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -46,6 +54,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Iterator;
+import java.util.Locale;
 
 // The floating eye: a system overlay that follows you out of the app, drags
 // anywhere, and cuts in with a line once you have been parked in one app.
@@ -66,6 +75,8 @@ public class EyeService extends Service {
 	private WindowManager windowManager;
 	private FrameLayout root;
 	private ImageView eye;
+	private ImageView ghostNear;
+	private ImageView ghostFar;
 	private TextView bubble;
 	private LinearLayout controls;
 	private WindowManager.LayoutParams params;
@@ -86,6 +97,13 @@ public class EyeService extends Service {
 	private long lastSayAt = 0;
 	private String saidKey = "";
 	private boolean polling = false;
+
+	private MediaRecorder recorder;
+	private File takeFile;
+	private boolean recording = false;
+	private boolean thinking = false;
+	private TextToSpeech tts;
+	private boolean ttsReady = false;
 
 	public static void start(Context context, String config) {
 		Intent intent = new Intent(context, EyeService.class);
@@ -135,6 +153,12 @@ public class EyeService extends Service {
 		handler = new Handler(Looper.getMainLooper());
 		eyeSize = dp(140);
 		createChannels();
+		try {
+			tts = new TextToSpeech(this, status -> {
+				ttsReady = status == TextToSpeech.SUCCESS;
+				if (ttsReady) tts.setLanguage(Locale.US);
+			});
+		} catch (Exception err) { /* voice replies are optional */ }
 	}
 
 	@Override
@@ -181,7 +205,19 @@ public class EyeService extends Service {
 				.setPriority(NotificationCompat.PRIORITY_MIN)
 				.setOngoing(true)
 				.build();
-		try { startForeground(7421, note); } catch (Exception err) { /* notification blocked */ }
+		try {
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+				int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+					type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+				}
+				startForeground(7421, note, type);
+			} else {
+				startForeground(7421, note);
+			}
+		} catch (Exception err) {
+			try { startForeground(7421, note); } catch (Exception again) { /* notification blocked */ }
+		}
 	}
 
 	private void createChannels() {
@@ -244,6 +280,7 @@ public class EyeService extends Service {
 		controls = new LinearLayout(this);
 		controls.setOrientation(LinearLayout.HORIZONTAL);
 		controls.setVisibility(View.GONE);
+		controls.addView(controlButton("MIC", v -> toggleMic()));
 		controls.addView(controlButton("PIN", v -> setPinned(!pinned)));
 		controls.addView(controlButton("X", v -> {
 			teardown();
@@ -251,9 +288,26 @@ public class EyeService extends Service {
 		}));
 		column.addView(controls);
 
+		Bitmap art = loadEye();
+		FrameLayout eyeBox = new FrameLayout(this);
+		LinearLayout.LayoutParams boxParams = new LinearLayout.LayoutParams(eyeSize, WindowManager.LayoutParams.WRAP_CONTENT);
+		// Two faint copies behind the eye: they lag a beat while you drag, which
+		// reads as a trail instead of a sticker glued to the glass.
+		ghostFar = new ImageView(this);
+		ghostFar.setImageBitmap(art);
+		ghostFar.setAlpha(0.07f);
+		FrameLayout.LayoutParams ghostFarParams = new FrameLayout.LayoutParams(eyeSize, WindowManager.LayoutParams.WRAP_CONTENT);
+		eyeBox.addView(ghostFar, ghostFarParams);
+		ghostNear = new ImageView(this);
+		ghostNear.setImageBitmap(art);
+		ghostNear.setAlpha(0.14f);
+		FrameLayout.LayoutParams ghostNearParams = new FrameLayout.LayoutParams(eyeSize, WindowManager.LayoutParams.WRAP_CONTENT);
+		eyeBox.addView(ghostNear, ghostNearParams);
 		eye = new ImageView(this);
-		eye.setImageBitmap(loadEye());
-		column.addView(eye, new LinearLayout.LayoutParams(eyeSize, WindowManager.LayoutParams.WRAP_CONTENT));
+		eye.setImageBitmap(art);
+		FrameLayout.LayoutParams eyeParams = new FrameLayout.LayoutParams(eyeSize, WindowManager.LayoutParams.WRAP_CONTENT);
+		eyeBox.addView(eye, eyeParams);
+		column.addView(eyeBox, boxParams);
 
 		bubble = new TextView(this);
 		bubble.setTextColor(Color.parseColor("#EAF6FF"));
@@ -298,15 +352,41 @@ public class EyeService extends Service {
 		handler.removeCallbacks(floater);
 		floater = () -> {
 			if (root == null || pinned) return;
-			eye.animate().translationYBy(dp(4)).setDuration(1700).setStartDelay(200).withEndAction(new Runnable() {
+			float tilt = (float) (Math.random() * 6 - 3);
+			eye.animate().translationY(dp(4)).rotation(tilt).setDuration(1700).setStartDelay(200).withEndAction(new Runnable() {
 				@Override public void run() {
-					eye.animate().translationYBy(-dp(4)).setDuration(1700).withEndAction(new Runnable() {
+					eye.animate().translationY(0).rotation(-tilt).setDuration(1700).withEndAction(new Runnable() {
 						@Override public void run() { idleFloat(); }
 					}).start();
 				}
 			}).start();
 		};
 		handler.postDelayed(floater, 1200);
+	}
+
+	// Drag inertia: the eye leans against the motion and settles back, leaving
+	// its ghost copies behind for a beat.
+	private void smear(float dx, float dy) {
+		if (eye == null || pinned) return;
+		float ox = Math.max(-18f, Math.min(18f, -dx * 0.5f));
+		float oy = Math.max(-14f, Math.min(14f, -dy * 0.5f));
+		eye.animate().cancel();
+		eye.setTranslationX(ox);
+		eye.setTranslationY(oy);
+		eye.animate().translationX(0).translationY(0).setDuration(150).start();
+		if (ghostNear != null) {
+			ghostNear.setTranslationX(ox * 1.7f);
+			ghostNear.setTranslationY(oy * 1.7f);
+			ghostNear.animate().translationX(0).translationY(0).setDuration(240).start();
+		}
+		if (ghostFar != null) {
+			ghostFar.setTranslationX(ox * 2.4f);
+			ghostFar.setTranslationY(oy * 2.4f);
+			ghostFar.animate().translationX(0).translationY(0).setDuration(330).start();
+		}
+		// Cancelling the idle animation kills its chained end-action, so restart it.
+		handler.removeCallbacks(floater);
+		handler.postDelayed(floater, 380);
 	}
 
 	private TextView controlButton(String label, View.OnClickListener onClick) {
@@ -372,6 +452,188 @@ public class EyeService extends Service {
 		Bitmap cropped = Bitmap.createBitmap(out, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
 		out.recycle();
 		return cropped;
+	}
+
+	// ── voice orders ──────────────────────────────────────────────────────
+	private void toggleMic() {
+		if (recording) { stopMic(); return; }
+		if (thinking) return;
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+				&& checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+			showLine("Open Capri and allow the mic first.");
+			return;
+		}
+		if (base.isEmpty()) { showLine("Capri's link is down. Open the app once."); return; }
+		try {
+			takeFile = new File(getCacheDir(), "capri-eye-" + System.currentTimeMillis() + ".m4a");
+			recorder = new MediaRecorder();
+			recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
+			recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
+			recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
+			recorder.setAudioSamplingRate(44100);
+			recorder.setAudioEncodingBitRate(64000);
+			recorder.setOutputFile(takeFile.getAbsolutePath());
+			recorder.prepare();
+			recorder.start();
+			recording = true;
+			controls.setVisibility(View.VISIBLE);
+			showLine("Listening. Tap MIC when you're done.");
+			handler.removeCallbacks(autoStopMic);
+			handler.postDelayed(autoStopMic, 12_000);
+		} catch (Exception err) {
+			recording = false;
+			releaseRecorder();
+			showLine("The mic would not open.");
+		}
+	}
+
+	private final Runnable autoStopMic = () -> { if (recording) stopMic(); };
+
+	private void stopMic() {
+		if (!recording) return;
+		recording = false;
+		handler.removeCallbacks(autoStopMic);
+		try { recorder.stop(); } catch (Exception err) { /* stopped too early */ }
+		releaseRecorder();
+		handleTake();
+	}
+
+	private void releaseRecorder() {
+		if (recorder != null) {
+			try { recorder.reset(); } catch (Exception err) { /* nothing recording */ }
+			try { recorder.release(); } catch (Exception err) { /* already gone */ }
+			recorder = null;
+		}
+	}
+
+	private void handleTake() {
+		final File file = takeFile;
+		takeFile = null;
+		if (file == null || !file.exists() || file.length() < 2000) {
+			showLine("The mic picked up nothing. Try again and talk right away.");
+			return;
+		}
+		thinking = true;
+		showLine("Reading that back…");
+		new Thread(() -> {
+			String text = transcribe(file);
+			try { file.delete(); } catch (Exception err) { /* cache cleans itself */ }
+			thinking = false;
+			if (text == null || text.isEmpty()) {
+				handler.post(() -> showLine("I caught noise, not words."));
+				return;
+			}
+			final String heard = stripWake(text);
+			if (heard.isEmpty()) {
+				handler.post(() -> showLine("Say that again, choom."));
+				return;
+			}
+			handler.post(() -> showLine(heard));
+			answer(heard);
+		}).start();
+	}
+
+	private String transcribe(File file) {
+		HttpURLConnection conn = null;
+		try {
+			byte[] bytes = new byte[(int) file.length()];
+			FileInputStream in = new FileInputStream(file);
+			int read = in.read(bytes);
+			in.close();
+			if (read <= 0) return "";
+			URL url = new URL(base + "/api/stt");
+			conn = (HttpURLConnection) url.openConnection();
+			conn.setRequestMethod("POST");
+			conn.setConnectTimeout(8000);
+			conn.setReadTimeout(20000);
+			conn.setDoOutput(true);
+			conn.setRequestProperty("Content-Type", "audio/mp4");
+			if (!token.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + token);
+			if (!session.isEmpty()) conn.setRequestProperty("X-Capri-Profile", session);
+			OutputStream out = conn.getOutputStream();
+			out.write(bytes);
+			out.close();
+			if (conn.getResponseCode() != 200) return "";
+			BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+			StringBuilder sb = new StringBuilder();
+			String row;
+			while ((row = reader.readLine()) != null) sb.append(row);
+			reader.close();
+			return new JSONObject(sb.toString()).optString("text", "").trim();
+		} catch (Exception err) {
+			return "";
+		} finally {
+			if (conn != null) conn.disconnect();
+		}
+	}
+
+	// "Capri, set a timer" typed into the eye works the same as in the app.
+	private String stripWake(String raw) {
+		String clean = raw == null ? "" : raw.trim();
+		String lower = clean.toLowerCase(Locale.US);
+		int at = lower.indexOf("capri");
+		if (at < 0) at = lower.indexOf("capri,");
+		if (at >= 0) clean = clean.substring(at + 5).replaceAll("^[\\s,.:;!?\\-]+", "").trim();
+		return clean;
+	}
+
+	private void answer(String order) {
+		HttpURLConnection conn = null;
+		try {
+			URL url = new URL(base + "/api/chat?device=mobile");
+			conn = (HttpURLConnection) url.openConnection();
+			conn.setRequestMethod("POST");
+			conn.setConnectTimeout(8000);
+			conn.setReadTimeout(60000);
+			conn.setDoOutput(true);
+			conn.setRequestProperty("Content-Type", "application/json");
+			conn.setRequestProperty("Accept", "text/event-stream");
+			if (!token.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + token);
+			if (!session.isEmpty()) conn.setRequestProperty("X-Capri-Profile", session);
+			String payload = "{\"messages\":[{\"role\":\"user\",\"content\":" + JSONObject.quote(order)
+					+ "}],\"activity\":{\"tabFocused\":false,\"banter\":true}}";
+			OutputStream out = conn.getOutputStream();
+			out.write(payload.getBytes(StandardCharsets.UTF_8));
+			out.close();
+			if (conn.getResponseCode() != 200) {
+				handler.post(() -> showLine("Capri's relay refused that. Try again in a moment."));
+				return;
+			}
+			BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+			StringBuilder reply = new StringBuilder();
+			String row;
+			while ((row = reader.readLine()) != null) {
+				if (!row.startsWith("data:")) continue;
+				String raw = row.substring(5).trim();
+				if (raw.isEmpty()) continue;
+				JSONObject evt;
+				try { evt = new JSONObject(raw); } catch (Exception err) { continue; }
+				String type = evt.optString("type");
+				if ("delta".equals(type)) {
+					reply.append(evt.optString("text"));
+				} else if ("device_call".equals(type) && "set_reminder".equals(evt.optString("name"))) {
+					JSONObject args = evt.optJSONObject("args");
+					if (args != null) {
+						int seconds = args.optInt("seconds", 60);
+						String message = args.optString("message", "Time is up.");
+						Alerts.schedule(this, seconds, message);
+						handler.post(() -> showLine("Timer set: " + message));
+					}
+				}
+			}
+			reader.close();
+			final String text = reply.toString().replaceAll("\\s+", " ").trim();
+			if (text.isEmpty()) return;
+			handler.post(() -> {
+				showLine(text);
+				notifyAlert("Capri", text);
+				if (tts != null && ttsReady) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "capri-eye");
+			});
+		} catch (Exception err) {
+			handler.post(() -> showLine("No link to Capri right now."));
+		} finally {
+			if (conn != null) conn.disconnect();
+		}
 	}
 
 	private void showLine(String text) {
@@ -528,18 +790,30 @@ public class EyeService extends Service {
 		handler.removeCallbacks(watcher);
 		handler.removeCallbacks(floater);
 		handler.removeCallbacks(hideBubble);
+		handler.removeCallbacks(autoStopMic);
+		if (recording) {
+			recording = false;
+			try { recorder.stop(); } catch (Exception err) { /* stopped early */ }
+			releaseRecorder();
+		}
 		if (root != null) {
 			try { windowManager.removeView(root); } catch (Exception err) { /* already gone */ }
 			root = null;
 		}
 		bubble = null;
 		eye = null;
+		ghostNear = null;
+		ghostFar = null;
 		controls = null;
 	}
 
 	@Override
 	public void onDestroy() {
 		teardown();
+		if (tts != null) {
+			try { tts.shutdown(); } catch (Exception err) { /* already closed */ }
+			tts = null;
+		}
 		super.onDestroy();
 	}
 
@@ -553,6 +827,8 @@ public class EyeService extends Service {
 		private int startY;
 		private float touchX;
 		private float touchY;
+		private float lastDx;
+		private float lastDy;
 		private long downAt;
 
 		@Override
@@ -563,6 +839,8 @@ public class EyeService extends Service {
 					startY = params.y;
 					touchX = event.getRawX();
 					touchY = event.getRawY();
+					lastDx = 0;
+					lastDy = 0;
 					downAt = System.currentTimeMillis();
 					return false;
 				case MotionEvent.ACTION_MOVE:
@@ -572,6 +850,9 @@ public class EyeService extends Service {
 						params.x = startX + dx;
 						params.y = startY + dy;
 						try { windowManager.updateViewLayout(root, params); } catch (Exception err) { /* view gone */ }
+						smear(event.getRawX() - touchX - lastDx, event.getRawY() - touchY - lastDy);
+						lastDx = event.getRawX() - touchX;
+						lastDy = event.getRawY() - touchY;
 						return true;
 					}
 					return false;
