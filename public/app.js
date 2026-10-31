@@ -2316,49 +2316,96 @@ async function sayLocally(text, userText) {
 
 // True when the turn belonged to the lock and nothing else has to answer it.
 async function handleNoNut(userText) {
-  if (typeof window.capriNative?.noNut !== "function") {
-    if (NNN_PHRASE.test(String(userText || ""))) {
-      await sayLocally("That lock is PC work. Ask me from the Windows app and I will seal it there.", userText);
-      return true;
-    }
-    return false;
-  }
   const text = String(userText || "").trim();
   if (!text) return false;
   const code = text.match(BARE_CODE)?.[1] || "";
   const phrase = NNN_PHRASE.test(text);
   if (!phrase && !code) return false;
 
-  const status = await nativeNoNut("status");
-  if (!status || typeof status.active !== "boolean") return false;
-  // A number on its own is only the code while she holds the lock and has
-  // asked for it; anywhere else it stays an ordinary sentence.
-  if (code && !(status.active && status.awaitingCode)) return false;
-
-  if (code) {
-    const result = await nativeNoNut("code", code);
-    await sayLocally(result?.message || "That did not work. Still locked.", userText);
+  // Arming the shared switch takes the code, so nobody who merely knows the
+  // phrase can seal every machine on the account list.
+  if (code && nnnAwaitingArmCode) {
+    nnnAwaitingArmCode = false;
+    const out = await nnnServerOrder("arm", code);
+    if (!out) {
+      const local = await nativeNoNut("activate");
+      await sayLocally(
+        `No server to tell, so this machine alone is sealed: ${local?.message || "locked until December 1st."}`,
+        userText,
+      );
+      return true;
+    }
+    if (!out.ok) {
+      await sayLocally(out.message || "Wrong code. Nothing changes.", userText);
+      return true;
+    }
+    nnnGlobal = out;
+    await nativeNoNut("arm");
+    await sayLocally(
+      out.message || `Armed on every device until ${out.until || "December 1st"}.`,
+      userText,
+    );
     return true;
   }
+  if (code && !phrase) return false;
+
+  const status = nnnHasShell() ? await nativeNoNut("status") : null;
+  const state = nnnGlobal.armed ? nnnGlobal : ((await nnnSync()) || nnnGlobal);
+  const lockedHere = Boolean(status?.active);
+
+  if (code) {
+    // The number only means the code while she has asked for it.
+    if (!state.armed && !(status && status.awaitingCode)) return false;
+    const out = await nnnServerOrder("release", code);
+    if (out && out.ok) {
+      nnnGlobal = out;
+      await nativeNoNut("release", "", "released by the code you said");
+      await sayLocally(out.message || "Code checked out. Every device is open again.", userText);
+      return true;
+    }
+    if (out && out.status === 403) {
+      await sayLocally(out.message || "Wrong code. Nothing changes.", userText);
+      return true;
+    }
+    const local = await nativeNoNut("code", code);
+    await sayLocally(local?.message || "That did not work. Still locked.", userText);
+    return true;
+  }
+
   if (NNN_CANCEL.test(text)) {
-    if (!status.active) {
+    if (!state.armed && !lockedHere) {
       await sayLocally("There is nothing to cancel. The lock is not on.", userText);
       return true;
     }
-    const result = await nativeNoNut("cancel");
-    await sayLocally(result?.message || "Then give me the cancellation code.", userText);
+    if (lockedHere && !status.awaitingCode) {
+      const result = await nativeNoNut("cancel");
+      await sayLocally(result?.message || "Then give me the cancellation code.", userText);
+      return true;
+    }
+    nnnAwaitingArmCode = false;
+    await sayLocally("That opens every device, so say the code.", userText);
     return true;
   }
+
   if (NNN_STATUS.test(text)) {
-    await sayLocally(status.message, userText);
+    const line = state.armed
+      ? state.message
+      : (status?.message || (lockedHere ? "Locked on this machine." : "The lock is off."));
+    await sayLocally(line, userText);
     return true;
   }
-  if (status.active) {
-    await sayLocally(status.message || "Already armed, and it stays armed.", userText);
+
+  if (state.armed || lockedHere) {
+    const until = state.armed ? state.message : (status?.message || "Already armed, and it stays armed.");
+    await sayLocally(until, userText);
     return true;
   }
-  const result = await nativeNoNut("activate");
-  await sayLocally(result?.message || "Armed. Anything like that gets closed.", userText);
+
+  nnnAwaitingArmCode = true;
+  await sayLocally(
+    "That seals every device you use - PC and phone - until December 1st. Say the code and I arm it.",
+    userText,
+  );
   return true;
 }
 
