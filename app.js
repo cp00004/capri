@@ -2362,7 +2362,9 @@ function paintNnn() {
   const serverArmed = Boolean(nnnGlobal.armed) && now < Number(nnnGlobal.releaseAt || 0);
   const localActive = Boolean(nnnLocal?.active);
   const active = localActive || serverArmed || (cal === "active" && !nnnHasShell());
-  const mode = active ? "active" : cal;
+  // An arm made before November 1st is stored, not enforced: the dashboard
+  // shows the countdown to the start, not a live lock.
+  const mode = active ? (String(nnnLocal?.mode || "") === "before" ? "before" : "active") : cal;
   const blocked = Number(nnnLocal?.blocked ?? nnnGlobal.blocked ?? 0);
   const sites = Boolean(nnnLocal?.sites);
 
@@ -2371,7 +2373,7 @@ function paintNnn() {
       ? "NNN MODE ACTIVE"
       : mode === "after"
         ? "NNN MODE COMPLETED"
-        : "NNN MODE ARMS NOVEMBER 1";
+        : active ? "NNN MODE ARMED" : "NNN MODE ARMS NOVEMBER 1";
   }
   if (nnnTimerEl) {
     const left = mode === "active"
@@ -2399,8 +2401,7 @@ function paintNnn() {
   if (nnnStateEl) {
     nnnStateEl.textContent = mode === "active" ? "LOCKED" : mode === "after" ? "done" : active ? "armed" : "off";
     nnnStateEl.classList.toggle("bad", mode === "active");
-  }
-  // Before the season: the setup button. During: nothing but the disclosed
+  }  // Before the season: the setup button. During: nothing but the disclosed
   // recovery code. After: nothing at all, settings are normal again.
   nnnArmRow?.classList.toggle("hidden", mode !== "before" || active);
   nnnRecoveryRow?.classList.toggle("hidden", mode !== "active");
