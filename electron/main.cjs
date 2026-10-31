@@ -1111,6 +1111,32 @@ function foregroundApp() {
   });
 }
 
+// The visible text of a chat window: the last few lines actually on screen.
+// Chat apps put messages in UI Automation text elements, so this is the same
+// text the person is reading - no screenshots, no OCR, no message store.
+function chatText() {
+  return new Promise((resolve) => {
+    const ps = [
+      `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes`,
+      `Add-Type -Namespace CapriChat -Name Api -MemberDefinition '[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();'`,
+      `$h = [CapriChat.Api]::GetForegroundWindow()`,
+      `if (-not $h) { exit 0 }`,
+      `$root = [System.Windows.Automation.AutomationElement]::FromHandle($h)`,
+      `if (-not $root) { exit 0 }`,
+      `$cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Text)`,
+      `$items = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)`,
+      `$out = New-Object System.Collections.ArrayList`,
+      `foreach ($t in $items) { $n = $t.Current.Name; if ($n -and $n.Trim().Length -gt 0 -and $n.Length -lt 280) { [void]$out.Add($n.Trim()) } }`,
+      `if ($out.Count -gt 16) { $out = $out.GetRange($out.Count - 16, 16) }`,
+      `$out -join [char]10`,
+    ].join("; ");
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
+      if (err) return resolve("");
+      resolve(String(stdout || "").replace(/\r/g, "").trim().slice(0, 700));
+    });
+  });
+}
+
 async function eyeComment(ctx) {
   const target = `${APP_URL}/api/banter`;
   try {
@@ -1127,6 +1153,7 @@ async function eyeComment(ctx) {
         title: ctx.title,
         kind: ctx.kind,
         known: ctx.known,
+        snippet: ctx.snippet || "",
       }),
     });
     if (!res.ok) return;
@@ -1153,13 +1180,26 @@ async function watchScreen() {
     const key = `${ctx.label}|${ctx.title}`.slice(0, 180);
     const now = Date.now();
     if (key !== eyeTrack.key) {
-      eyeTrack = { key, since: now, said: "" };
+      eyeTrack = { key, since: now, said: "", snippet: "" };
       return;
     }
     const dwell = now - eyeTrack.since;
-    if (dwell < 22_000) return;
-    if (eyeTrack.said === key) return;
+    if (dwell < (ctx.kind === "chat" ? 12_000 : 22_000)) return;
+    if (eyeTrack.said === key && ctx.kind !== "chat") return;
     if (now - eyeLastSay < 70_000) return;
+    if (ctx.kind === "chat") {
+      // The conversation on screen, not just the app name. She waits until the
+      // messages settle, and only speaks again when the lines change.
+      const raw = await chatText();
+      const junk = /^(send|type a message|message|search|attach|emoji|gif|sticker|voice|call|video call|info|members|pinned|add reaction|reply|forward|copy|delete|edit|more|today|yesterday|online|offline|active now|new message)$/i;
+      const lines = raw.split("\n").map((line) => line.trim()).filter((line) => line.length > 1 && !junk.test(line));
+      if (lines.length) {
+        ctx.snippet = lines.slice(-14).join("\n").slice(0, 700);
+        const last = lines.slice(-3).join(" ");
+        if (last && last === eyeTrack.snippet) { eyeTrack.said = key; return; }
+        eyeTrack.snippet = last;
+      }
+    }
     eyeTrack.said = key;
     await eyeComment(ctx);
   } finally {

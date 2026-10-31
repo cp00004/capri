@@ -909,6 +909,7 @@ public class EyeService extends Service {
 		String label = "";
 		String site = "";
 		String title = "";
+		String snippet = "";
 		String kind = "app";
 		boolean known = true;
 
@@ -921,6 +922,7 @@ public class EyeService extends Service {
 				out.put("label", label);
 				out.put("site", site);
 				out.put("title", title);
+				out.put("snippet", snippet);
 				out.put("kind", kind);
 				out.put("known", known);
 			} catch (Exception err) { /* plain fields */ }
@@ -956,6 +958,8 @@ public class EyeService extends Service {
 			if (s.site.isEmpty()) s.site = siteInside(media[0] + " " + (note == null ? "" : note[0] + " " + note[1]));
 		} else if (note != null) {
 			s.title = note[1].isEmpty() ? note[0] : note[0] + ": " + note[1];
+			// The notification is the message: that is what she comments on.
+			s.snippet = s.title;
 		} else {
 			s.title = activityHint(pkg);
 		}
