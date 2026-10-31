@@ -290,6 +290,7 @@ function saveDevices() {
 
 const PAIR_CODE = process.env.CAPRI_PAIR_CODE || String(crypto.randomInt(100000, 999999));
 const pairFailures = new Map(); // ip -> { count, until }
+const sttHits = new Map(); // ip -> [timestamps]
 const pendingAccess = new Map(); // id -> request
 let pcLocked = process.env.CAPRI_PC === "off";
 const WINDOWS_LOCAL = process.platform === "win32";
@@ -1996,6 +1997,22 @@ async function handleStt(req, res) {
 
   const buffer = Buffer.concat(chunks);
   if (!buffer.length) return json(res, 400, { error: "empty_audio" });
+
+  // A busy room must not turn the always-on ear into a transcription storm
+  // that burns the shared key and starves every other device.
+  const ip = req.socket.remoteAddress || "?";
+  const now = Date.now();
+  const hits = (sttHits.get(ip) || []).filter((at) => now - at < 60_000);
+  if (hits.length >= 18) {
+    return json(res, 429, { error: "rate_limited", message: "Too many voice clips from this device. Wait a moment." });
+  }
+  hits.push(now);
+  sttHits.set(ip, hits);
+  if (sttHits.size > 400) {
+    for (const [key, list] of sttHits) {
+      if (!list.some((at) => now - at < 60_000)) sttHits.delete(key);
+    }
+  }
 
   // A short hint keeps Whisper spelling the assistant's name the same way the
   // wake matcher expects ("Copy" instead of "Capri" broke hands-free use).

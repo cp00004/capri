@@ -1386,7 +1386,8 @@ function setWakeWordEnabled(enabled) {
 
 const WAKE_WORDS = new Set([
   "capri", "capry", "capree", "caprie", "caprii", "kapri", "kapry", "kabri", "cabri",
-  "caprice", "cappy", "cappi", "capra", "caprio", "capris",
+  "caprice", "cappy", "cappi", "capra", "caprio", "capris", "capre", "caprey",
+  "cappree", "kappri", "kappry", "kopri", "copri", "copree", "cabree",
 ]);
 
 function editDistance(a, b) {
@@ -1729,7 +1730,10 @@ async function checkWakeClip(blob) {
   try {
     const res = await api("/api/stt", {
       method: "POST",
-      headers: { "Content-Type": blob.type || "audio/webm" },
+      headers: {
+        "Content-Type": blob.type || "audio/webm",
+        "X-Capri-Prompt": "Capri is the assistant's name. The user says Capri.",
+      },
       body: blob,
     });
     const data = await res.json().catch(() => ({}));

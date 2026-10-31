@@ -422,7 +422,8 @@ final class CapriVoice {
 
 	private static final java.util.Set<String> WAKE = new java.util.HashSet<>(java.util.Arrays.asList(
 			"capri", "capry", "capree", "caprie", "caprii", "kapri", "kapry", "kabri", "cabri",
-			"caprice", "cappy", "cappi", "capra", "caprio", "capris"));
+			"caprice", "cappy", "cappi", "capra", "caprio", "capris", "capre", "caprey",
+			"cappree", "kappri", "kappry", "kopri", "copri", "copree", "cabree", "caprie's"));
 
 	private static final java.util.Set<String> COPY = new java.util.HashSet<>(java.util.Arrays.asList(
 			"copy", "copi", "kopy", "copy's"));
