@@ -1225,12 +1225,14 @@ async function nnnPullList(force = false) {
 // counts. Roots are indexed once per list, then a title is only as expensive as
 // the number of words in it.
 let nnnRoots = new Set();
+let nnnDomainSet = new Set();
 let nnnRootsFor = null;
 
 function nnnIndexRoots() {
   if (nnnRootsFor === nnnExtraDomains) return;
   nnnRootsFor = nnnExtraDomains;
   nnnRoots = new Set();
+  nnnDomainSet = new Set(nnnExtraDomains);
   for (const host of nnnExtraDomains) {
     const labels = host.split(".").filter(Boolean);
     const root = labels.length > 1 ? labels[labels.length - 2] : labels[0];
@@ -1238,12 +1240,21 @@ function nnnIndexRoots() {
   }
 }
 
+// Only tokens that read like a host count - "pornhub.com" in a tab title, not
+// the bare word "check", which a porn domain happens to own. Without that rule
+// an innocent title gets a browser killed every two seconds.
 function nnnDomainHit(text) {
-  const clean = String(text || "").toLowerCase().replace(/[^a-z0-9.]+/g, " ").trim();
+  const clean = String(text || "").toLowerCase();
   if (!clean) return "";
   nnnIndexRoots();
-  for (const word of clean.split(" ")) {
-    if (word.length > 3 && nnnRoots.has(word)) return word;
+  for (const raw of clean.split(/[^a-z0-9.-]+/)) {
+    const token = raw.replace(/^[.\-]+|[.\-]+$/g, "");
+    if (!token.includes(".") || token.length < 5) continue;
+    const labels = token.split(".").filter(Boolean);
+    if (labels.length < 2) continue;
+    const root = labels[labels.length - 2];
+    if (nnnDomainSet.has(token)) return token;
+    if (root && root.length > 3 && nnnRoots.has(root)) return token;
   }
   return "";
 }
@@ -1357,7 +1368,9 @@ function nnnVeilShow(holdMs = NNN_VEIL_MS) {
         nnnVeils[index] = win;
       }
       win.setBounds(display.bounds);
-      if (!win.webContents.getURL().startsWith("data:")) win.loadURL(nnnVeilPage(seconds));
+      // Always a fresh page: a stale one would still be counting down the
+      // seconds of the last hit, not this one.
+      win.loadURL(nnnVeilPage(seconds));
       win.show();
       win.focus();
       win.moveTop();
