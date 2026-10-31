@@ -102,7 +102,7 @@ const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.2.6";
+const APP_VERSION = "4.2.7";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -878,6 +878,9 @@ function eyeConfig() {
     base: state.apiBase || (LOCAL_HOST ? location.origin : ''),
     token: state.token || '',
     session: state.session || '',
+    // The eye's comments are written by the model, and the shell has no key of
+    // its own. Hand it the one saved in Settings.
+    key: localStorage.getItem(OWN_KEY) || '',
   };
 }
 
@@ -2534,6 +2537,7 @@ el.userKeySave.addEventListener("click", () => {
     localStorage.removeItem(OWN_KEY);
     el.userKeyInput.value = "";
     syncUserKeyHint();
+    pushEyeSpy();
     showNotice("Own key removed. Capri is back on the server key.", null, null, 4000);
     return;
   }
@@ -2544,6 +2548,8 @@ el.userKeySave.addEventListener("click", () => {
   }
   localStorage.setItem(OWN_KEY, typed);
   syncUserKeyHint();
+  // The eye comments through the same key, so it learns the new one right away.
+  pushEyeSpy();
   showNotice("Key saved. Your questions now spend your own quota first.", null, null, 5000);
 });
 

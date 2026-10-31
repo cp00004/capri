@@ -91,6 +91,7 @@ public class EyeService extends Service {
 	private String base = "";
 	private String token = "";
 	private String session = "";
+	private String apiKey = "";
 
 	private String lastKey = "";
 	private long lastKeyAt = 0;
@@ -197,6 +198,7 @@ public class EyeService extends Service {
 		base = cfg.optString("base", "").trim();
 		token = cfg.optString("token", "").trim();
 		session = cfg.optString("session", "").trim();
+		apiKey = cfg.optString("key", "").trim();
 
 		startForegroundSafe();
 		if (root == null && Settings.canDrawOverlays(this)) addOverlay();
@@ -270,6 +272,7 @@ public class EyeService extends Service {
 			cfg.put("base", base);
 			cfg.put("token", token);
 			cfg.put("session", session);
+			cfg.put("key", apiKey);
 		} catch (Exception err) { /* plain fields */ }
 		return cfg.toString();
 	}
@@ -759,6 +762,7 @@ public class EyeService extends Service {
 			conn.setRequestProperty("Content-Type", "application/json");
 			if (!token.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + token);
 			if (!session.isEmpty()) conn.setRequestProperty("X-Capri-Profile", session);
+			if (!apiKey.isEmpty()) conn.setRequestProperty("x-capri-key", apiKey);
 			String body = "{\"app\":" + JSONObject.quote(appName) + ",\"title\":\"\"}";
 			OutputStream out = conn.getOutputStream();
 			out.write(body.getBytes(StandardCharsets.UTF_8));

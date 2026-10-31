@@ -764,7 +764,7 @@ let eyeWin = null;
 let eyeEnabled = true;
 let eyeBanter = true;
 let eyeDismissed = false;
-const eyeApi = { base: "", token: "", session: "" };
+const eyeApi = { base: "", token: "", session: "", key: "" };
 let eyeCursorTimer = null;
 let eyeWatchTimer = null;
 let eyeTrack = { key: "", since: 0, said: "" };
@@ -982,8 +982,10 @@ function readContext(rawName, rawTitle) {
   else if (BROWSER_APPS.has(app)) kind = site ? "web" : "browser";
   return {
     app,
-    // What she calls it: the site when a browser, the app otherwise.
-    label: BROWSER_APPS.has(app) ? (site || "a browser tab") : app,
+    // What she calls it: the site when a browser, the app otherwise. An
+    // unknown site falls back to the page title so she has something to name
+    // instead of saying "a browser tab" forever.
+    label: BROWSER_APPS.has(app) ? (site || title || "a browser tab") : app,
     site,
     title,
     kind,
@@ -1019,7 +1021,10 @@ async function eyeComment(ctx) {
   try {
     const res = await fetch(target, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(eyeApi.key ? { "x-capri-key": eyeApi.key } : {}),
+      },
       body: JSON.stringify({
         app: ctx.app,
         label: ctx.label,
@@ -1104,6 +1109,7 @@ ipcMain.on("capri-eye-config", (_event, cfg) => {
   if (typeof cfg?.base === "string") eyeApi.base = cfg.base.replace(/\/+$/, "");
   if (typeof cfg?.token === "string") eyeApi.token = cfg.token;
   if (typeof cfg?.session === "string") eyeApi.session = cfg.session;
+  if (typeof cfg?.key === "string") eyeApi.key = cfg.key;
   writeEyeState({ enabled: eyeEnabled, banter: eyeBanter });
   if (!eyeEnabled) hideEye();
   else if (eyeWin && !eyeWin.isDestroyed()) sendEyeConfig();
