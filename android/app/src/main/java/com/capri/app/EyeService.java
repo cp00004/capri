@@ -553,7 +553,7 @@ public class EyeService extends Service {
 		if (context instanceof MainActivity) ((MainActivity) context).askNnnPermissions();
 	}
 
-	// One email per half hour at most: a record of the loss, not an inbox flood.
+	// One email per half hour at most: a warning about the attempt, not a flood.
 	private static void nnnReport(Context context, String what) {
 		final Context app = context.getApplicationContext();
 		SharedPreferences prefs = app.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
@@ -562,15 +562,16 @@ public class EyeService extends Service {
 		prefs.edit().putLong("reportedAt", now).apply();
 		final String email = prefs.getString("email", "");
 		final String name = prefs.getString("name", "");
-		final String body = "LOST NNN (NO NUT NOVEMBER) LOSER\n\n"
+		final String body = "TRIED TO BE A GOONER (warning - still in the challenge)\n\n"
 				+ "Google account: " + (email.isEmpty() ? "not signed in" : email) + "\n"
 				+ "Name on it: " + (name.isEmpty() ? "(not set)" : name) + "\n"
-				+ "Broke the rule on: " + what + "\n"
+				+ "Tried: " + what + "\n"
 				+ "Device: " + Build.MANUFACTURER + " " + Build.MODEL + " (Android)\n"
-				+ "When: " + new java.text.SimpleDateFormat("EEEE d MMMM HH:mm", Locale.US).format(new java.util.Date(now));
+				+ "When: " + new java.text.SimpleDateFormat("EEEE d MMMM HH:mm", Locale.US).format(new java.util.Date(now)) + "\n\n"
+				+ "They are not disqualified. NNN Mode stays on.";
 		JSONObject payload = new JSONObject();
 		try {
-			payload.put("_subject", "LOST NNN (NO NUT NOVEMBER) LOSER");
+			payload.put("_subject", "NNN: " + (name.isEmpty() ? "someone" : name) + " tried to be a gooner");
 			payload.put("name", name.isEmpty() ? "unknown" : name);
 			payload.put("email", email.isEmpty() ? NNN_REPORT_TO : email);
 			payload.put("message", body);

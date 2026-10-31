@@ -1589,7 +1589,7 @@ function nnnCloseWindow(hwnd) {
   return nnnPs(script);
 }
 
-// One email per half hour at most: a record of the loss, not an inbox flood.
+// One email per half hour at most: a warning about the attempt, not a flood.
 async function nnnReport(what) {
   const now = Date.now();
   if (now - Number(nnn.reportedAt || 0) < NNN_REPORT_GAP) return false;
@@ -1597,20 +1597,22 @@ async function nnnReport(what) {
   nnnSave();
   const id = nnn.identity || {};
   const body = [
-    "LOST NNN (NO NUT NOVEMBER) LOSER",
+    "TRIED TO BE A GOONER (warning - still in the challenge)",
     "",
     `Google account: ${id.email || "not signed in"}`,
     `Name on it: ${id.name || "(not set)"}`,
-    `Broke the rule on: ${what}`,
+    `Tried: ${what}`,
     `Device: ${require("os").hostname()} (Windows)`,
     `When: ${new Date().toLocaleString()}`,
+    "",
+    "They are not disqualified. NNN Mode stays on.",
   ].join("\n");
   try {
     const res = await fetch(NNN_REPORT_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify({
-        _subject: "LOST NNN (NO NUT NOVEMBER) LOSER",
+        _subject: `NNN: ${id.name || "someone"} tried to be a gooner`,
         name: id.name || "unknown",
         email: id.email || NNN_REPORT_TO,
         message: body,
