@@ -1,6 +1,5 @@
 package com.capri.app;
 
-import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -8,35 +7,22 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.app.usage.UsageEvents;
 import android.app.usage.UsageStatsManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
+import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.ServiceInfo;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.Paint;
-import android.graphics.PixelFormat;
-import android.graphics.Typeface;
-import android.graphics.drawable.GradientDrawable;
-import android.media.MediaRecorder;
+import android.media.MediaMetadata;
+import android.media.session.MediaController;
+import android.media.session.MediaSessionManager;
+import android.media.session.PlaybackState;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.provider.Settings;
-import android.speech.tts.TextToSpeech;
-import android.text.TextUtils;
-import android.util.TypedValue;
-import android.view.Gravity;
-import android.view.MotionEvent;
-import android.view.View;
-import android.view.WindowManager;
-import android.widget.FrameLayout;
-import android.widget.ImageView;
-import android.widget.LinearLayout;
-import android.widget.TextView;
+import android.service.notification.StatusBarNotification;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
@@ -44,49 +30,34 @@ import androidx.core.app.NotificationManagerCompat;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayDeque;
-import java.util.Iterator;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
-// The floating eye: a system overlay that follows you out of the app, drags
-// anywhere, and cuts in with a line once you have been parked in one app.
+// Screen watching on the phone. There is no floating eye here: she reads what
+// you are actually doing - the track, the video, the chat - and answers as a
+// notification.
 public class EyeService extends Service {
 	public static final String ACTION_START = "com.capri.app.EYE_START";
 	public static final String ACTION_STOP = "com.capri.app.EYE_STOP";
 	public static final String ACTION_SHOW = "com.capri.app.EYE_SHOW";
 	public static final String ACTION_HIDE = "com.capri.app.EYE_HIDE";
-	public static final String ACTION_SAY = "com.capri.app.EYE_SAY";
 	public static final String EXTRA_CONFIG = "config";
-	public static final String EXTRA_TEXT = "text";
 
 	private static final String CHANNEL_EYE = "capri_eye";
 	private static final String CHANNEL_ALERTS = "capri_alerts";
 	private static final long DWELL_MS = 45_000L;
 	private static final long COOLDOWN_MS = 120_000L;
 
-	private WindowManager windowManager;
-	private FrameLayout root;
-	private ImageView eye;
-	private ImageView ghostNear;
-	private ImageView ghostFar;
-	private TextView bubble;
-	private LinearLayout controls;
-	private WindowManager.LayoutParams params;
-
 	private Handler handler;
 	private Runnable watcher;
-	private Runnable floater;
-	private int eyeSize;
 
-	private boolean pinned = false;
 	private boolean banter = true;
 	private String base = "";
 	private String token = "";
@@ -99,25 +70,49 @@ public class EyeService extends Service {
 	private String saidKey = "";
 	private boolean polling = false;
 
-	private MediaRecorder recorder;
-	private File takeFile;
-	private boolean recording = false;
-	private boolean thinking = false;
-	private TextToSpeech tts;
-	private boolean ttsReady = false;
-
 	private static boolean running = false;
 
-	public static void start(Context context, String config) {
-		Intent intent = new Intent(context, EyeService.class);
-		intent.setAction(ACTION_START);
-		intent.putExtra(EXTRA_CONFIG, config == null ? "{}" : config);
-		try {
-			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent);
-			else context.startService(intent);
-		} catch (Exception err) {
-			// Android 12+ refuses background service starts; the app will try again when it comes back.
-		}
+	// What she calls the app, and what kind of place it is. A browser has no
+	// site yet - that comes from whatever page is playing inside it.
+	private static final Map<String, String[]> SIGHTS = new HashMap<>();
+
+	static {
+		SIGHTS.put("com.google.android.youtube", new String[] { "YouTube", "video" });
+		SIGHTS.put("com.google.android.apps.youtube.music", new String[] { "YouTube Music", "music" });
+		SIGHTS.put("com.zhiliaoapp.musically", new String[] { "TikTok", "video" });
+		SIGHTS.put("com.ss.android.ugc.aweme", new String[] { "TikTok", "video" });
+		SIGHTS.put("com.vimeo.android.videoapp", new String[] { "Vimeo", "video" });
+		SIGHTS.put("com.netflix.mediaclient", new String[] { "Netflix", "video" });
+		SIGHTS.put("com.spotify.music", new String[] { "Spotify", "music" });
+		SIGHTS.put("com.soundcloud.android", new String[] { "SoundCloud", "music" });
+		SIGHTS.put("deezer.android.app", new String[] { "Deezer", "music" });
+		SIGHTS.put("com.apple.android.music", new String[] { "Apple Music", "music" });
+		SIGHTS.put("com.google.android.apps.podcasts", new String[] { "Podcasts", "music" });
+		SIGHTS.put("com.whatsapp", new String[] { "WhatsApp", "chat" });
+		SIGHTS.put("com.whatsapp.w4b", new String[] { "WhatsApp", "chat" });
+		SIGHTS.put("org.telegram.messenger", new String[] { "Telegram", "chat" });
+		SIGHTS.put("org.telegram.messenger.web", new String[] { "Telegram", "chat" });
+		SIGHTS.put("com.discord", new String[] { "Discord", "chat" });
+		SIGHTS.put("com.facebook.orca", new String[] { "Messenger", "chat" });
+		SIGHTS.put("com.facebook.messaging", new String[] { "Messenger", "chat" });
+		SIGHTS.put("com.snapchat.android", new String[] { "Snapchat", "chat" });
+		SIGHTS.put("com.google.android.apps.messaging", new String[] { "Messages", "chat" });
+		SIGHTS.put("com.instagram.android", new String[] { "Instagram", "social" });
+		SIGHTS.put("com.facebook.katana", new String[] { "Facebook", "social" });
+		SIGHTS.put("com.reddit.frontpage", new String[] { "Reddit", "social" });
+		SIGHTS.put("com.twitter.android", new String[] { "X", "social" });
+		SIGHTS.put("com.pinterest", new String[] { "Pinterest", "social" });
+		SIGHTS.put("com.google.android.gm", new String[] { "Gmail", "mail" });
+		SIGHTS.put("com.termux", new String[] { "Termux", "code" });
+		SIGHTS.put("com.android.chrome", new String[] { "", "browser" });
+		SIGHTS.put("com.google.android.apps.chrome", new String[] { "", "browser" });
+		SIGHTS.put("com.microsoft.emmx", new String[] { "", "browser" });
+		SIGHTS.put("org.mozilla.firefox", new String[] { "", "browser" });
+		SIGHTS.put("com.brave.browser", new String[] { "", "browser" });
+		SIGHTS.put("com.duckduckgo.android", new String[] { "", "browser" });
+		SIGHTS.put("com.kiwibrowser.browser", new String[] { "", "browser" });
+		SIGHTS.put("com.opera.browser", new String[] { "", "browser" });
+		SIGHTS.put("com.sec.android.app.sbrowser", new String[] { "", "browser" });
 	}
 
 	public static void stop(Context context) {
@@ -144,53 +139,34 @@ public class EyeService extends Service {
 		try { context.startService(intent); } catch (Exception err) { /* nothing running */ }
 	}
 
-	public static void say(Context context, String text) {
-		Intent intent = new Intent(context, EyeService.class);
-		intent.setAction(ACTION_SAY);
-		intent.putExtra(EXTRA_TEXT, text == null ? "" : text);
-		try { context.startService(intent); } catch (Exception err) { /* nothing floating */ }
-	}
-
 	@Override
 	public void onCreate() {
 		super.onCreate();
 		running = true;
-		windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
 		handler = new Handler(Looper.getMainLooper());
-		eyeSize = dp(140);
 		createChannels();
-		try {
-			tts = new TextToSpeech(this, status -> {
-				ttsReady = status == TextToSpeech.SUCCESS;
-				if (ttsReady) tts.setLanguage(Locale.US);
-			});
-		} catch (Exception err) { /* voice replies are optional */ }
 	}
 
 	@Override
 	public int onStartCommand(Intent intent, int flags, int startId) {
 		String action = intent == null ? null : intent.getAction();
 		if (ACTION_STOP.equals(action)) {
-			teardown();
+			stopWatching();
 			stopSelf();
 			return START_NOT_STICKY;
 		}
 		if (ACTION_HIDE.equals(action)) {
-			// Only the floating view goes away. The service and its foreground
-			// notification stay, so bringing the eye back later is never a
-			// background start Android would refuse.
-			teardown();
-			return START_STICKY;
-		}
-		if (ACTION_SAY.equals(action)) {
-			showLine(intent.getStringExtra(EXTRA_TEXT));
+			// Only the watching pauses. The service and its foreground
+			// notification stay, so resuming later is never a background start
+			// Android would refuse.
+			stopWatching();
 			return START_STICKY;
 		}
 
 		JSONObject cfg = new JSONObject();
 		try { cfg = new JSONObject(intent == null ? "{}" : String.valueOf(intent.getStringExtra(EXTRA_CONFIG))); } catch (Exception err) { /* defaults */ }
 		if (!cfg.optBoolean("enabled", true)) {
-			teardown();
+			stopWatching();
 			stopSelf();
 			return START_NOT_STICKY;
 		}
@@ -201,7 +177,6 @@ public class EyeService extends Service {
 		apiKey = cfg.optString("key", "").trim();
 
 		startForegroundSafe();
-		if (root == null && Settings.canDrawOverlays(this)) addOverlay();
 		startWatching();
 		return START_STICKY;
 	}
@@ -216,26 +191,16 @@ public class EyeService extends Service {
 				.build();
 		try {
 			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-				// Android 14 throws if a declared foreground type lacks its
-				// runtime grant, so ask only for the mic type once the user has
-				// actually allowed the microphone. Then fall back a step at a time.
-				int special = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
-				boolean micGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.M
-						|| checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-				if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && micGranted) {
-					try {
-						startForeground(7421, note, special | ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
-						return;
-					} catch (Exception err) { /* no mic type on this build */ }
-				}
+				// Android 14 throws if a declared foreground type lacks its runtime
+				// grant, so try the declared type then fall back to the plain form.
 				try {
-					startForeground(7421, note, special);
+					startForeground(7421, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
 					return;
 				} catch (Exception err) { /* fall through to the plain form */ }
 			}
 			startForeground(7421, note);
 		} catch (Exception err) {
-			// A hidden notification must not take the whole eye down with it.
+			// A hidden notification must not take the watcher down with it.
 		}
 	}
 
@@ -252,7 +217,7 @@ public class EyeService extends Service {
 
 	@Override
 	public void onTaskRemoved(Intent rootIntent) {
-		// Swiping the task away should leave the eye on screen, not kill it.
+		// Swiping the task away should keep her watching, not kill it.
 		Intent restart = new Intent(this, EyeService.class);
 		restart.setAction(ACTION_START);
 		restart.putExtra(EXTRA_CONFIG, currentConfig());
@@ -277,407 +242,18 @@ public class EyeService extends Service {
 		return cfg.toString();
 	}
 
-	private int dp(int value) {
-		return Math.round(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, getResources().getDisplayMetrics()));
-	}
-
-	private void addOverlay() {
-		root = new FrameLayout(this);
-		int wrap = WindowManager.LayoutParams.WRAP_CONTENT;
-		params = new WindowManager.LayoutParams(
-				wrap, wrap,
-				Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE,
-				WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-				PixelFormat.TRANSLUCENT);
-		params.gravity = Gravity.TOP | Gravity.START;
-		params.x = getResources().getDisplayMetrics().widthPixels - eyeSize - dp(16);
-		params.y = Math.round(getResources().getDisplayMetrics().heightPixels * 0.32f);
-
-		LinearLayout column = new LinearLayout(this);
-		column.setOrientation(LinearLayout.VERTICAL);
-		column.setGravity(Gravity.CENTER_HORIZONTAL);
-
-		controls = new LinearLayout(this);
-		controls.setOrientation(LinearLayout.HORIZONTAL);
-		controls.setVisibility(View.GONE);
-		controls.addView(controlButton("MIC", v -> toggleMic()));
-		controls.addView(controlButton("PIN", v -> setPinned(!pinned)));
-		controls.addView(controlButton("X", v -> {
-			teardown();
-			stopSelf();
-		}));
-		column.addView(controls);
-
-		Bitmap art = loadEye();
-		FrameLayout eyeBox = new FrameLayout(this);
-		LinearLayout.LayoutParams boxParams = new LinearLayout.LayoutParams(eyeSize, WindowManager.LayoutParams.WRAP_CONTENT);
-		// Two faint copies behind the eye: they lag a beat while you drag, which
-		// reads as a trail instead of a sticker glued to the glass.
-		ghostFar = new ImageView(this);
-		ghostFar.setImageBitmap(art);
-		ghostFar.setAlpha(0.07f);
-		FrameLayout.LayoutParams ghostFarParams = new FrameLayout.LayoutParams(eyeSize, WindowManager.LayoutParams.WRAP_CONTENT);
-		eyeBox.addView(ghostFar, ghostFarParams);
-		ghostNear = new ImageView(this);
-		ghostNear.setImageBitmap(art);
-		ghostNear.setAlpha(0.14f);
-		FrameLayout.LayoutParams ghostNearParams = new FrameLayout.LayoutParams(eyeSize, WindowManager.LayoutParams.WRAP_CONTENT);
-		eyeBox.addView(ghostNear, ghostNearParams);
-		eye = new ImageView(this);
-		eye.setImageBitmap(art);
-		FrameLayout.LayoutParams eyeParams = new FrameLayout.LayoutParams(eyeSize, WindowManager.LayoutParams.WRAP_CONTENT);
-		eyeBox.addView(eye, eyeParams);
-		column.addView(eyeBox, boxParams);
-
-		bubble = new TextView(this);
-		bubble.setTextColor(Color.parseColor("#EAF6FF"));
-		bubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-		bubble.setTypeface(Typeface.create("sans-serif-condensed", Typeface.NORMAL));
-		bubble.setLineSpacing(0, .92f);
-		bubble.setMaxWidth(dp(190));
-		bubble.setMaxLines(3);
-		bubble.setEllipsize(TextUtils.TruncateAt.END);
-		bubble.setPadding(dp(7), dp(4), dp(7), dp(5));
-		GradientDrawable card = new GradientDrawable();
-		card.setColor(Color.parseColor("#E607000C"));
-		card.setStroke(dp(1), Color.parseColor("#8C4DFF9D"));
-		card.setCornerRadius(dp(4));
-		bubble.setBackground(card);
-		bubble.setVisibility(View.GONE);
-		bubble.setOnClickListener(v -> openApp());
-		LinearLayout.LayoutParams bubbleParams = new LinearLayout.LayoutParams(
-				WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT);
-		bubbleParams.topMargin = dp(4);
-		column.addView(bubble, bubbleParams);
-
-		root.addView(column);
-		root.setOnTouchListener(new DragListener());
-		root.setClickable(true);
-
-		try {
-			windowManager.addView(root, params);
-		} catch (Exception err) {
-			root = null;
-			stopSelf();
-			return;
-		}
-
-		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-			eye.animate().translationY(-dp(4)).setDuration(1800).setStartDelay(400).withEndAction(new Runnable() {
-				@Override public void run() { idleFloat(); }
-			}).start();
-		}
-	}
-
-	private void idleFloat() {
-		handler.removeCallbacks(floater);
-		floater = () -> {
-			if (root == null || pinned) return;
-			float tilt = (float) (Math.random() * 6 - 3);
-			eye.animate().translationY(dp(4)).rotation(tilt).setDuration(1700).setStartDelay(200).withEndAction(new Runnable() {
-				@Override public void run() {
-					eye.animate().translationY(0).rotation(-tilt).setDuration(1700).withEndAction(new Runnable() {
-						@Override public void run() { idleFloat(); }
-					}).start();
-				}
-			}).start();
-		};
-		handler.postDelayed(floater, 1200);
-	}
-
-	// Drag inertia: the eye leans against the motion and settles back, leaving
-	// its ghost copies behind for a beat.
-	private void smear(float dx, float dy) {
-		if (eye == null || pinned) return;
-		float ox = Math.max(-18f, Math.min(18f, -dx * 0.5f));
-		float oy = Math.max(-14f, Math.min(14f, -dy * 0.5f));
-		eye.animate().cancel();
-		eye.setTranslationX(ox);
-		eye.setTranslationY(oy);
-		eye.animate().translationX(0).translationY(0).setDuration(150).start();
-		if (ghostNear != null) {
-			ghostNear.setTranslationX(ox * 1.7f);
-			ghostNear.setTranslationY(oy * 1.7f);
-			ghostNear.animate().translationX(0).translationY(0).setDuration(240).start();
-		}
-		if (ghostFar != null) {
-			ghostFar.setTranslationX(ox * 2.4f);
-			ghostFar.setTranslationY(oy * 2.4f);
-			ghostFar.animate().translationX(0).translationY(0).setDuration(330).start();
-		}
-		// Cancelling the idle animation kills its chained end-action, so restart it.
-		handler.removeCallbacks(floater);
-		handler.postDelayed(floater, 380);
-	}
-
-	private TextView controlButton(String label, View.OnClickListener onClick) {
-		TextView button = new TextView(this);
-		button.setText(label);
-		button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
-		button.setTextColor(Color.parseColor("#4DFF9D"));
-		button.setPadding(dp(8), dp(3), dp(8), dp(3));
-		button.setOnClickListener(onClick);
-		return button;
-	}
-
-	private void setPinned(boolean value) {
-		pinned = value;
-		eye.animate().cancel();
-		if (pinned) eye.setTranslationY(0);
-		else idleFloat();
-	}
-
-	// The eye art came on a white card. Fade the near-white pixels out and crop
-	// the empty border so only the eye is left floating.
-	private Bitmap loadEye() {
-		Bitmap src = BitmapFactory.decodeResource(getResources(), R.drawable.eye_spy);
-		if (src == null) return null;
-		int targetW = Math.min(640, src.getWidth());
-		int targetH = Math.max(1, Math.round(src.getHeight() * (targetW / (float) src.getWidth())));
-		Bitmap work = Bitmap.createScaledBitmap(src, targetW, targetH, true);
-		if (work != src) src.recycle();
-		Bitmap out = work.copy(Bitmap.Config.ARGB_8888, true);
-		work.recycle();
-		int w = out.getWidth();
-		int h = out.getHeight();
-		int[] px = new int[w * h];
-		out.getPixels(px, 0, w, 0, 0, w, h);
-
-		int x0 = w, y0 = h, x1 = -1, y1 = -1;
-		for (int y = 0; y < h; y++) {
-			for (int x = 0; x < w; x++) {
-				int i = y * w + x;
-				int c = px[i];
-				int low = Math.min(Color.red(c), Math.min(Color.green(c), Color.blue(c)));
-				float t = Math.max(0f, Math.min(1f, (low - 150) / 45f));
-				int alpha = Color.alpha(c);
-				if (t > 0) {
-					alpha = Math.round(alpha * (1f - t));
-					px[i] = Color.argb(alpha, Color.red(c), Color.green(c), Color.blue(c));
-				}
-				if (alpha > 12) {
-					if (x < x0) x0 = x;
-					if (x > x1) x1 = x;
-					if (y < y0) y0 = y;
-					if (y > y1) y1 = y;
-				}
-			}
-		}
-		out.setPixels(px, 0, w, 0, 0, w, h);
-		if (x1 < x0 || y1 < y0) return out;
-		int pad = 6;
-		x0 = Math.max(0, x0 - pad);
-		y0 = Math.max(0, y0 - pad);
-		x1 = Math.min(w - 1, x1 + pad);
-		y1 = Math.min(h - 1, y1 + pad);
-		Bitmap cropped = Bitmap.createBitmap(out, x0, y0, x1 - x0 + 1, y1 - y0 + 1);
-		out.recycle();
-		return cropped;
-	}
-
-	// ── voice orders ──────────────────────────────────────────────────────
-	private void toggleMic() {
-		if (recording) { stopMic(); return; }
-		if (thinking) return;
-		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-				&& checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-			showLine("Open Capri and allow the mic first.");
-			return;
-		}
-		if (base.isEmpty()) { showLine("Capri's link is down. Open the app once."); return; }
-		try {
-			takeFile = new File(getCacheDir(), "capri-eye-" + System.currentTimeMillis() + ".m4a");
-			recorder = new MediaRecorder();
-			recorder.setAudioSource(MediaRecorder.AudioSource.MIC);
-			recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4);
-			recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC);
-			recorder.setAudioSamplingRate(44100);
-			recorder.setAudioEncodingBitRate(64000);
-			recorder.setOutputFile(takeFile.getAbsolutePath());
-			recorder.prepare();
-			recorder.start();
-			recording = true;
-			controls.setVisibility(View.VISIBLE);
-			showLine("Listening. Tap MIC when you're done.");
-			handler.removeCallbacks(autoStopMic);
-			handler.postDelayed(autoStopMic, 12_000);
-		} catch (Exception err) {
-			recording = false;
-			releaseRecorder();
-			showLine("The mic would not open.");
-		}
-	}
-
-	private final Runnable autoStopMic = () -> { if (recording) stopMic(); };
-
-	private void stopMic() {
-		if (!recording) return;
-		recording = false;
-		handler.removeCallbacks(autoStopMic);
-		try { recorder.stop(); } catch (Exception err) { /* stopped too early */ }
-		releaseRecorder();
-		handleTake();
-	}
-
-	private void releaseRecorder() {
-		if (recorder != null) {
-			try { recorder.reset(); } catch (Exception err) { /* nothing recording */ }
-			try { recorder.release(); } catch (Exception err) { /* already gone */ }
-			recorder = null;
-		}
-	}
-
-	private void handleTake() {
-		final File file = takeFile;
-		takeFile = null;
-		if (file == null || !file.exists() || file.length() < 2000) {
-			showLine("The mic picked up nothing. Try again and talk right away.");
-			return;
-		}
-		thinking = true;
-		showLine("Reading that back…");
-		new Thread(() -> {
-			String text = transcribe(file);
-			try { file.delete(); } catch (Exception err) { /* cache cleans itself */ }
-			thinking = false;
-			if (text == null || text.isEmpty()) {
-				handler.post(() -> showLine("I caught noise, not words."));
-				return;
-			}
-			final String heard = stripWake(text);
-			if (heard.isEmpty()) {
-				handler.post(() -> showLine("Say that again, choom."));
-				return;
-			}
-			handler.post(() -> showLine(heard));
-			answer(heard);
-		}).start();
-	}
-
-	private String transcribe(File file) {
-		HttpURLConnection conn = null;
-		try {
-			byte[] bytes = new byte[(int) file.length()];
-			FileInputStream in = new FileInputStream(file);
-			int read = in.read(bytes);
-			in.close();
-			if (read <= 0) return "";
-			URL url = new URL(base + "/api/stt");
-			conn = (HttpURLConnection) url.openConnection();
-			conn.setRequestMethod("POST");
-			conn.setConnectTimeout(8000);
-			conn.setReadTimeout(20000);
-			conn.setDoOutput(true);
-			conn.setRequestProperty("Content-Type", "audio/mp4");
-			if (!token.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + token);
-			if (!session.isEmpty()) conn.setRequestProperty("X-Capri-Profile", session);
-			OutputStream out = conn.getOutputStream();
-			out.write(bytes);
-			out.close();
-			if (conn.getResponseCode() != 200) return "";
-			BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
-			StringBuilder sb = new StringBuilder();
-			String row;
-			while ((row = reader.readLine()) != null) sb.append(row);
-			reader.close();
-			return new JSONObject(sb.toString()).optString("text", "").trim();
-		} catch (Exception err) {
-			return "";
-		} finally {
-			if (conn != null) conn.disconnect();
-		}
-	}
-
-	// "Capri, set a timer" typed into the eye works the same as in the app.
-	private String stripWake(String raw) {
-		String clean = raw == null ? "" : raw.trim();
-		String lower = clean.toLowerCase(Locale.US);
-		int at = lower.indexOf("capri");
-		if (at < 0) at = lower.indexOf("capri,");
-		if (at >= 0) clean = clean.substring(at + 5).replaceAll("^[\\s,.:;!?\\-]+", "").trim();
-		return clean;
-	}
-
-	private void answer(String order) {
-		HttpURLConnection conn = null;
-		try {
-			URL url = new URL(base + "/api/chat?device=mobile");
-			conn = (HttpURLConnection) url.openConnection();
-			conn.setRequestMethod("POST");
-			conn.setConnectTimeout(8000);
-			conn.setReadTimeout(60000);
-			conn.setDoOutput(true);
-			conn.setRequestProperty("Content-Type", "application/json");
-			conn.setRequestProperty("Accept", "text/event-stream");
-			if (!token.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + token);
-			if (!session.isEmpty()) conn.setRequestProperty("X-Capri-Profile", session);
-			String payload = "{\"messages\":[{\"role\":\"user\",\"content\":" + JSONObject.quote(order)
-					+ "}],\"activity\":{\"tabFocused\":false,\"banter\":true}}";
-			OutputStream out = conn.getOutputStream();
-			out.write(payload.getBytes(StandardCharsets.UTF_8));
-			out.close();
-			if (conn.getResponseCode() != 200) {
-				handler.post(() -> showLine("Capri's relay refused that. Try again in a moment."));
-				return;
-			}
-			BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
-			StringBuilder reply = new StringBuilder();
-			String row;
-			while ((row = reader.readLine()) != null) {
-				if (!row.startsWith("data:")) continue;
-				String raw = row.substring(5).trim();
-				if (raw.isEmpty()) continue;
-				JSONObject evt;
-				try { evt = new JSONObject(raw); } catch (Exception err) { continue; }
-				String type = evt.optString("type");
-				if ("delta".equals(type)) {
-					reply.append(evt.optString("text"));
-				} else if ("device_call".equals(type) && "set_reminder".equals(evt.optString("name"))) {
-					JSONObject args = evt.optJSONObject("args");
-					if (args != null) {
-						int seconds = args.optInt("seconds", 60);
-						String message = args.optString("message", "Time is up.");
-						Alerts.schedule(this, seconds, message);
-						handler.post(() -> showLine("Timer set: " + message));
-					}
-				}
-			}
-			reader.close();
-			final String text = reply.toString().replaceAll("\\s+", " ").trim();
-			if (text.isEmpty()) return;
-			handler.post(() -> {
-				showLine(text);
-				notifyAlert("Capri", text);
-				if (tts != null && ttsReady) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "capri-eye");
-			});
-		} catch (Exception err) {
-			handler.post(() -> showLine("No link to Capri right now."));
-		} finally {
-			if (conn != null) conn.disconnect();
-		}
-	}
-
-	private void showLine(String text) {
-		if (root == null || bubble == null || text == null) return;
-		String line = text.replaceAll("\\s+", " ").trim();
-		if (line.isEmpty()) return;
-		bubble.setText(line);
-		bubble.setVisibility(View.VISIBLE);
-		handler.removeCallbacks(hideBubble);
-		handler.postDelayed(hideBubble, 11_000);
-	}
-
-	private final Runnable hideBubble = () -> {
-		if (bubble != null) bubble.setVisibility(View.GONE);
-	};
-
 	private void startWatching() {
 		handler.removeCallbacks(watcher);
 		watcher = () -> {
-			if (root != null) watchOnce();
+			watchOnce();
 			handler.postDelayed(watcher, 15_000);
 		};
 		handler.postDelayed(watcher, 20_000);
+	}
+
+	private void stopWatching() {
+		if (handler != null) handler.removeCallbacks(watcher);
+		watcher = null;
 	}
 
 	private void watchOnce() {
@@ -685,7 +261,8 @@ public class EyeService extends Service {
 		if (!usageAllowed()) return;
 		String pkg = foregroundPackage();
 		if (pkg == null || pkg.equals(getPackageName())) { lastKey = ""; return; }
-		String key = pkg;
+		Sight sight = sightFor(pkg);
+		String key = sight.key();
 		long now = System.currentTimeMillis();
 		if (!key.equals(lastKey)) { lastKey = key; lastKeyAt = now; return; }
 		if (now - lastKeyAt < DWELL_MS) return;
@@ -693,22 +270,170 @@ public class EyeService extends Service {
 		if (now - lastSayAt < COOLDOWN_MS) return;
 		saidKey = key;
 		lastSayAt = now;
-		final String label = appLabel(pkg);
+		final JSONObject payload = sight.json();
+		final String where = sight.label;
 		polling = true;
 		new Thread(() -> {
 			try {
-				String line = fetchBanter(label);
+				String line = fetchBanter(payload);
 				if (line != null && !line.isEmpty()) {
 					final String text = line;
-					handler.post(() -> {
-						showLine(text);
-						notifyAlert("Capri", text);
-					});
+					handler.post(() -> notifyAlert("Capri · " + where, text));
 				}
 			} finally {
 				polling = false;
 			}
 		}).start();
+	}
+
+	private static final class Sight {
+		String app = "";
+		String label = "";
+		String site = "";
+		String title = "";
+		String kind = "app";
+		boolean known = true;
+
+		String key() { return (label + "|" + title).toLowerCase(Locale.US); }
+
+		JSONObject json() {
+			JSONObject out = new JSONObject();
+			try {
+				out.put("app", app);
+				out.put("label", label);
+				out.put("site", site);
+				out.put("title", title);
+				out.put("kind", kind);
+				out.put("known", known);
+			} catch (Exception err) { /* plain fields */ }
+			return out;
+		}
+	}
+
+	// Everything knowable about this moment: the app, the kind of place it is,
+	// and the actual thing happening in it.
+	private Sight sightFor(String pkg) {
+		Sight s = new Sight();
+		String name = appLabel(pkg);
+		s.app = name;
+		s.label = name;
+		String[] meta = SIGHTS.get(pkg.toLowerCase(Locale.US));
+		if (meta != null) {
+			s.kind = meta[1];
+			s.site = meta[0];
+			if (!meta[0].isEmpty()) s.label = meta[0];
+		} else {
+			s.kind = isGame(pkg) ? "game" : "app";
+			s.known = seenBefore(pkg);
+		}
+
+		String[] media = activeMedia(pkg);
+		String[] note = noteFor(pkg);
+		if (media != null) {
+			String artist = media[1];
+			s.title = artist.isEmpty() || media[0].toLowerCase(Locale.US).contains(artist.toLowerCase(Locale.US))
+					? media[0]
+					: media[0] + " - " + artist;
+			if (s.kind.equals("app") || s.kind.equals("browser")) s.kind = "video";
+			if (s.site.isEmpty()) s.site = siteInside(media[0] + " " + (note == null ? "" : note[0] + " " + note[1]));
+		} else if (note != null) {
+			s.title = note[1].isEmpty() ? note[0] : note[0] + ": " + note[1];
+		} else {
+			s.title = activityHint(pkg);
+		}
+		if (s.kind.equals("browser")) s.label = s.site.isEmpty() ? (s.title.isEmpty() ? name : s.title) : s.site;
+		if (!s.site.isEmpty()) s.known = true;
+		return s;
+	}
+
+	// A video playing in a browser still belongs to the service hosting it.
+	private String siteInside(String haystack) {
+		String low = haystack.toLowerCase(Locale.US);
+		if (low.contains("youtube")) return "YouTube";
+		if (low.contains("tiktok")) return "TikTok";
+		if (low.contains("vimeo")) return "Vimeo";
+		return "";
+	}
+
+	// The track or video playing right now, read from its media session. That
+	// needs notification access, so it quietly falls back to nothing.
+	private String[] activeMedia(String pkg) {
+		if (!listenerEnabled()) return null;
+		try {
+			MediaSessionManager msm = (MediaSessionManager) getSystemService(Context.MEDIA_SESSION_SERVICE);
+			if (msm == null) return null;
+			List<MediaController> controllers = msm.getActiveSessions(new ComponentName(this, CapriListener.class));
+			for (MediaController controller : controllers) {
+				if (controller == null || !pkg.equals(controller.getPackageName())) continue;
+				PlaybackState state = controller.getPlaybackState();
+				if (state == null || state.getState() != PlaybackState.STATE_PLAYING) continue;
+				MediaMetadata md = controller.getMetadata();
+				if (md == null) continue;
+				String title = clean(md.getString(MediaMetadata.METADATA_KEY_TITLE));
+				if (title.isEmpty()) continue;
+				return new String[] { title, clean(md.getString(MediaMetadata.METADATA_KEY_ARTIST)) };
+			}
+		} catch (Exception err) { /* no listener access on this build */ }
+		return null;
+	}
+
+	private String[] noteFor(String pkg) {
+		StatusBarNotification sbn = CapriListener.latest(pkg);
+		if (sbn == null || sbn.getNotification() == null) return null;
+		android.os.Bundle extras = sbn.getNotification().extras;
+		if (extras == null) return null;
+		String title = clean(String.valueOf(extras.get("android.title")));
+		String text = clean(String.valueOf(extras.get("android.text")));
+		if (title.isEmpty() && text.isEmpty()) return null;
+		return new String[] { title.isEmpty() ? "Notification" : title, text };
+	}
+
+	// A class name means nothing to anyone, but "WatchWhileActivity" or
+	// "Conversation" says more than the bare app label.
+	private String activityHint(String pkg) {
+		String component = foregroundComponent(pkg);
+		if (component == null || !component.contains(".")) return "";
+		String cls = component.substring(component.lastIndexOf('.') + 1).toLowerCase(Locale.US);
+		if (cls.contains("watch") || cls.contains("player") || cls.contains("video")) return "watching a video";
+		if (cls.contains("conversation") || cls.contains("chat") || cls.contains("thread")) return "in a chat";
+		if (cls.contains("feed") || cls.contains("timeline") || cls.contains("home")) return "scrolling the feed";
+		if (cls.contains("search")) return "searching";
+		if (cls.contains("editor") || cls.contains("terminal") || cls.contains("code")) return "in something technical";
+		return "";
+	}
+
+	private boolean listenerEnabled() {
+		try {
+			String enabled = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+			return enabled != null && enabled.contains(getPackageName());
+		} catch (Exception err) {
+			return false;
+		}
+	}
+
+	private boolean isGame(String pkg) {
+		try {
+			ApplicationInfo info = getPackageManager().getApplicationInfo(pkg, 0);
+			return (info.flags & ApplicationInfo.FLAG_IS_GAME) != 0;
+		} catch (Exception err) {
+			return false;
+		}
+	}
+
+	// True from the second sighting on: the first time in an unknown app is news,
+	// and she says so.
+	private boolean seenBefore(String pkg) {
+		SharedPreferences prefs = getSharedPreferences("capri-sighted", MODE_PRIVATE);
+		boolean seen = prefs.getBoolean(pkg, false);
+		if (!seen) prefs.edit().putBoolean(pkg, true).apply();
+		return seen;
+	}
+
+	private String clean(String raw) {
+		if (raw == null) return "";
+		String out = raw.replaceAll("\\s+", " ").trim();
+		if (out.equalsIgnoreCase("null") || out.equals("\"\"")) return "";
+		return out.length() > 140 ? out.substring(0, 140) : out;
 	}
 
 	private boolean usageAllowed() {
@@ -720,6 +445,28 @@ public class EyeService extends Service {
 			return mode == android.app.AppOpsManager.MODE_ALLOWED;
 		} catch (Exception err) {
 			return false;
+		}
+	}
+
+	// The usage stream holds the last two minutes of screens. The newest event
+	// for this package is the screen they are actually on.
+	private String foregroundComponent(String wanted) {
+		try {
+			UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+			long now = System.currentTimeMillis();
+			UsageEvents events = usm.queryEvents(now - 120_000L, now);
+			UsageEvents.Event event = new UsageEvents.Event();
+			String component = null;
+			while (events.hasNextEvent()) {
+				events.getNextEvent(event);
+				if (event.getEventType() == UsageEvents.Event.MOVE_TO_FOREGROUND
+						&& wanted.equals(event.getPackageName())) {
+					component = event.getClassName();
+				}
+			}
+			return component;
+		} catch (Exception err) {
+			return null;
 		}
 	}
 
@@ -742,16 +489,15 @@ public class EyeService extends Service {
 
 	private String appLabel(String pkg) {
 		try {
-			android.content.pm.ApplicationInfo info = getPackageManager().getApplicationInfo(pkg, 0);
+			ApplicationInfo info = getPackageManager().getApplicationInfo(pkg, 0);
 			String label = String.valueOf(getPackageManager().getApplicationLabel(info));
-			if (label.length() > 50) label = label.substring(0, 50);
-			return label;
+			return label.length() > 50 ? label.substring(0, 50) : label;
 		} catch (Exception err) {
 			return pkg;
 		}
 	}
 
-	private String fetchBanter(String appName) {
+	private String fetchBanter(JSONObject ctx) {
 		HttpURLConnection conn = null;
 		try {
 			URL url = new URL(base + "/api/banter");
@@ -764,9 +510,8 @@ public class EyeService extends Service {
 			if (!token.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + token);
 			if (!session.isEmpty()) conn.setRequestProperty("X-Capri-Profile", session);
 			if (!apiKey.isEmpty()) conn.setRequestProperty("x-capri-key", apiKey);
-			String body = "{\"app\":" + JSONObject.quote(appName) + ",\"title\":\"\"}";
 			OutputStream out = conn.getOutputStream();
-			out.write(body.getBytes(StandardCharsets.UTF_8));
+			out.write(ctx.toString().getBytes(StandardCharsets.UTF_8));
 			out.close();
 			if (conn.getResponseCode() != 200) return null;
 			BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
@@ -801,94 +546,17 @@ public class EyeService extends Service {
 		return intent;
 	}
 
-	private void openApp() {
-		try {
-			startActivity(openIntent());
-			teardown();
-		} catch (Exception err) { /* focus stolen */ }
-	}
-
-	private void teardown() {
-		handler.removeCallbacks(watcher);
-		handler.removeCallbacks(floater);
-		handler.removeCallbacks(hideBubble);
-		handler.removeCallbacks(autoStopMic);
-		if (recording) {
-			recording = false;
-			try { recorder.stop(); } catch (Exception err) { /* stopped early */ }
-			releaseRecorder();
-		}
-		if (root != null) {
-			try { windowManager.removeView(root); } catch (Exception err) { /* already gone */ }
-			root = null;
-		}
-		bubble = null;
-		eye = null;
-		ghostNear = null;
-		ghostFar = null;
-		controls = null;
-	}
-
 	@Override
 	public void onDestroy() {
 		running = false;
-		teardown();
+		stopWatching();
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE);
 		else stopForeground(true);
-		if (tts != null) {
-			try { tts.shutdown(); } catch (Exception err) { /* already closed */ }
-			tts = null;
-		}
 		super.onDestroy();
 	}
 
 	@Override
 	public IBinder onBind(Intent intent) {
 		return null;
-	}
-
-	private class DragListener implements View.OnTouchListener {
-		private int startX;
-		private int startY;
-		private float touchX;
-		private float touchY;
-		private float lastDx;
-		private float lastDy;
-		private long downAt;
-
-		@Override
-		public boolean onTouch(View view, MotionEvent event) {
-			switch (event.getActionMasked()) {
-				case MotionEvent.ACTION_DOWN:
-					startX = params.x;
-					startY = params.y;
-					touchX = event.getRawX();
-					touchY = event.getRawY();
-					lastDx = 0;
-					lastDy = 0;
-					downAt = System.currentTimeMillis();
-					return false;
-				case MotionEvent.ACTION_MOVE:
-					int dx = Math.round(event.getRawX() - touchX);
-					int dy = Math.round(event.getRawY() - touchY);
-					if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
-						params.x = startX + dx;
-						params.y = startY + dy;
-						try { windowManager.updateViewLayout(root, params); } catch (Exception err) { /* view gone */ }
-						smear(event.getRawX() - touchX - lastDx, event.getRawY() - touchY - lastDy);
-						lastDx = event.getRawX() - touchX;
-						lastDy = event.getRawY() - touchY;
-						return true;
-					}
-					return false;
-				case MotionEvent.ACTION_UP:
-					if (System.currentTimeMillis() - downAt < 250) {
-						controls.setVisibility(controls.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
-					}
-					return true;
-				default:
-					return false;
-			}
-		}
 	}
 }

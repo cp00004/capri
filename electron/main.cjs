@@ -1103,8 +1103,223 @@ async function watchScreen() {
   }
 }
 
-function notify(title, body) {
+// ── No Nut November ──────────────────────────────────────────────────────────
+// An accountability lock he orders out loud. Once armed, anything carrying
+// sexual content is closed and kept closed: a watchdog walks every visible
+// window twice a second and kills whatever matches, so it cannot be opened or
+// played. The only ways out are the PC's own clock reaching November 1st or the
+// cancellation code, and a wrong code unlocks nothing.
+const NNN_CODE = "45872";
+const NNN_MARK = "capri-no-nut-november";
+// Titles and process names she watches for. Deliberately blunt: this is his
+// request, not a content classifier, so a false positive costs him a browser
+// restart and a miss costs him the whole point.
+const NNN_WORDS = [
+  "porn", "pornhub", "onlyfans", "fansly", "chaturbate", "stripchat", "livejasmin", "camsoda",
+  "bongacams", "cam4", "mydirtyhobby", "brazzers", "naughty", "nude", "nudes", "nsfw", "rule ?34",
+  "hentai", "eroge", "erotic", "sex", "xnxx", "xvideos", "xhamster", "redtube", "youporn",
+  "spankbang", "tube8", "eporner", "beeg", "fetlife", "kink", "feet ?pic", "leaked", "cam ?show",
+  "adult", "xxx", "boobs", "milf", "blowjob", "orgy", "bdsm", "webcam ?models? ?live",
+];
+const NNN_PATTERN = new RegExp(`(?:\\b(?:${NNN_WORDS.join("|")})\\b)`, "i");
+const NNN_DOMAINS = [
+  "pornhub.com", "www.pornhub.com", "xvideos.com", "www.xvideos.com", "xnxx.com", "www.xnxx.com",
+  "xhamster.com", "www.xhamster.com", "redtube.com", "www.redtube.com", "youporn.com", "www.youporn.com",
+  "tube8.com", "www.tube8.com", "spankbang.com", "www.spankbang.com", "eporner.com", "www.eporner.com",
+  "beeg.com", "www.beeg.com", "chaturbate.com", "www.chaturbate.com", "onlyfans.com", "www.onlyfans.com",
+  "fansly.com", "www.fansly.com", "brazzers.com", "www.brazzers.com", "livejasmin.com", "stripchat.com",
+  "camsoda.com", "www.camsoda.com", "bongacams.com", "mydirtyhobby.com", "fetlife.com", "kink.com",
+];
+
+const nnnFile = () => path.join(app.getPath("userData"), "no-nut-november.json");
+let nnn = { active: false, awaitingCode: false, since: 0, releaseAt: 0, kills: 0, wrongCodes: 0, sites: false, lastKill: "" };
+let nnnTimer = null;
+let nnnSweeping = false;
+
+function nnnLoad() {
+  nnn = { ...nnn, ...(readJson(nnnFile()) || {}) };
+  if (nnn.active) nnnStart();
+}
+
+function nnnSave() {
+  writeJson(nnnFile(), nnn);
+}
+
+function nnnReleaseAt(from = new Date()) {
+  const thisYear = new Date(from.getFullYear(), 10, 1, 0, 0, 0, 0);
+  return (from < thisYear ? thisYear : new Date(from.getFullYear() + 1, 10, 1)).getTime();
+}
+
+// Best effort: the hosts file is the only site-level block that needs no proxy,
+// and it belongs to Windows. Without admin it simply does not apply, and the
+// watchdog is what holds the line.
+function nnnHosts(on) {
+  const file = path.join(process.env.SystemRoot || "C:\\Windows", "System32", "drivers", "etc", "hosts");
   try {
+    const raw = fs.readFileSync(file, "utf8");
+    const stripped = raw.split(/\r?\n/).filter((line) => !line.includes(NNN_MARK)).join("\r\n");
+    if (on) {
+      const block = NNN_DOMAINS.map((host) => `127.0.0.1 ${String(host).trim()} # ${NNN_MARK}`).join("\r\n");
+      fs.writeFileSync(file, `${stripped}\r\n${block}\r\n`);
+    } else {
+      fs.writeFileSync(file, `${stripped}\r\n`);
+    }
+    execFile("ipconfig.exe", ["/flushdns"], { windowsHide: true }, () => {});
+    nnn.sites = Boolean(on);
+    return true;
+  } catch {
+    nnn.sites = false;
+    return false;
+  }
+}
+
+function nnnWindows() {
+  return new Promise((resolve) => {
+    const ps = [
+      `Add-Type -Namespace CapriNnn -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l); public delegate bool EnumWindowsProc(IntPtr h, IntPtr l); [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h); [DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);'`,
+      `$rows = New-Object System.Collections.ArrayList`,
+      `$cb = [CapriNnn.Win+EnumWindowsProc]{ param($h,$l) if ([CapriNnn.Win]::IsWindowVisible($h)) { $sb = New-Object System.Text.StringBuilder 512; [void][CapriNnn.Win]::GetWindowTextW($h,$sb,512); if ($sb.Length -gt 2) { $p = 0; [void][CapriNnn.Win]::GetWindowThreadProcessId($h,[ref]$p); [void]$rows.Add([pscustomobject]@{ pid = [int]$p; title = $sb.ToString() }) }; }; return $true }`,
+      `[void][CapriNnn.Win]::EnumWindows($cb,[IntPtr]::Zero)`,
+      // Tab separated: a window title can contain anything, including the
+      // delimiter, so the fields are pid, process name, then the whole title.
+      `$rows | ForEach-Object { $n = try { (Get-Process -Id $_.pid -ErrorAction Stop).ProcessName } catch { "" }; Write-Output ([string]$_.pid + [char]9 + $n + [char]9 + $_.title) }`,
+    ].join("; ");
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 6000 }, (err, stdout) => {
+      if (err) return resolve([]);
+      resolve(String(stdout || "").split(/\r?\n/).map((line) => {
+        const parts = line.split("\t");
+        return { pid: Number(parts[0]) || 0, proc: String(parts[1] || "").trim(), title: String(parts[2] || "").trim() };
+      }).filter((row) => row.pid > 4 && row.title));
+    });
+  });
+}
+
+async function nnnSweep() {
+  if (nnnSweeping) return;
+  nnnSweeping = true;
+  const killed = [];
+  try {
+    const rows = await nnnWindows();
+    for (const row of rows) {
+      const hit = NNN_PATTERN.test(row.title) || NNN_PATTERN.test(row.proc);
+      if (!hit) continue;
+      // Her own overlay carries the title "Capri" and the code word lives in
+      // files, so nothing of hers is ever on this list.
+      try { process.kill(row.pid, "SIGKILL"); } catch { /* already gone */ }
+      execFile("taskkill.exe", ["/F", "/T", "/PID", String(row.pid)], { windowsHide: true }, () => {});
+      killed.push(`${row.proc || "app"} (${row.title.slice(0, 40)})`);
+    }
+  } catch { /* a failed sweep only means she looks again in a second */ }
+  nnnSweeping = false;
+  if (!killed.length) return;
+  nnn.kills += killed.length;
+  nnn.lastKill = killed[0];
+  nnnSave();
+  logLine(`nnn: closed ${killed.length} -> ${killed.join(", ")}`);
+  notify("Capri // NO NUT NOVEMBER", `Shut down ${killed.join(", ")}. It stays shut.`);
+}
+
+function nnnStart() {
+  if (nnnTimer) return;
+  nnnTimer = setInterval(() => {
+    if (!nnn.active) { nnnStopTimer(); return; }
+    // She checks the machine's own clock, not his word for it.
+    if (Date.now() >= nnn.releaseAt) { nnnRelease("It is November 1st."); return; }
+    nnnSweep().catch(() => {});
+  }, 2000);
+}
+
+function nnnStopTimer() {
+  clearInterval(nnnTimer);
+  nnnTimer = null;
+}
+
+function nnnRelease(reason) {
+  nnn.active = false;
+  nnn.awaitingCode = false;
+  nnnStopTimer();
+  if (nnn.sites) nnnHosts(false);
+  nnnSave();
+  logLine(`nnn: released (${reason})`);
+  notify("Capri // NO NUT NOVEMBER", reason);
+}
+
+function nnnActivate() {
+  const today = new Date();
+  if (today.getMonth() === 10 && today.getDate() === 1) {
+    return { ok: true, active: false, message: "It is already November 1st, so there is nothing to lock." };
+  }
+  const releaseAt = nnnReleaseAt(today);
+  nnn = {
+    ...nnn,
+    active: true,
+    awaitingCode: false,
+    since: today.getTime(),
+    releaseAt,
+    wrongCodes: 0,
+    kills: 0,
+  };
+  nnnHosts(true);
+  nnnSave();
+  nnnStart();
+  nnnSweep().catch(() => {});
+  const days = Math.max(1, Math.round((releaseAt - today.getTime()) / 86_400_000));
+  logLine(`nnn: armed for ${days} day(s), site block ${nnn.sites ? "on" : "needs admin"}`);
+  return {
+    ok: true,
+    active: true,
+    sites: nnn.sites,
+    days,
+    until: new Date(releaseAt).toDateString(),
+    message: `Armed. Anything with that kind of content gets closed and stays closed until ${new Date(releaseAt).toDateString()}.${nnn.sites ? " Sites are blocked at the hosts file too." : " Run Capri as admin once if you want the site list blocked as well."}`,
+  };
+}
+
+function nnnCancel() {
+  if (!nnn.active) return { ok: true, active: false, message: "Nothing is locked right now." };
+  nnn.awaitingCode = true;
+  nnnSave();
+  return { ok: true, active: true, asking: true, message: "Then give me the cancellation code. Guess it wrong and nothing opens." };
+}
+
+function nnnCode(value) {
+  if (!nnn.active) return { ok: true, active: false, message: "Nothing is locked right now." };
+  const given = String(value || "").replace(/\D/g, "").slice(0, 16);
+  if (!given) return { ok: false, active: true, message: "That is not a code. Say the cancel command and give me the five digits." };
+  nnn.awaitingCode = false;
+  if (given !== NNN_CODE) {
+    // One wrong digit and the lock does not even flinch.
+    nnn.wrongCodes += 1;
+    nnnSave();
+    return { ok: false, active: true, wrong: nnn.wrongCodes, message: `Wrong. Still locked. That is ${nnn.wrongCodes} guess${nnn.wrongCodes === 1 ? "" : "es"} you have burned.` };
+  }
+  nnnRelease("Code accepted.");
+  return { ok: true, active: false, message: "Code checked out. Everything is yours again." };
+}
+
+function nnnStatus() {
+  if (!nnn.active) return { ok: true, active: false, message: "No Nut November is not armed." };
+  const days = Math.max(0, Math.round((nnn.releaseAt - Date.now()) / 86_400_000));
+  return {
+    ok: true,
+    active: true,
+    kills: nnn.kills,
+    days,
+    sites: nnn.sites,
+    awaitingCode: nnn.awaitingCode,
+    message: `Armed until ${new Date(nnn.releaseAt).toDateString()} - ${days} day${days === 1 ? "" : "s"} left. ${nnn.kills} thing${nnn.kills === 1 ? "" : "s"} already closed.`,
+  };
+}
+
+ipcMain.handle("capri-nnn", async (_event, payload) => {
+  const action = String(payload?.action || "status");
+  if (action === "activate") return nnnActivate();
+  if (action === "cancel") return nnnCancel();
+  if (action === "code") return nnnCode(payload?.code);
+  return nnnStatus();
+});
+
+function notify(title, body) {  try {
     if (!Notification.isSupported()) return;
     const note = new Notification({
       title: String(title || "Capri"),
@@ -1419,11 +1634,14 @@ app.whenReady().then(async () => {
   startServer();
   try { createTray(); } catch (err) { console.warn("[capri] tray unavailable:", err.message); }
   syncShortcuts();
+  nnnLoad();
   try {
     const eyeState = readEyeState();
     eyeEnabled = eyeState.enabled !== false;
     eyeBanter = eyeState.banter !== false;
   } catch { /* first run */ }
+  // A lock he armed yesterday is still a lock today, whichever window closed.
+  try { nnnLoad(); } catch { /* first run */ }
   setInterval(syncEye, 2000);
   // Show the window quickly; the bundled server is the fallback, not a gate.
   await Promise.race([waitForServer(), new Promise((r) => setTimeout(r, 2500))]);

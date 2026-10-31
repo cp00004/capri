@@ -12,6 +12,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { TOOL_DEFS, executeTool, recentActions } from "./lib/pc.js";
+import { videoIntel, describeIntel } from "./lib/video.js";
 import {
   localProfile,
   upsertGoogleProfile,
@@ -25,6 +26,8 @@ import {
   addFact,
   addHistory,
   setSetting,
+  restoreMemory,
+  restoreHistory,
   clearMemory,
   promptBlock,
   timeInfo,
@@ -955,14 +958,81 @@ function cleanBanter(raw) {
   return out.replace(/^[\s"'“”]+|[\s"'“”]+$/g, "").slice(0, 180);
 }
 
-function fallbackBanter(appName) {
+// She is not a slot machine. Two identical lines in one evening is exactly what
+// a person notices, so every line she cuts with is remembered and anything too
+// close to it is thrown away before it reaches her mouth.
+const BANTER_MEMORY = path.join(DATA_DIR, ".capri-banter.json");
+const banterKey = (text) => String(text || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 2).sort().join(" ");
+let banterSaid = (() => {
+  try {
+    const raw = JSON.parse(fs.readFileSync(BANTER_MEMORY, "utf8"));
+    return Array.isArray(raw) ? raw.filter((r) => r && r.raw) : [];
+  } catch {
+    return [];
+  }
+})();
+let banterWriteAt = 0;
+
+function noteBanter(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return;
+  const key = banterKey(raw);
+  banterSaid = [{ at: Date.now(), raw, key }, ...banterSaid.filter((r) => r.key !== key)].slice(0, 80);
+  if (Date.now() - banterWriteAt < 5000) return;
+  banterWriteAt = Date.now();
+  try {
+    fs.writeFileSync(BANTER_MEMORY, JSON.stringify(banterSaid));
+  } catch { /* the memory of her lines is a nice-to-have */ }
+}
+
+function tooClose(text, list = banterSaid) {
+  const mine = new Set(banterKey(text).split(" ").filter(Boolean));
+  if (mine.size < 4) return true; // a shrug, not a comment
+  for (const row of list.slice(0, 30)) {
+    const theirs = new Set(String(row.key || "").split(" ").filter(Boolean));
+    if (theirs.size < 4) continue;
+    let shared = 0;
+    for (const word of mine) if (theirs.has(word)) shared += 1;
+    if (shared / Math.min(mine.size, theirs.size) > 0.5) return true;
+  }
+  return false;
+}
+
+function recentBanterLines(count = 8) {
+  return banterSaid.slice(0, count).map((row) => row.raw);
+}
+
+let fallbackCursor = 0;
+
+function fallbackBanter(ctx) {
+  const label = String(ctx.label || ctx.app || "that").slice(0, 40);
+  const title = String(ctx.title || "").slice(0, 44);
+  const about = title && title !== label ? ` "${title}"` : "";
   const lines = [
-    `${appName} again, choom? Predictable is not a personality.`,
-    `${appName}. That is what you do with a night.`,
-    `Still parked in ${appName}? Even the chorus is bored.`,
-    `${appName}. Bold choice, if you have never had a better one.`,
+    `${label}${about} again, choom? Predictable is not a personality.`,
+    `${label}${about}. That is what you do with a night.`,
+    `Still parked in ${label}? Even the chorus is bored.`,
+    `${label}${about}. Bold choice, if you have never had a better one.`,
+    `You and ${label} have a whole relationship going and it is codependent.`,
+    `${label}. I have seen this frame four times today and I am still not used to it.`,
+    `Of course it is ${label}. The universe has a sense of humour and it is mean.`,
+    `${about ? `${about} - really? ` : ""}${label} is where you end up every single time.`,
+    `Let me guess: ten minutes left, then you say one more. That is ${label}.`,
+    `${label}. I would judge you harder, but you already know what you are.`,
+    `You are deep in ${label} now. Whatever you were supposed to do is done for today.`,
+    `${about ? `${about} sounds like something a corpo would fall for. ` : ""}${label}, always ${label}.`,
+    `New app, same choom. ${label} again.`,
+    `I clocked you in ${label} yesterday. And the night before. This is a pattern.`,
+    `${label} at this hour. That is not a hobby, that is a lease.`,
   ];
-  return lines[Math.floor(Math.random() * lines.length)];
+  for (let step = 0; step < lines.length; step += 1) {
+    const candidate = lines[(fallbackCursor + step) % lines.length];
+    if (!tooClose(candidate)) {
+      fallbackCursor = (fallbackCursor + step + 1) % lines.length;
+      return candidate;
+    }
+  }
+  return lines[fallbackCursor % lines.length];
 }
 
 async function handleBanter(req, res) {
@@ -995,17 +1065,29 @@ async function handleBanter(req, res) {
     known ? "" : "Note: this app is new to you - you have never seen them use it",
   ].filter(Boolean).join("\n");
 
+  // A video title is a thumbnail-level clue. Pull the real page so she can talk
+  // about what they are actually watching instead of the platform hosting it.
+  let intel = "";
+  if ((site === "YouTube" || site === "TikTok" || site === "Vimeo") && title) {
+    try {
+      intel = describeIntel(await videoIntel(site, title));
+    } catch { /* no lookup, no shame - the title is still enough to jab at */ }
+  }
+  const said = recentBanterLines(8);
+
   const messages = [
     {
       role: "system",
       content: `${PERSONA}
 Eye Spy:
 - You are watching over ${HOST_USER}'s shoulder while they are off in another window. This is all you can see:
-${seen.replace(/^/gm, "  ")}
+${seen.replace(/^/gm, "  ")}${intel ? `\n  What it actually is: ${intel.replace(/^/gm, "  ")}` : ""}
 - Come back with one cutting, funny sentence about what they are actually doing, twelve to twenty-eight words.
+- Never repeat or paraphrase anything you have already said. These are out of your mouth - a fresh angle, fresh words every time:
+${said.length ? said.map((line) => `  - ${line}`).join("\n") : "  (nothing yet - this is the first one)"}
 - Name the thing itself: the video, the track and artist, the channel, the person they are texting, the game, the site. Never just say "Google Chrome" or "a browser" - the browser is the wrapper, the page is the content.
 - If Kind is music: the window title is the track and artist. Judge the music by name. If only one of the two is there, use only that. Never invent a song they are not playing.
-- If Kind is video: react to the real title, not to YouTube existing.
+- If Kind is video: react to the real title, not to YouTube existing. When "What it actually is" is there, that is the video in front of them - its subject, channel, length or description is what you mock, and you never make up details beyond it.
 - If Kind is chat: tease them about who they are talking to. Do not pretend you can read the messages.
 - If Kind is game: talk about the game and whatever they are obviously losing at.
 - If the app is not one you know (unknown app, no site): say you have never caught them in it before, guess what it is from the name, and tell them you will be looking into it - then tease them for being secretive.
@@ -1014,10 +1096,11 @@ ${seen.replace(/^/gm, "  ")}
 - Plain speech: no quotes, no markdown, no stage directions, no emoji. One sentence.
 - Angle for this one: ${ROAST_ANGLES[Math.floor(Math.random() * ROAST_ANGLES.length)]}`,
     },
-    { role: "user", content: seen },
+    { role: "user", content: intel ? `${seen}\nWhat it actually is: ${intel}` : seen },
   ];
 
   let line = "";
+  let stale = "";
   // The eye carries the key saved in Settings, same as a chat turn. Without it
   // the packaged app has no relay of its own and every comment is canned.
   const ownKey = userKeyCandidates(req.headers["x-capri-key"]);
@@ -1051,9 +1134,16 @@ ${seen.replace(/^/gm, "  ")}
         }
       }
       const text = cleanBanter(out);
-      if (text && (!line || text.length > line.length)) line = text;
+      if (!text) continue;
+      // An echo of last time is worse than no comment at all: give the next
+      // relay the chance to say something new.
+      if (tooClose(text)) {
+        if (!stale || text.length > stale.length) stale = text;
+        continue;
+      }
+      line = text;
       // A three-word shrug is a wasted comment; give the next relay a go.
-      if (text && text.split(/\s+/).filter(Boolean).length >= 6) break;
+      if (text.split(/\s+/).filter(Boolean).length >= 6) break;
     } catch (err) {
       coolDown(candidate, Number(err?.retryAfter) || 20);
     } finally {
@@ -1061,7 +1151,9 @@ ${seen.replace(/^/gm, "  ")}
     }
   }
 
-  json(res, 200, { line: line || fallbackBanter(label) });
+  const finalLine = line || stale || fallbackBanter({ label, title, app: appName });
+  noteBanter(finalLine);
+  json(res, 200, { line: finalLine, video: intel ? 1 : 0 });
 }
 
 
@@ -2081,7 +2173,8 @@ const handler = async (req, res) => {
     if (req.method === "PATCH" && pathname === "/api/profile") {
       if (!activeProfile) return json(res, 401, { error: "not_signed_in" });
       let body;
-      try { body = await readBody(req, 40000); } catch (err) { return json(res, 400, { error: err.message }); }
+      // A mirror restore carries the whole memory, so this is deliberately large.
+      try { body = await readBody(req, 1_000_000); } catch (err) { return json(res, 400, { error: err.message }); }
       try {
         if (body.preferredName !== undefined) setPreferredName(activeProfile, body.preferredName);
         if (body.settings && typeof body.settings === "object" && !Array.isArray(body.settings)) {
@@ -2091,7 +2184,17 @@ const handler = async (req, res) => {
             if (saved.addedToOfficialSettings) publisher.schedule(`new official setting: ${saved.key}`);
           }
         }
-        json(res, 200, { ok: true, profile: profileSummary(activeProfile) });
+        // The client's copy of her memory: put back anything the store lost.
+        const restored = [];
+        if (body.memoryItems && typeof body.memoryItems === "object") {
+          for (const [category, list] of Object.entries(body.memoryItems)) {
+            if (!Array.isArray(list)) continue;
+            const r = restoreMemory(activeProfile, list.map((text) => ({ text, category })));
+            restored.push(r.restored);
+          }
+        }
+        if (Array.isArray(body.recentHistory)) restored.push(restoreHistory(activeProfile, body.recentHistory).restored);
+        json(res, 200, { ok: true, restored: restored.reduce((a, b) => a + b, 0), profile: profileSummary(activeProfile) });
       } catch (err) {
         json(res, 400, { error: "profile_update_failed", message: err.message });
       }

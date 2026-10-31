@@ -913,11 +913,17 @@ eyeSpyBtn?.addEventListener('click', () => {
   const next = !eyeSpyOn();
   localStorage.setItem('capri.eyeSpy', next ? '1' : '0');
   paintEyeSpy();
-  if (next && window.CapriEyes?.hasOverlay && !window.CapriEyes.hasOverlay()) {
-    showNotice("Let Capri draw over other apps so the eye can follow you.", null, null, 8000);
-    try { window.CapriEyes.requestOverlay(); } catch { /* older build */ }
-  }
-  if (!next) { try { window.CapriEyes?.hide?.(); } catch { /* not android */ } }
+  try {
+    if (next) {
+      window.CapriEyes?.show?.();
+      const grants = readPhoneGrants();
+      if (grants && !grants.listener) {
+        showNotice("Give Capri notification access and she can name the exact video or track, not just the app.", null, null, 9000);
+      }
+    } else {
+      window.CapriEyes?.hide?.();
+    }
+  } catch { /* not android */ }
 });
 
 /* ---------------------------------------------------------------- phone access */
@@ -931,7 +937,7 @@ const phoneHint = document.getElementById('phoneHint');
 const PHONE_CHIPS = {
   mic: ['phoneMicBtn', 'phoneMicLabel'],
   notifications: ['phoneNotesBtn', 'phoneNotesLabel'],
-  overlay: ['phoneEyeBtn', 'phoneEyeLabel'],
+  listener: ['phoneEyeBtn', 'phoneEyeLabel'],
   usage: ['phoneUsageBtn', 'phoneUsageLabel'],
   alarms: ['phoneAlarmBtn', 'phoneAlarmLabel'],
   battery: ['phoneBatteryBtn', 'phoneBatteryLabel'],
@@ -963,13 +969,13 @@ function paintPhoneAccess() {
     if (btn) btn.classList.toggle('is-on', on);
     if (label) label.dataset.on = on ? '1' : '0';
   }
-  const missing = ['mic', 'notifications', 'overlay', 'usage', 'alarms', 'battery'].filter((k) => !grants[k]);
+  const missing = ['mic', 'notifications', 'listener', 'usage', 'alarms', 'battery'].filter((k) => !grants[k]);
   phoneState.textContent = missing.length ? `${6 - missing.length}/6 granted` : 'full access';
-  phoneState.classList.toggle('bad', missing.includes('mic') || missing.includes('overlay'));
+  phoneState.classList.toggle('bad', missing.includes('mic') || missing.includes('usage'));
   if (phoneHint) {
     phoneHint.textContent = missing.length
       ? `Still needed: ${missing.join(', ')}. Tap a chip to open its screen.`
-      : 'Everything is granted. She can hear you, draw the eye and comment on apps.';
+      : 'Everything is granted. She can hear you, watch your apps and reply by notification.';
   }
   return grants;
 }
@@ -1030,16 +1036,12 @@ function wireEyeVoice() {
   });
 }
 
-// Android: the eye belongs on screen while Capri is out of the way.
+// Android: she watches once Capri is out of the way, and pauses while it is up.
 document.addEventListener('visibilitychange', () => {
   if (IS_DESKTOP_APP || !window.CapriEyes) return;
   try {
-    if (document.hidden && eyeSpyOn()) {
-      if (window.CapriEyes.hasOverlay?.()) window.CapriEyes.show();
-      else window.CapriEyes.start(JSON.stringify(eyeConfig()));
-    } else if (!document.hidden) {
-      window.CapriEyes.hide();
-    }
+    if (document.hidden && eyeSpyOn()) window.CapriEyes.show();
+    else if (!document.hidden) window.CapriEyes.hide();
   } catch { /* web page, not the apk */ }
 });
 
@@ -2182,7 +2184,95 @@ function clearAction(delay = 1200) {
   actTimer = setTimeout(() => el.act.classList.remove("show"), delay);
 }
 
+/* ---------------------------------------------------------- no nut november */
+// Spoken or typed, these orders go straight to the native shell: closing
+// Windows programs is shell work, so it cannot depend on what a model decides
+// to do with the sentence.
+const NNN_PHRASE = /no\s*nut\s*november|nut\s*november\s*mode|\bnbnn\b/i;
+const NNN_CANCEL = /cancel|stop|end|deactivate|disable|abort|release|unlock/i;
+const NNN_STATUS = /status|how\s*(long|much)|still|remaining|until\s*when/i;
+const BARE_CODE = /^[\s"'.,!?-]*(\d{3,8})[\s"'.,!?-]*$/i;
+
+async function nativeNoNut(action, code) {
+  const call = window.capriNative?.noNut;
+  if (typeof call !== "function") return null;
+  try {
+    return await call(action, code);
+  } catch {
+    return null;
+  }
+}
+
+// Her own words for a local order: on screen, out loud, in the transcript, in
+// the eye, and in a notification if she is sitting in the background.
+async function sayLocally(text, userText) {
+  const line = String(text || "").trim();
+  if (!line) return;
+  typer.reset("");
+  typer.held = true;
+  setPhase("speaking");
+  typer.push(line);
+  typer.finish();
+  if (state.voiceOn) speech.enqueue(line);
+  else typer.release();
+  state.history.push({ role: "user", content: String(userText || "").slice(0, 400) });
+  state.history.push({ role: "assistant", content: line });
+  state.history = state.history.slice(-16);
+  if (document.hidden) notifyUser("Capri", line.slice(0, 180));
+  try { window.capriNative?.eyeReply?.(line); } catch { /* older shell */ }
+  clearAction(2500);
+}
+
+// True when the turn belonged to the lock and nothing else has to answer it.
+async function handleNoNut(userText) {
+  if (typeof window.capriNative?.noNut !== "function") {
+    if (NNN_PHRASE.test(String(userText || ""))) {
+      await sayLocally("That lock is PC work. Ask me from the Windows app and I will seal it there.", userText);
+      return true;
+    }
+    return false;
+  }
+  const text = String(userText || "").trim();
+  if (!text) return false;
+  const code = text.match(BARE_CODE)?.[1] || "";
+  const phrase = NNN_PHRASE.test(text);
+  if (!phrase && !code) return false;
+
+  const status = await nativeNoNut("status");
+  if (!status || typeof status.active !== "boolean") return false;
+  // A number on its own is only the code while she holds the lock and has
+  // asked for it; anywhere else it stays an ordinary sentence.
+  if (code && !(status.active && status.awaitingCode)) return false;
+
+  if (code) {
+    const result = await nativeNoNut("code", code);
+    await sayLocally(result?.message || "That did not work. Still locked.", userText);
+    return true;
+  }
+  if (NNN_CANCEL.test(text)) {
+    if (!status.active) {
+      await sayLocally("There is nothing to cancel. The lock is not on.", userText);
+      return true;
+    }
+    const result = await nativeNoNut("cancel");
+    await sayLocally(result?.message || "Then give me the cancellation code.", userText);
+    return true;
+  }
+  if (NNN_STATUS.test(text)) {
+    await sayLocally(status.message, userText);
+    return true;
+  }
+  if (status.active) {
+    await sayLocally(status.message || "Already armed, and it stays armed.", userText);
+    return true;
+  }
+  const result = await nativeNoNut("activate");
+  await sayLocally(result?.message || "Armed. Anything like that gets closed.", userText);
+  return true;
+}
+
 async function respond(userText) {
+  if (await handleNoNut(userText)) return;
   state.history.push({ role: "user", content: userText });
   state.history = state.history.slice(-16);
 
@@ -2416,6 +2506,26 @@ document.querySelectorAll(".dl-card").forEach((card) => {
 // blank one - so the name you set and every setting look forgotten. Keep a copy
 // on the device and hand it back whenever the server comes home empty.
 const MIRROR_KEYS = ["voice", "glitch", "timeFormat", "app_banter"];
+// Everything she knows about you, not just the settings: the copy on this
+// device carries her memory and her side of the conversations, so an account
+// that lands on a rebuilt store gets its whole history back - and a second
+// device signed into the same Google account sees the same saves.
+const MEMORY_BUCKETS = ["fact", "note", "favorite", "music"];
+const MIRROR_TURNS = 120;
+
+function itemsTotal(items) {
+  if (!items || typeof items !== "object") return 0;
+  return MEMORY_BUCKETS.reduce((total, bucket) => total + (Array.isArray(items[bucket]) ? items[bucket].length : 0), 0);
+}
+
+function mirrorMemoryTotal(row) {
+  return itemsTotal(row && row.memory);
+}
+
+function serverMemoryTotal(profile) {
+  const counts = (profile && profile.memory) || {};
+  return ["facts", "notes", "favorites", "music"].reduce((total, key) => total + (Number(counts[key]) || 0), 0);
+}
 
 function mirrorSlot(profile) {
   return `${PROFILE_MIRROR}.${String((profile && (profile.sub || profile.email)) || "this pc")}`;
@@ -2461,6 +2571,12 @@ function writeMirror(profile) {
   const row = { ...prev, at: Date.now(), born: String(profile.createdAt || prev.born || "") };
   row.preferredName = String(profile.preferredName || settings.preferredName || "").trim() || prev.preferredName || "";
   for (const key of MIRROR_KEYS) if (settings[key] !== undefined) row[key] = settings[key];
+  // Whichever side knows more wins: a full server store updates the copy, and a
+  // copy taken before the store was wiped keeps everything until it can be sent back.
+  if (profile.memoryItems && itemsTotal(profile.memoryItems) >= mirrorMemoryTotal(row)) row.memory = profile.memoryItems;
+  if (Array.isArray(profile.recentHistory) && profile.recentHistory.length >= (Array.isArray(row.history) ? row.history.length : 0)) {
+    row.history = profile.recentHistory.slice(-MIRROR_TURNS);
+  }
   writeMirrorRow(profile, row);
   return row;
 }
@@ -2514,7 +2630,18 @@ async function healProfile(profile, row) {
     const value = row[key];
     if (value !== undefined && value !== null && value !== "") payload.settings[key] = value;
   }
-  if (!payload.preferredName && !Object.keys(payload.settings).length) return;
+  // Anything the store lost comes back from the device copy. Restoring is
+  // additive and deduplicated on the server, so sending a copy that is already
+  // there is harmless - but only send it when the store is actually behind.
+  if (mirrorMemoryTotal(row) > serverMemoryTotal(profile)) payload.memoryItems = row.memory;
+  const saved = Number((profile.memory || {}).saved) || 0;
+  if (Array.isArray(row.history) && row.history.length > saved) payload.recentHistory = row.history;
+  if (
+    !payload.preferredName
+    && !Object.keys(payload.settings).length
+    && !payload.memoryItems
+    && !payload.recentHistory
+  ) return;
   mirrorHeal = true;
   try {
     const res = await api("/api/profile", {
@@ -2556,13 +2683,17 @@ function applyProfile(profile) {
   const born = String(profile.createdAt || "");
   const rebuilt = Boolean(row && row.born && born && row.born !== born);
   const nameLost = Boolean(row && row.preferredName && !String(profile.preferredName || "").trim());
-  if (row && !mirrorHeal && (rebuilt || nameLost)) {
+  // Her memory counts too: a store that came back with fewer facts than the
+  // copy on this device has been rebuilt and needs the whole thing handed back.
+  const memoryLost = Boolean(row && mirrorMemoryTotal(row) > serverMemoryTotal(profile));
+  if (row && !mirrorHeal && (rebuilt || nameLost || memoryLost)) {
     applyMirror(row);
     healProfile(profile, row);
   } else {
     pullProfile(profile);
     writeMirror(profile);
   }
+  restoreRecentHistory(profile);
 
   const signedIn = Boolean(profile.google);
   el.accountName.textContent = signedIn ? (profile.email || profile.name || "google account") : "this pc";

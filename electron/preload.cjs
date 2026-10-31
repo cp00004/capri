@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld("capriNative", {
   googleSignIn: () => ipcRenderer.invoke("capri-google-signin"),
   notify: (body, title) => ipcRenderer.invoke("capri-notify", { body: String(body || ""), title: title || "Capri" }),
   eyeSpy: (config) => ipcRenderer.send("capri-eye-config", config || {}),
+  noNut: (action, code) => ipcRenderer.invoke("capri-nnn", { action: String(action || ""), code: String(code || "") }),
   eyeReply: (text) => ipcRenderer.send("capri-eye-reply", String(text || "")),
   saveSession: (token) => ipcRenderer.invoke("capri-session-save", String(token || "")),
   loadSession: () => ipcRenderer.invoke("capri-session-load"),

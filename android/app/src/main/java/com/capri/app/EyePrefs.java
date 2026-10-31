@@ -23,6 +23,7 @@ final class EyePrefs {
 				.putString("base", json.optString("base", ""))
 				.putString("token", json.optString("token", ""))
 				.putString("session", json.optString("session", ""))
+				.putString("key", json.optString("key", ""))
 				.apply();
 	}
 
@@ -35,6 +36,7 @@ final class EyePrefs {
 			json.put("base", prefs.getString("base", ""));
 			json.put("token", prefs.getString("token", ""));
 			json.put("session", prefs.getString("session", ""));
+			json.put("key", prefs.getString("key", ""));
 		} catch (Exception err) { /* plain fields */ }
 		return json.toString();
 	}

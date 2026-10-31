@@ -81,9 +81,10 @@ public class MainActivity extends BridgeActivity {
 		requestRuntime(false);
 	}
 
-	// Everything the phone has to hand over before she can actually take over:
-	// mic, notifications, draw-over-other-apps, usage access, exact alarms and a
-	// battery exemption. The page asks here and gets sent to the right screen.
+	// Everything the phone has to hand over before she can actually watch: mic,
+	// notifications, notification access (what is playing), usage access, exact
+	// alarms and a battery exemption. The page asks here and gets sent to the
+	// right screen.
 	private class PermBridge {
 		@JavascriptInterface
 		public String status() {
@@ -101,7 +102,6 @@ public class MainActivity extends BridgeActivity {
 		public String startEye() {
 			JSONObject cfg = new JSONObject();
 			try { cfg = new JSONObject(EyePrefs.load(MainActivity.this)); } catch (Exception err) { /* defaults */ }
-			EyeService.start(MainActivity.this, cfg.toString());
 			EyeService.show(MainActivity.this, cfg.toString());
 			return grantStatus().toString();
 		}
@@ -113,7 +113,7 @@ public class MainActivity extends BridgeActivity {
 			boolean mic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
 			boolean notes = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
 					|| NotificationManagerCompat.from(this).areNotificationsEnabled();
-			boolean overlay = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this);
+			boolean listener = listenerAllowed();
 			boolean usage = usageAllowed();
 			boolean alarms = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
 					|| ((AlarmManager) getSystemService(ALARM_SERVICE)).canScheduleExactAlarms();
@@ -121,15 +121,26 @@ public class MainActivity extends BridgeActivity {
 					|| ((PowerManager) getSystemService(POWER_SERVICE)).isIgnoringBatteryOptimizations(getPackageName());
 			out.put("mic", mic);
 			out.put("notifications", notes);
-			out.put("overlay", overlay);
+			out.put("listener", listener);
 			out.put("usage", usage);
 			out.put("alarms", alarms);
 			out.put("battery", battery);
-			out.put("core", mic && notes && overlay && usage);
+			out.put("core", mic && notes && usage);
 		} catch (Exception err) {
 			// a missing reading is just a missing grant
 		}
 		return out;
+	}
+
+	// Notification access is the one grant she cannot check with a normal
+	// permission call - it lives in its own secure setting.
+	private boolean listenerAllowed() {
+		try {
+			String enabled = Settings.Secure.getString(getContentResolver(), "enabled_notification_listeners");
+			return enabled != null && enabled.contains(getPackageName());
+		} catch (Exception err) {
+			return false;
+		}
 	}
 
 	private boolean usageAllowed() {
@@ -155,14 +166,14 @@ public class MainActivity extends BridgeActivity {
 			case "notifications":
 				requestRuntime(false);
 				break;
-			case "overlay":
+			case "listener":
 			case "usage":
 			case "alarms":
 			case "battery":
 				openSettingsPage(which);
 				break;
 			default:
-				openSettingsPage("overlay");
+				openSettingsPage("usage");
 		}
 	}
 
@@ -171,7 +182,7 @@ public class MainActivity extends BridgeActivity {
 	// starting the next whenever the user comes back.
 	private void startGrantFlow() {
 		grantQueue.clear();
-		grantQueue.add("overlay");
+		grantQueue.add("listener");
 		grantQueue.add("usage");
 		grantQueue.add("alarms");
 		grantQueue.add("battery");
@@ -223,6 +234,11 @@ public class MainActivity extends BridgeActivity {
 		try {
 			Intent intent;
 			switch (which) {
+				case "listener":
+					// No public constant for this one on every build, so name the
+					// action and let the fallback page catch a miss.
+					intent = new Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS");
+					break;
 				case "usage":
 					intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
 					intent.setData(Uri.parse("package:" + getPackageName()));
@@ -241,9 +257,8 @@ public class MainActivity extends BridgeActivity {
 					intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
 					intent.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
 					break;
-				case "overlay":
 				default:
-					intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
+					intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
 			}
 			intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 			startActivity(intent);
@@ -266,25 +281,9 @@ public class MainActivity extends BridgeActivity {
 		}
 	}
 
-	// The eye, plus the bits of the shell the web page cannot reach: system
+	// The watcher, plus the bits of the shell the web page cannot reach: system
 	// notifications and alarms that outlive the app.
 	private class EyeBridge {
-		@JavascriptInterface
-		public boolean hasOverlay() {
-			return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(MainActivity.this);
-		}
-
-		@JavascriptInterface
-		public void requestOverlay() {
-			try {
-				Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()));
-				intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-				startActivity(intent);
-			} catch (Exception err) {
-				// no settings page on this build
-			}
-		}
-
 		@JavascriptInterface
 		public void setConfig(String config) {
 			EyePrefs.save(MainActivity.this, config);
@@ -292,13 +291,13 @@ public class MainActivity extends BridgeActivity {
 
 		@JavascriptInterface
 		public void show() {
-			if (hasOverlay()) EyeService.show(MainActivity.this, EyePrefs.load(MainActivity.this));
+			EyeService.show(MainActivity.this, EyePrefs.load(MainActivity.this));
 		}
 
 		@JavascriptInterface
 		public void start(String config) {
 			EyePrefs.save(MainActivity.this, config);
-			if (hasOverlay()) EyeService.show(MainActivity.this, config);
+			EyeService.show(MainActivity.this, config);
 		}
 
 		@JavascriptInterface
@@ -310,11 +309,6 @@ public class MainActivity extends BridgeActivity {
 		@JavascriptInterface
 		public void stop() {
 			EyeService.stop(MainActivity.this);
-		}
-
-		@JavascriptInterface
-		public void say(String text) {
-			EyeService.say(MainActivity.this, text);
 		}
 
 		@JavascriptInterface
@@ -330,12 +324,10 @@ public class MainActivity extends BridgeActivity {
 
 	@Override
 	protected void onUserLeaveHint() {
-		// Fires while we still count as foreground, so the overlay service is
-		// allowed to start. The eye is already off in the app itself.
+		// Fires while we still count as foreground, so the watcher service is
+		// allowed to start. Watching is off while you are inside the app.
 		super.onUserLeaveHint();
-		if (EyePrefs.enabled(this) && (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this))) {
-			EyeService.show(this, EyePrefs.load(this));
-		}
+		if (EyePrefs.enabled(this)) EyeService.show(this, EyePrefs.load(this));
 	}
 
 	@Override
