@@ -407,28 +407,51 @@ function pruneOldVersions(keepDir) {
 async function installOverlay(feed, latest) {
   const dir = path.join(UPD_ROOT, latest);
   const zip = path.join(app.getPath("temp"), `Capri-${latest}-win.zip`);
-  sendUpdate({ phase: "downloading", version: latest, percent: 0 });
   const progress = (percent) => sendUpdate({ phase: "downloading", version: latest, percent });
-  let bytes = (() => { try { return fs.statSync(zip).size; } catch { return 0; } })();
+  const short = (size) => size < 50 * 1024 * 1024;
 
-  if (bytes < 50 * 1024 * 1024) {
-    try {
-      ({ bytes } = await downloadFile(feed.windowsZip, zip, progress));
-    } catch (err) {
-      logLine(`update: zip download failed (${err.message}) - retrying once`);
-      await new Promise((r) => setTimeout(r, 3000));
-      ({ bytes } = await downloadFile(feed.windowsZip, zip, progress));
+  async function fetchZip() {
+    let bytes = (() => { try { return fs.statSync(zip).size; } catch { return 0; } })();
+    if (short(bytes)) {
+      try {
+        ({ bytes } = await downloadFile(feed.windowsZip, zip, progress));
+      } catch (err) {
+        logLine(`update: zip download failed (${err.message}) - retrying once`);
+        await new Promise((r) => setTimeout(r, 3000));
+        ({ bytes } = await downloadFile(feed.windowsZip, zip, progress));
+      }
     }
+    if (short(bytes)) throw new Error("update package came down short");
   }
-  if (bytes < 50 * 1024 * 1024) throw new Error("update package came down short");
 
+  async function unpack() {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* fresh dir */ }
+    fs.mkdirSync(dir, { recursive: true });
+    await extractZip(zip, dir);
+    if (!fs.existsSync(path.join(dir, "Capri.exe"))) throw new Error("update package had no Capri.exe");
+  }
+
+  // A cached zip is named after the version, so re-publishing the same version
+  // leaves the old bytes on disk and the old build gets installed under the new
+  // number. Trust the payload over the filename.
+  const payloadVersion = () => {
+    try {
+      return String(JSON.parse(fs.readFileSync(path.join(dir, "resources", "app", "package.json"), "utf8")).version || "");
+    } catch { return ""; }
+  };
+
+  sendUpdate({ phase: "downloading", version: latest, percent: 0 });
+  await fetchZip();
   sendUpdate({ phase: "installing", version: latest });
   logLine(`update: unpacking ${latest}`);
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* fresh dir */ }
-  fs.mkdirSync(dir, { recursive: true });
-  await extractZip(zip, dir);
-  const exe = path.join(dir, "Capri.exe");
-  if (!fs.existsSync(exe)) throw new Error("update package had no Capri.exe");
+  await unpack();
+  if (payloadVersion() !== latest) {
+    logLine(`update: package says ${payloadVersion() || "nothing"} but feed says ${latest} - redownloading`);
+    try { fs.rmSync(zip, { force: true }); } catch { /* nothing to drop */ }
+    await fetchZip();
+    await unpack();
+    if (payloadVersion() !== latest) throw new Error("update package does not contain the release it announces");
+  }
 
   // Model keys only ever exist on this machine, never in the release. Carry the
   // current .env across so an unpack does not leave her with no relays.
@@ -445,7 +468,7 @@ async function installOverlay(feed, latest) {
 
   writeCurrent({ version: latest, dir });
   logLine(`update: ${latest} ready, relaunching`);
-  relaunchTo(exe);
+  relaunchTo(path.join(dir, "Capri.exe"));
 }
 
 async function checkForUpdates() {
