@@ -2047,7 +2047,6 @@ async function handleStt(req, res) {
   }
   json(res, 502, { error: "stt_failed", message: failure || "No transcription engine answered." });
 }
-}
 
 // ---------------------------------------------------------------- pairing + access
 async function handlePair(req, res) {
