@@ -1941,10 +1941,11 @@ function audioExtension(type) {
   return "webm";
 }
 
-async function geminiStt(buffer, type) {
+async function geminiStt(buffer, type, hint = "") {
   const key = GEMINI_KEYS[0];
   if (!key) return null;
   const model = process.env.CAPRI_STT_GEMINI_MODEL || GEMINI_MODEL;
+  const guide = hint ? `${hint} ` : "";
   try {
     const upstream = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
@@ -1955,7 +1956,7 @@ async function geminiStt(buffer, type) {
           contents: [{
             role: "user",
             parts: [
-              { text: "Transcribe the speech in this audio exactly. Reply with the spoken words only and nothing else." },
+              { text: `${guide}Transcribe the speech in this audio exactly, keeping names as given. Reply with the spoken words only and nothing else.` },
               { inline_data: { mime_type: type, data: buffer.toString("base64") } },
             ],
           }],
@@ -2036,7 +2037,7 @@ async function handleStt(req, res) {
   }
 
   // One bucket can run dry while the account still has capacity elsewhere.
-  const fallback = await geminiStt(buffer, type);
+  const fallback = await geminiStt(buffer, type, hint);
   if (fallback !== null) return json(res, 200, { text: fallback, via: "gemini" });
 
   if (limited) {
