@@ -1225,9 +1225,10 @@ const NNN_MARK = "capri-no-nut-november";
 const NNN_WORDS = [
   "porn", "pornhub", "onlyfans", "fansly", "chaturbate", "stripchat", "livejasmin", "camsoda",
   "bongacams", "cam4", "mydirtyhobby", "brazzers", "naughty", "nude", "nudes", "nsfw", "rule ?34",
-  "hentai", "eroge", "erotic", "sex", "xnxx", "xvideos", "xhamster", "redtube", "youporn",
+  "hentai", "eroge", "erotic", "sex", "sexy", "xnxx", "xvideos", "xhamster", "redtube", "youporn",
   "spankbang", "tube8", "eporner", "beeg", "fetlife", "kink", "feet ?pic", "leaked", "cam ?show",
   "adult", "xxx", "boobs", "milf", "blowjob", "orgy", "bdsm", "webcam ?models? ?live",
+  "anime", "ecchi", "ahegao", "doujin", "lewds?", "shemale", "sexcam", "sex ?tape", "sex ?video",
 ];
 const NNN_PATTERN = new RegExp(`(?:\\b(?:${NNN_WORDS.join("|")})\\b)`, "i");
 const NNN_DOMAINS = [
@@ -1237,14 +1238,23 @@ const NNN_DOMAINS = [
   "beeg.com", "www.beeg.com", "chaturbate.com", "www.chaturbate.com", "onlyfans.com", "www.onlyfans.com",
   "fansly.com", "www.fansly.com", "brazzers.com", "www.brazzers.com", "livejasmin.com", "stripchat.com",
   "camsoda.com", "www.camsoda.com", "bongacams.com", "mydirtyhobby.com", "fetlife.com", "kink.com",
+  "hentaihaven.xxx", "nhentai.net", "e-hentai.org", "exhentai.org", "hanime.tv", "rule34.xxx",
+  "gelbooru.com", "danbooru.donmai.us", "sankakucomplex.com", "animeheaven.me", "9anime.to",
 ];
 
 const NNN_FILE_LIST = () => path.join(app.getPath("userData"), "no-nut-domains.json");
-const NNN_LIST_URL = "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts";
+// Several independent porn/NSFW lists, merged. One list is never the whole
+// internet; four of them catch the sites the others have never heard of.
+const NNN_LIST_URLS = [
+  "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts",
+  "https://blocklistproject.github.io/Lists/porn.txt",
+  "https://blocklistproject.github.io/Lists/nsfw.txt",
+  "https://raw.githubusercontent.com/chadmayfield/pihole-blocklists/master/lists/pi_blocklist_porn_top1m.list",
+];
 // Windows reads the hosts file through the DNS cache, so a huge list is real
 // CPU. The full list still decides what is blocked on screen; only this many
 // go into the hosts file.
-const NNN_HOSTS_CAP = 20000;
+const NNN_HOSTS_CAP = 35000;
 const NNN_VEIL_MS = 20_000;
 
 // The curated list is what she knows even with no network; the downloaded one
@@ -1271,33 +1281,39 @@ function nnnAllDomains() {
   return out;
 }
 
-// Pull the public blocklist once a day. Domains only - nothing is fetched from
-// the sites themselves.
+// Pull the public blocklists once a day. Domains only - nothing is fetched from
+// the sites themselves. Lists mix hosts-file and bare-domain formats.
 async function nnnPullList(force = false) {
   const age = (() => { try { return Date.now() - Number(readJson(NNN_FILE_LIST())?.fetchedAt || 0); } catch { return Infinity; } })();
   if (!force && age < 24 * 3600_000 && nnnExtraDomains.length) return nnnExtraDomains.length;
-  try {
-    const res = await fetch(NNN_LIST_URL, { signal: AbortSignal.timeout(45_000) });
-    if (!res.ok) throw new Error(`http ${res.status}`);
-    const text = await res.text();
-    const found = new Set();
-    for (const line of text.split(/\r?\n/)) {
-      const m = /^\s*0\.0\.0\.0\s+([a-z0-9][a-z0-9.-]*)\s*$/i.exec(line);
-      if (!m) continue;
-      const host = m[1].toLowerCase();
-      if (host === "localhost" || host === "local" || !host.includes(".")) continue;
-      found.add(host);
+  const found = new Set(nnnExtraDomains);
+  let answered = 0;
+  for (const url of NNN_LIST_URLS) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(45_000) });
+      if (!res.ok) throw new Error(`http ${res.status}`);
+      const text = await res.text();
+      for (const line of text.split(/\r?\n/)) {
+        const clean = line.replace(/#.*$/, "").trim();
+        if (!clean) continue;
+        const parts = clean.split(/\s+/);
+        const host = (parts.length > 1 ? parts[1] : parts[0]).toLowerCase();
+        if (!/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(host)) continue;
+        if (host === "localhost" || host === "local" || host === "localhost.localdomain") continue;
+        found.add(host.replace(/^www\./, ""));
+      }
+      answered += 1;
+    } catch (err) {
+      logLine(`nnn: blocklist ${url.split("/").pop()} failed (${err.message})`);
     }
-    const domains = [...found];
-    if (!domains.length) throw new Error("no domains parsed");
+  }
+  const domains = [...found].slice(0, 120000);
+  if (answered && domains.length) {
     writeJson(NNN_FILE_LIST(), { fetchedAt: Date.now(), domains });
     nnnExtraDomains = domains;
     logLine(`nnn: blocklist has ${domains.length} sites`);
-    return domains.length;
-  } catch (err) {
-    logLine(`nnn: blocklist fetch failed (${err.message}) - using the list on disk`);
-    return nnnExtraDomains.length;
   }
+  return nnnExtraDomains.length;
 }
 
 // A page title or window title carrying a domain she has never heard of still
@@ -1342,7 +1358,7 @@ const nnnFile = () => path.join(NNN_DATA, "no-nut-november.json");
 let nnn = {
   active: false, awaitingCode: false, since: 0, releaseAt: 0, kills: 0, blocked: 0,
   wrongCodes: 0, sites: false, lastKill: "", auto: false, dismissed: 0, completed: 0,
-  reportedAt: 0, identity: { email: "", name: "" },
+  reportedAt: 0, hostsCleanAt: 0, identity: { email: "", name: "" },
 };
 let nnnTimer = null;
 let nnnSweeping = false;
@@ -1357,6 +1373,7 @@ function nnnLoad() {
     nnnPullList().then((count) => { if (nnn.active && count) nnnHosts(true); }).catch(() => {});
   }
   nnnCheckSchedule();
+  setTimeout(nnnEnsureHosts, 5000);
 }
 
 function nnnSave() {
@@ -1394,6 +1411,7 @@ function nnnCheckSchedule(now = new Date()) {
   }
   if (t < start) {
     if (nnn.active && nnn.auto) nnnRelease("The season has not started yet.", { quiet: true });
+    nnnEnsureHosts();
     return { mode: "before", start, end };
   }
   if (!nnn.active && nnn.dismissed !== end) nnnActivate({ auto: true, quiet: true });
@@ -1433,6 +1451,69 @@ function nnnHosts(on) {
     nnn.sites = false;
     return false;
   }
+}
+
+/* A release can fail to rewrite the hosts file when Capri is not elevated.
+   Left alone those lines keep the sites blocked after the season ended (or
+   before it began). Noticing them and offering one Windows prompt fixes it. */
+function nnnHostsPath() {
+  return path.join(process.env.SystemRoot || "C:\\Windows", "System32", "drivers", "etc", "hosts");
+}
+
+function nnnHostsHasMark() {
+  try { return fs.readFileSync(nnnHostsPath(), "utf8").includes(NNN_MARK); } catch { return false; }
+}
+
+function nnnHostsCleanStale() {
+  const file = nnnHostsPath();
+  try {
+    const raw = fs.readFileSync(file, "utf8");
+    if (!raw.includes(NNN_MARK)) return true;
+    const stripped = raw.split(/\r?\n/).filter((line) => !line.includes(NNN_MARK)).join("\r\n");
+    fs.writeFileSync(file, `${stripped}\r\n`);
+    execFile("ipconfig.exe", ["/flushdns"], { windowsHide: true }, () => {});
+    nnn.sites = false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nnnElevatedHostsClean() {
+  const script = path.join(os.tmpdir(), "capri-hosts-clean.ps1");
+  const hosts = nnnHostsPath().replace(/'/g, "''");
+  try {
+    fs.writeFileSync(script,
+      `$f='${hosts}'; $raw=Get-Content -LiteralPath $f -ErrorAction Stop; ` +
+      `$out=$raw | Where-Object { $_ -notmatch 'capri-no-nut-november' }; ` +
+      `Set-Content -LiteralPath $f -Value $out -Encoding ASCII; ipconfig /flushdns | Out-Null`,
+      "utf8");
+    const arg = script.replace(/'/g, "''");
+    const ps = `Start-Process -FilePath powershell.exe -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','${arg}'`;
+    execFile("powershell.exe", ["-NoProfile", "-Command", ps], { windowsHide: true, timeout: 20000 }, (err) => {
+      if (err) logLine(`nnn: elevated hosts cleanup refused (${err.message.trim().split("\n").pop()})`);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Called at boot and on every calendar check. Only outside the active season:
+// during the season those lines are the point.
+function nnnEnsureHosts() {
+  if (GUARD_MODE) return;
+  if (nnn.active) return;
+  if (!nnnHostsHasMark()) return;
+  if (nnnHostsCleanStale()) {
+    logLine("nnn: cleared stale site blocks (season is not running)");
+    return;
+  }
+  if (Date.now() - Number(nnn.hostsCleanAt || 0) < 6 * 3600_000) return;
+  nnn.hostsCleanAt = Date.now();
+  nnnSave();
+  notify("Capri // NO NUT NOVEMBER", "Last season's site blocks are still in Windows. Approve the prompt to clear them.");
+  nnnElevatedHostsClean();
 }
 
 /* The black cover, sized to the window that broke the rule - just that tab's
@@ -1819,6 +1900,7 @@ function nnnRelease(reason, opts = {}) {
   nnnLockFiles(false);
   nnnSave();
   logLine(`nnn: released (${reason})`);
+  setTimeout(nnnEnsureHosts, 1500);
   if (!opts.quiet) notify("Capri // NO NUT NOVEMBER", opts.completed ? `${reason} NNN Mode completed.` : reason);
 }
 

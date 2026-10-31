@@ -11,11 +11,14 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.ContentUris;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ServiceInfo;
+import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.media.AudioManager;
 import android.media.MediaMetadata;
+import android.media.MediaMetadataRetriever;
 import android.media.ToneGenerator;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
@@ -24,6 +27,8 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.net.Uri;
+import android.util.Size;
 import android.provider.MediaStore;
 import android.provider.Settings;
 import android.service.notification.StatusBarNotification;
@@ -405,9 +410,10 @@ public class EyeService extends Service {
 	private static final String[] NNN_WORDS = {
 		"porn", "pornhub", "onlyfans", "fansly", "chaturbate", "stripchat", "livejasmin", "camsoda",
 		"bongacams", "cam4", "mydirtyhobby", "brazzers", "naughty", "nude", "nudes", "nsfw",
-		"hentai", "eroge", "erotic", "sex", "xnxx", "xvideos", "xhamster", "redtube", "youporn",
+		"hentai", "eroge", "erotic", "sex", "sexy", "xnxx", "xvideos", "xhamster", "redtube", "youporn",
 		"spankbang", "tube8", "eporner", "beeg", "fetlife", "kink", "leaked", "adult", "xxx",
 		"boobs", "milf", "blowjob", "orgy", "bdsm", "webcam model", "cam show", "camshow",
+		"anime", "ecchi", "ahegao", "doujin", "lewd", "shemale", "sexcam", "sex tape", "sex video",
 	};
 	private static final Pattern NNN_PATTERN = Pattern.compile(nnAlternation(), Pattern.CASE_INSENSITIVE);
 
@@ -677,17 +683,63 @@ public class EyeService extends Service {
 		}).start();
 	}
 
-	// The gallery, by name and folder. Android ships no offline "is this adult
-	// content" model, so this is the honest heuristic: a filename or album that
-	// says what it is. Matches are reported once each.
+	// Android ships no offline "is this adult" model, so the check is honest and
+	// two-part: a filename or album that says what it is, plus a conservative
+	// skin-coverage test on the thumbnail. Only a very high share of skin is
+	// flagged, because a false alarm is worse than a miss.
+	private static Bitmap nnnThumb(Context ctx, Uri uri, boolean video) {
+		try {
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+				return ctx.getContentResolver().loadThumbnail(uri, new Size(160, 160), null);
+			}
+			MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+			try {
+				mmr.setDataSource(ctx, uri);
+				return mmr.getFrameAtTime(video ? 1_000_000L : 0L);
+			} finally {
+				try { mmr.release(); } catch (Exception err) { /* released */ }
+			}
+		} catch (Exception err) {
+			return null;
+		}
+	}
+
+	private static float nnnSkinShare(Bitmap bmp) {
+		if (bmp == null) return 0f;
+		int w = bmp.getWidth();
+		int h = bmp.getHeight();
+		if (w < 8 || h < 8) return 0f;
+		int step = Math.max(1, Math.max(w, h) / 96);
+		long skin = 0;
+		long total = 0;
+		for (int y = 0; y < h; y += step) {
+			for (int x = 0; x < w; x += step) {
+				int c = bmp.getPixel(x, y);
+				if (((c >>> 24) & 0xff) < 100) continue;
+				int r = (c >> 16) & 0xff;
+				int g = (c >> 8) & 0xff;
+				int b = c & 0xff;
+				int max = Math.max(r, Math.max(g, b));
+				int min = Math.min(r, Math.min(g, b));
+				total++;
+				if (r > 95 && g > 40 && b > 20 && max - min > 15
+						&& Math.abs(r - g) > 15 && r > g && r > b) skin++;
+			}
+		}
+		return total == 0 ? 0f : (float) skin / (float) total;
+	}
+
 	private static void nnnScanGallery(Context context) {
 		final Context app = context.getApplicationContext();
 		SharedPreferences prefs = app.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
 		prefs.edit().putLong("galleryAt", System.currentTimeMillis()).apply();
 		java.util.Set<String> seen = new java.util.HashSet<>(prefs.getStringSet("gallerySeen", new java.util.HashSet<String>()));
+		java.util.Set<String> checked = new java.util.HashSet<>(prefs.getStringSet("galleryChecked", new java.util.HashSet<String>()));
 		boolean added = false;
+		int visualBudget = 160;
 		for (android.net.Uri base : new android.net.Uri[] {
 				MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI }) {
+			boolean video = base.equals(MediaStore.Video.Media.EXTERNAL_CONTENT_URI);
 			android.database.Cursor cur = null;
 			try {
 				String[] cols = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
@@ -698,20 +750,41 @@ public class EyeService extends Service {
 				int idCol = cur.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
 				int nameCol = cur.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
 				while (cur.moveToNext()) {
+					long id = cur.getLong(idCol);
 					String name = String.valueOf(cur.getString(nameCol));
 					String path = cur.getString(2);
-					if (!NNN_PATTERN.matcher(name + " " + (path == null ? "" : path)).find()) continue;
-					String key = base + "/" + cur.getLong(idCol);
+					String key = base + "/" + id;
+					boolean named = NNN_PATTERN.matcher(name + " " + (path == null ? "" : path)).find();
+					if (!named) {
+						// Walk the gallery a slice at a time instead of decoding
+						// every photo on every sweep.
+						if (visualBudget <= 0 || checked.contains(key)) continue;
+						checked.add(key);
+						visualBudget--;
+						Bitmap bmp = nnnThumb(app, ContentUris.withAppendedId(base, id), video);
+						try {
+							if (nnnSkinShare(bmp) < 0.66f) continue;
+						} finally {
+							if (bmp != null) bmp.recycle();
+						}
+					}
 					if (seen.contains(key)) continue;
 					seen.add(key);
 					added = true;
-					Alerts.show(app, "Capri // NO NUT NOVEMBER", "Found an 18+ file in your gallery (" + name + "). Reported as a loss.");
-					nnnReport(app, "gallery file: " + name);
+					Alerts.show(app, "Capri // NO NUT NOVEMBER", named
+							? "Found an 18+ file in your gallery (" + name + "). Reported as a loss."
+							: "Found sexual media in your gallery (" + name + "). Reported as a loss.");
+					nnnReport(app, (named ? "gallery file: " : "gallery image: ") + name);
 					prefs.edit().putInt("blocked", prefs.getInt("blocked", 0) + 1).apply();
 				}
 			} catch (Exception err) { /* no media grant yet */ }
 			finally { if (cur != null) cur.close(); }
 		}
+		if (checked.size() > 4000) {
+			java.util.List<String> list = new java.util.ArrayList<>(checked);
+			checked = new java.util.HashSet<>(list.subList(list.size() - 2000, list.size()));
+		}
+		prefs.edit().putStringSet("galleryChecked", checked).apply();
 		if (!added) return;
 		if (seen.size() > 800) {
 			java.util.List<String> list = new java.util.ArrayList<>(seen);

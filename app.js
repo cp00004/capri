@@ -116,7 +116,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.5.11";
+const APP_VERSION = "4.5.12";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -762,11 +762,11 @@ function pickBrowserVoice(voices) {
 
 const FALLBACK_VOICES = [
   { id: "capri", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous. The one and only." },
+  { id: "mommy", label: "MOMMY // fish audio", note: "A warm, teasing, older voice from Fish Audio. Needs FISH_AUDIO_API_KEY on her server." },
 ];
 
 function refreshVoices() {
-  // Keep only the first voice (or fallback) to enforce a single voice
-  const list = (state.voices.length ? state.voices : FALLBACK_VOICES).slice(0, 1);
+  const list = state.voices.length ? state.voices : FALLBACK_VOICES;
   el.voiceSelect.innerHTML = "";
   for (const v of list) {
     const opt = document.createElement("option");
@@ -792,7 +792,9 @@ function paintVoiceHint() {
   const v = (state.voices.length ? state.voices : FALLBACK_VOICES).find((x) => x.id === state.voicePreset);
   el.voiceHint.textContent = state.voicePreset === "system"
     ? "Uses whatever voice your browser has. Always available, never quite her."
-    : v?.note || "Neural voice with a show-matched edge.";
+    : (v?.id === "mommy" && state.config && state.config.hasFish === false
+      ? "MOMMY comes from Fish Audio. Add FISH_AUDIO_API_KEY to her server to hear the real model."
+      : v?.note || "Neural voice with a show-matched edge.");
   if (el.prefName && state.profile) {
     const name = state.profile.preferredName || state.profile.settings?.preferredName || "";
     // Never blank the field: an empty server profile means it lost the file, not
@@ -808,6 +810,10 @@ function paintVoiceHint() {
 function setVoicePreset(value) {
   state.voicePreset = value;
   state.orpheusVoice = value;
+  // Each voice pins its own engine; carrying MOMMY's fish engine over to CAPRI
+  // would make the next line come out of the wrong mouth.
+  state.voiceEngine = "";
+  localStorage.removeItem(VOICE_ENGINE_KEY);
   localStorage.setItem("capri.voicePreset", value);
   localStorage.setItem("capri.voice", value);
   paintVoiceHint();
@@ -4280,15 +4286,24 @@ async function boot() {
     if (cfg.portrait) {
       // The shipped portrait wins over a stale server path, and a fresh query
       // string keeps browsers from reusing the old cached face.
-      const shipped = "assets/capri-portrait.png?v=2";
+      const sources = [
+        "assets/capri-portrait.png?v=3",
+        "assets/capri-portrait.jpg?v=3",
+        cfg.portrait,
+        "assets/capri.png?v=3",
+      ].filter((src, i, all) => src && all.indexOf(src) === i);
       const use = (src) => {
         state.portrait = src;
         el.portraitImg.src = src;
         el.ghostA.src = src;
         el.ghostB.src = src;
       };
-      el.portraitImg.addEventListener("error", () => use(cfg.portrait), { once: true });
-      use(shipped);
+      let pick = 0;
+      el.portraitImg.addEventListener("error", () => {
+        pick += 1;
+        if (pick < sources.length) use(sources[pick]);
+      });
+      use(sources[0]);
     }
     if (!cfg.hasKey && !cfg.hasGemini) showNotice("Capri's server has no API key yet, so she cannot think. Add GROQ_API_KEY (or GEMINI_API_KEY) in the hosting panel, then redeploy.", null, null, 20000);
 
