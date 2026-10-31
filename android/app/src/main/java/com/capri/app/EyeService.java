@@ -186,16 +186,18 @@ public class EyeService extends Service {
 		try { cfg = new JSONObject(intent == null ? "{}" : String.valueOf(intent.getStringExtra(EXTRA_CONFIG))); } catch (Exception err) { /* defaults */ }
 		if (!cfg.optBoolean("enabled", true)) {
 			// Banter off does not mean the lock off: enforcement keeps its own
-			// loop and does not need the server or the watcher.
-			if (nnnArmed(this) || nnnNeeded(this)) {
-				nnnCheckSchedule(this);
+			// loop and does not need the server or the watcher. The ear alone is
+			// also enough to keep the service up with the eye switched off.
+			boolean nnn = nnnArmed(this) || nnnNeeded(this);
+			if (nnn || EyePrefs.wake(this)) {
+				if (nnn) nnnCheckSchedule(this);
 				base = cfg.optString("base", "").trim();
 				token = cfg.optString("token", "").trim();
 				session = cfg.optString("session", "").trim();
 				apiKey = cfg.optString("key", "").trim();
 				startForegroundSafe();
 				stopWatching();
-				startNnn();
+				if (nnn) startNnn();
 				backgroundVoice(this, true);
 				return START_STICKY;
 			}
@@ -227,8 +229,9 @@ public class EyeService extends Service {
 	// works after the window is gone. When the name (and an order) lands, she
 	// pings, opens herself and hands the order to the page.
 	static void backgroundVoice(Context context, boolean on) {
-		boolean wanted = on && EyePrefs.wake(context)
-				&& (EyePrefs.enabled(context) || nnnArmed(context) || nnnNeeded(context));
+		// The foreground service is the only place Android lets the mic run with
+		// the window gone, so the ear never starts without it.
+		boolean wanted = on && running && EyePrefs.wake(context);
 		if (!wanted) {
 			if (bgVoice) {
 				bgVoice = false;

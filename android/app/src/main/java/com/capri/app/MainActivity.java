@@ -513,7 +513,7 @@ public class MainActivity extends BridgeActivity {
 		// Fires while we still count as foreground, so the watcher service is
 		// allowed to start. Watching is off while you are inside the app.
 		super.onUserLeaveHint();
-		if (EyePrefs.enabled(this) || EyeService.nnnArmed(this) || EyeService.nnnNeeded(this)) {
+		if (EyePrefs.enabled(this) || EyePrefs.wake(this) || EyeService.nnnArmed(this) || EyeService.nnnNeeded(this)) {
 			EyeService.show(this, EyePrefs.load(this));
 		}
 	}
@@ -539,6 +539,11 @@ public class MainActivity extends BridgeActivity {
 	@Override
 	public void onPause() {
 		super.onPause();
+		// A pause can be a lock screen or a jump into another app, where
+		// onUserLeaveHint may not fire. The service is what keeps the ear alive.
+		if (EyePrefs.wake(this) || EyePrefs.enabled(this) || EyeService.nnnArmed(this) || EyeService.nnnNeeded(this)) {
+			EyeService.show(this, EyePrefs.load(this));
+		}
 		EyeService.backgroundVoice(this, true);
 	}
 
