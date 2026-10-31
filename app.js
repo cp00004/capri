@@ -116,7 +116,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.5.10";
+const APP_VERSION = "4.5.11";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -184,7 +184,10 @@ async function api(url, opts = {}) {
   if (ownKey && url.startsWith("/api/chat")) headers.set("X-Capri-Key", ownKey);
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
   const controller = opts.signal ? null : new AbortController();
-  const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
+  // A fallback transcriber can take its time on a cold clip; cutting it at
+  // eight seconds used to surface as "Failed to fetch" and looked like a dead
+  // link even though the server was still working.
+  const timeoutId = controller ? setTimeout(() => controller.abort(), url.startsWith("/api/stt") ? 30000 : 8000) : null;
   let res;
   try {
     res = await fetch(apiUrl(withDevice(url)), { ...opts, headers, signal: opts.signal || controller.signal });
@@ -2230,7 +2233,12 @@ async function transcribe(blob) {
     await respond(text);
   } catch (err) {
     setPhase("idle");
-    if (err.message !== "unauthorized") showNotice(`No link: ${err.message}`, null, null, 8000);
+    if (err.message !== "unauthorized") {
+      const dropped = /failed to fetch|network|abort/i.test(String(err.message || ""));
+      showNotice(dropped
+        ? "No link: the server did not answer. Check the connection and tap again."
+        : `No link: ${err.message}`, null, null, 8000);
+    }
     resumeWakeWord();
   }
 }
@@ -2517,7 +2525,9 @@ const BARE_CODE = /^[\s"'.,!?-]*(\d{3,8})[\s"'.,!?-]*$/i;
 // One switch, on the public backend, for every device running Capri. Each box
 // polls it and honours it locally, so arming it here seals PCs and phones alike
 // and nobody has to say the order twice.
-const NNN_SERVER = DEFAULT_TUNNEL;
+// The desktop's page cannot call the hosted switch directly, so it asks its own
+// server, which relays the call and mirrors the answer.
+const NNN_SERVER = OWN_SERVER ? "" : DEFAULT_TUNNEL;
 const NNN_POLL_MS = 180000;
 let nnnGlobal = { armed: false, armedAt: 0, releaseAt: 0, until: "", days: 0, message: "" };
 let nnnLocal = null;       // last answer from this machine's shell
