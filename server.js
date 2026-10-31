@@ -1961,12 +1961,17 @@ async function handleStt(req, res) {
   const buffer = Buffer.concat(chunks);
   if (!buffer.length) return json(res, 400, { error: "empty_audio" });
 
+  // A short hint keeps Whisper spelling the assistant's name the same way the
+  // wake matcher expects ("Copy" instead of "Capri" broke hands-free use).
+  const hint = String(req.headers["x-capri-prompt"] || "").trim().slice(0, 240);
+
   try {
     const form = new FormData();
     form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
     form.append("model", STT_MODEL);
     form.append("response_format", "json");
     form.append("temperature", "0");
+    if (hint) form.append("prompt", hint);
 
     const upstream = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
       method: "POST",

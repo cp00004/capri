@@ -281,6 +281,8 @@ final class CapriVoice {
 			conn.setRequestProperty("Content-Type", "audio/wav");
 			conn.setRequestProperty("Accept", "application/json");
 			conn.setRequestProperty("User-Agent", "Capri-Android");
+			conn.setRequestProperty("X-Capri-Prompt",
+					"Capri is the assistant's name. The user says Capri.");
 			if (!device.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + device);
 			if (!session.isEmpty()) conn.setRequestProperty("X-Capri-Profile", session);
 			conn.setFixedLengthStreamingMode(clip.length);
@@ -378,7 +380,31 @@ final class CapriVoice {
 			}
 			return rest.toString().trim();
 		}
+		// A one-word take that Whisper spelled slightly off ("capre", "carpri")
+		// still counts as just the name. Full sentences stay strict so "copy"
+		// in normal speech cannot wake her.
+		if (words.length == 1 && words[0].length() >= 4 && words[0].length() <= 6
+				&& distance(words[0], "capri") <= 1) {
+			return "";
+		}
 		return null;
+	}
+
+	private static int distance(String a, String b) {
+		int[] prev = new int[b.length() + 1];
+		int[] cur = new int[b.length() + 1];
+		for (int j = 0; j <= b.length(); j += 1) prev[j] = j;
+		for (int i = 1; i <= a.length(); i += 1) {
+			cur[0] = i;
+			for (int j = 1; j <= b.length(); j += 1) {
+				int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
+				cur[j] = Math.min(Math.min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
+			}
+			int[] swap = prev;
+			prev = cur;
+			cur = swap;
+		}
+		return prev[b.length()];
 	}
 
 	private static final java.util.Set<String> WAKE = new java.util.HashSet<>(java.util.Arrays.asList(
