@@ -67,26 +67,47 @@
   #face { position: relative; will-change: transform; transform-origin: 50% 55%; }
   #eye { display: block; width: 250px; height: auto; }
 
-  /* The eyeball: the iris disc itself, masked soft at the rim, sliding the
-     same art inside it so the pupil follows the cursor. */
-  #aperture {
+  /* Socket: the shadowed recess left behind when the iris moves away from the
+     printed one. It never moves, so the pupil sliding over it is what reads as
+     a glance. */
+  #socket {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 2;
+    background: radial-gradient(circle at 50% 46%, #15000f 0%, #05000a 62%, rgba(5, 0, 10, .55) 88%, rgba(5, 0, 10, 0) 100%);
+    box-shadow: inset 0 3px 7px rgba(0, 0, 0, .8), inset 0 -2px 4px rgba(0, 0, 0, .55);
+  }
+
+  /* The iris is a real disc cut from her own art and slid over the socket, so
+     the pupil travels with it instead of the whole face shifting. */
+  #iris {
     position: absolute;
     border-radius: 50%;
     overflow: hidden;
     pointer-events: none;
-    -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 72%, rgba(0, 0, 0, 0) 100%);
-    mask-image: radial-gradient(circle at 50% 50%, #000 72%, rgba(0, 0, 0, 0) 100%);
+    z-index: 3;
+    will-change: transform;
+    filter: saturate(1.18) contrast(1.06);
+    -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 82%, rgba(0, 0, 0, 0) 100%);
+    mask-image: radial-gradient(circle at 50% 50%, #000 82%, rgba(0, 0, 0, 0) 100%);
   }
-  #aperture::after {
-    content: "";
-    position: absolute; inset: 0;
-    border-radius: 50%;
-    box-shadow: inset 0 0 6px rgba(0, 0, 0, .35);
-  }
-  #iris {
+  #iris img {
     position: absolute;
     display: block;
-    will-change: transform;
+    max-width: none;
+  }
+
+  /* Fixed catchlight: it stays put while the iris moves under it, which is the
+     other half of why an eye reads as a sphere. */
+  #glint {
+    position: absolute;
+    z-index: 4;
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(circle at 38% 36%, rgba(255, 255, 255, .9), rgba(190, 255, 230, .45) 46%, rgba(190, 255, 230, 0) 74%);
+    mix-blend-mode: screen;
+    opacity: .85;
   }
 
   #scan {
@@ -132,7 +153,9 @@
     <div id="stage">
       <div id="face">
         <img id="eye" alt="Capri eye" />
-        <div id="aperture"><img id="iris" alt="" /></div>
+        <div id="socket"></div>
+        <div id="iris"><img id="irisArt" alt="" /></div>
+        <div id="glint"></div>
       </div>
       <div id="scan"></div>
     </div>
@@ -144,8 +167,10 @@
   const stage = document.getElementById("stage");
   const face = document.getElementById("face");
   const img = document.getElementById("eye");
-  const aperture = document.getElementById("aperture");
+  const socket = document.getElementById("socket");
   const iris = document.getElementById("iris");
+  const irisArt = document.getElementById("irisArt");
+  const glint = document.getElementById("glint");
   const bubble = document.getElementById("bubble");
   const line = document.getElementById("line");
   const modeTag = document.getElementById("mode");
@@ -241,7 +266,7 @@
   // The iris layer is the same cutout parked over itself inside a soft circle.
   // Sliding that layer a few pixels is what makes the eyeball look around.
   function buildEyeball() {
-    iris.src = img.dataset.src || img.src;
+    irisArt.src = img.dataset.src || img.src;
     layoutEyeball();
   }
 
@@ -249,19 +274,32 @@
     const rect = img.getBoundingClientRect();
     const shownW = rect.width || sprite.w;
     const shownH = rect.height || Math.round(shownW * (sprite.h / sprite.w));
-    const size = Math.round(ball.r * 2 * shownW);
-    ball.size = size;
-    ball.left = ball.cx * shownW - size / 2;
-    ball.top = ball.cy * shownH - size / 2;
-    ball.max = Math.max(3.4, size * 0.095);
-    aperture.style.width = `${size}px`;
-    aperture.style.height = `${size}px`;
-    aperture.style.left = `${ball.left.toFixed(1)}px`;
-    aperture.style.top = `${ball.top.toFixed(1)}px`;
-    iris.style.width = `${shownW}px`;
-    iris.style.height = `${shownH}px`;
-    iris.style.left = `${(-ball.left).toFixed(1)}px`;
-    iris.style.top = `${(-ball.top).toFixed(1)}px`;
+    const disc = Math.round(ball.r * 2 * shownW);
+    const cx = ball.cx * shownW;
+    const cy = ball.cy * shownH;
+    ball.size = disc;
+    ball.left = cx - disc / 2;
+    ball.top = cy - disc / 2;
+    // A glance of a fifth of the iris diameter. Large enough to read at a
+    // glance, small enough that the disc never climbs onto the lashes.
+    ball.max = Math.max(6.5, disc * 0.21);
+
+    for (const node of [socket, iris]) {
+      node.style.width = `${disc}px`;
+      node.style.height = `${disc}px`;
+      node.style.left = `${ball.left.toFixed(1)}px`;
+      node.style.top = `${ball.top.toFixed(1)}px`;
+    }
+    irisArt.style.width = `${shownW}px`;
+    irisArt.style.height = `${shownH}px`;
+    irisArt.style.left = `${(-ball.left).toFixed(1)}px`;
+    irisArt.style.top = `${(-ball.top).toFixed(1)}px`;
+
+    const g = Math.round(disc * 0.26);
+    glint.style.width = `${g}px`;
+    glint.style.height = `${g}px`;
+    glint.style.left = `${(cx - g * 0.62).toFixed(1)}px`;
+    glint.style.top = `${(cy - g * 0.72).toFixed(1)}px`;
   }
 
   img.addEventListener("load", () => {
@@ -347,10 +385,12 @@
     gaze.next = performance.now() + 2200 + Math.random() * 3000;
   }
   function newLookTarget() {
+    // Bias toward the sides and below: those are the glances people actually
+    // notice, and they used to be the ones that read as "blank stare".
     const angle = Math.random() * Math.PI * 2;
     look.tx = Math.cos(angle) * ball.max;
-    look.ty = Math.sin(angle) * ball.max * 0.7;
-    look.next = performance.now() + 1200 + Math.random() * 2200;
+    look.ty = Math.sin(angle) * ball.max * 0.95;
+    look.next = performance.now() + 1100 + Math.random() * 2000;
   }
   newGazeTarget();
   newLookTarget();
@@ -405,9 +445,10 @@
 
     // A slow lissajous drift: she visibly floats up, down and around instead of
     // sitting still between gaze targets. Dragging pins her to the cursor.
+    // Kept tighter than the iris travel so the glance stays the loudest motion.
     const drift = state.dragging ? 0.2 : 1;
-    const driftX = (Math.sin(now * 0.00092) * 8 + Math.sin(now * 0.00041 + 1.7) * 3.5) * drift;
-    const driftY = (Math.cos(now * 0.00113) * 10 + Math.cos(now * 0.00037 + 0.9) * 4) * drift;
+    const driftX = (Math.sin(now * 0.00092) * 5 + Math.sin(now * 0.00041 + 1.7) * 2.5) * drift;
+    const driftY = (Math.cos(now * 0.00113) * 6 + Math.cos(now * 0.00037 + 0.9) * 3) * drift;
 
     const px = gaze.x + impulse.x + driftX;
     const py = gaze.y + impulse.y + driftY;
@@ -428,7 +469,7 @@
       const dist = Math.hypot(dx, dy);
       if (dist > ball.size * 0.55) {
         look.tx = (dx / dist) * ball.max;
-        look.ty = (dy / dist) * ball.max * 0.85;
+        look.ty = (dy / dist) * ball.max * 0.95;
       } else {
         look.tx = (dx / ball.size) * ball.max;
         look.ty = (dy / ball.size) * ball.max;

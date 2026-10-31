@@ -744,7 +744,8 @@ function createWindow() {
   win.on("focus", () => {
     clearTimeout(eyeBlurTimer);
     eyeDismissed = false;
-    if (!readEyeState().pinned) hideEye();
+    // Back in her own window means the eye gets out of the way, pinned or not.
+    hideEye();
     // Coming back to a window that has been open for hours is a good moment to
     // notice a build published in the meantime. Throttled inside.
     checkForUpdates().catch(() => {});
@@ -873,7 +874,7 @@ function syncEye() {
   const away = !win.isFocused() || win.isMinimized() || !win.isVisible();
   if (!away) {
     eyeDismissed = false;
-    if (!readEyeState().pinned) hideEye();
+    hideEye();
     return;
   }
   if (eyeDismissed) return;
@@ -936,6 +937,60 @@ function friendlyApp(name) {
   return APP_NAMES[raw.toLowerCase()] || raw;
 }
 
+// A browser title is "Page - YouTube", a Spotify title is "Track - Artist".
+// Splitting that is the difference between commenting on the site and
+// commenting on the browser chrome.
+const BROWSER_APPS = new Set(["Google Chrome", "Microsoft Edge", "Firefox", "Brave", "Opera", "Vivaldi"]);
+const SITE_RULES = [
+  [/\byoutube\b/i, "YouTube"], [/\byoutube music\b/i, "YouTube Music"],
+  [/\bnetflix\b/i, "Netflix"], [/\btwitch\b/i, "Twitch"], [/\bdisney\+/i, "Disney+"],
+  [/\bprime video\b/i, "Prime Video"], [/\bhulu\b/i, "Hulu"], [/\btiktok\b/i, "TikTok"],
+  [/\binstagram\b/i, "Instagram"], [/\bfacebook\b/i, "Facebook"], [/\breddit\b/i, "Reddit"],
+  [/\bwhatsapp\b/i, "WhatsApp Web"], [/\bdiscord\b/i, "Discord"], [/\btelegram\b/i, "Telegram"],
+  [/\bgithub\b/i, "GitHub"], [/\bgitlab\b/i, "GitLab"], [/\bstack overflow\b/i, "Stack Overflow"],
+  [/\bchatgpt\b/i, "ChatGPT"], [/\bgemini\b/i, "Gemini"], [/\bclaude\b/i, "Claude"],
+  [/\bgmail\b/i, "Gmail"], [/\bgoogle search\b/i, "Google Search"], [/\bamazon\b/i, "Amazon"],
+  [/\bebay\b/i, "eBay"], [/\bsteam\b/i, "Steam"], [/\broblox\b/i, "Roblox"],
+  [/\bminecraft\b/i, "Minecraft"], [/\bvalorant\b/i, "Valorant"], [/\bfortnite\b/i, "Fortnite"],
+  [/\bleague of legends\b/i, "League of Legends"], [/\bspotify\b/i, "Spotify Web"],
+];
+const MUSIC_APPS = /\b(spotify|music|soundcloud|tidal|deezer|foobar|winamp|itunes|amazon music)\b/i;
+const CHAT_APPS = /\b(discord|whatsapp|telegram|signal|messenger|teams|slack|instagram|snapchat)\b/i;
+const VIDEO_SITES = /\b(youtube|netflix|twitch|disney\+|prime video|hulu|tiktok|bilibili|vimeo)\b/i;
+const GAME_APPS = /\b(roblox|minecraft|valorant|fortnite|league of legends|genshin|steam|epic games|battle\.net|osu|overwatch|apex|cs2|counter-strike|gta|rockstar)\b/i;
+const CODE_APPS = /\b(visual studio code|cursor|sublime text|intellij|pycharm|webstorm|android studio|windows terminal|command prompt|powershell|nvim|vim)\b/i;
+
+function stripChrome(title) {
+  return String(title || "")
+    .replace(/\s+[-–—|]\s+(Google Chrome|Chromium|Microsoft Edge|Mozilla Firefox|Firefox|Brave|Opera|Vivaldi|Spotify( Free| Premium)?|WhatsApp|Discord|Telegram|Slack|Microsoft Teams|Visual Studio Code)\s*$/i, "")
+    .replace(/\s+[-–—|]\s+(YouTube|Netflix|Twitch|Reddit|GitHub|Gmail|X|Twitter)\s*$/i, "")
+    .trim();
+}
+
+// Turns a process and window title into what she should actually talk about.
+function readContext(rawName, rawTitle) {
+  const app = friendlyApp(rawName);
+  const title = stripChrome(rawTitle).slice(0, 150);
+  const hay = `${app} ${rawTitle}`;
+  const site = (SITE_RULES.find(([re]) => re.test(hay)) || [])[1] || "";
+  let kind = "app";
+  if (MUSIC_APPS.test(hay)) kind = "music";
+  else if (CHAT_APPS.test(hay)) kind = "chat";
+  else if (VIDEO_SITES.test(hay)) kind = "video";
+  else if (GAME_APPS.test(hay)) kind = "game";
+  else if (CODE_APPS.test(hay)) kind = "code";
+  else if (BROWSER_APPS.has(app)) kind = site ? "web" : "browser";
+  return {
+    app,
+    // What she calls it: the site when a browser, the app otherwise.
+    label: BROWSER_APPS.has(app) ? (site || "a browser tab") : app,
+    site,
+    title,
+    kind,
+    known: Boolean(APP_NAMES[String(rawName || "").toLowerCase()] || site),
+  };
+}
+
 // What is actually in front on the PC right now: process name and window title.
 function foregroundApp() {
   return new Promise((resolve) => {
@@ -959,13 +1014,20 @@ function foregroundApp() {
   });
 }
 
-async function eyeComment(app_) {
+async function eyeComment(ctx) {
   const target = `${APP_URL}/api/banter`;
   try {
     const res = await fetch(target, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ app: app_.name, title: app_.title }),
+      body: JSON.stringify({
+        app: ctx.app,
+        label: ctx.label,
+        site: ctx.site,
+        title: ctx.title,
+        kind: ctx.kind,
+        known: ctx.known,
+      }),
     });
     if (!res.ok) return;
     const data = await res.json().catch(() => ({}));
@@ -974,7 +1036,7 @@ async function eyeComment(app_) {
     eyeLastSay = Date.now();
     sayEye(line);
     notify("Capri", line);
-    logLine(`eye: ${app_.name} -> "${line.slice(0, 60)}"`);
+    logLine(`eye: ${ctx.label}${ctx.title ? ` / ${ctx.title.slice(0, 40)}` : ""} -> "${line.slice(0, 60)}"`);
   } catch { /* the comment is a bonus, never an error dialog */ }
 }
 
@@ -984,21 +1046,22 @@ async function watchScreen() {
   eyeBusy = true;
   try {
     const appNow = await foregroundApp();
-    if (!appNow || !appNow.title) return;
+    if (!appNow || (!appNow.title && !appNow.name)) return;
     if (/^(capri|capri-desktop|electron)$/i.test(appNow.name)) { eyeTrack = { key: "", since: 0, said: "" }; return; }
-    appNow.name = friendlyApp(appNow.name);
-    const key = `${appNow.name}|${appNow.title}`.slice(0, 180);
+    const ctx = readContext(appNow.name, appNow.title);
+    if (!ctx.title && !ctx.site && !ctx.known) return;
+    const key = `${ctx.label}|${ctx.title}`.slice(0, 180);
     const now = Date.now();
     if (key !== eyeTrack.key) {
       eyeTrack = { key, since: now, said: "" };
       return;
     }
     const dwell = now - eyeTrack.since;
-    if (dwell < 40_000) return;
+    if (dwell < 22_000) return;
     if (eyeTrack.said === key) return;
-    if (now - eyeLastSay < 120_000) return;
+    if (now - eyeLastSay < 70_000) return;
     eyeTrack.said = key;
-    await eyeComment(appNow);
+    await eyeComment(ctx);
   } finally {
     eyeBusy = false;
   }
