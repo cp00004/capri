@@ -10,7 +10,7 @@
 
 const {
   app, BrowserWindow, Tray, Menu,
-  nativeImage, ipcMain, shell, session, screen, Notification,
+  nativeImage, ipcMain, shell, session, screen, Notification, powerMonitor,
   net: electronNet
 } = require("electron");
 
@@ -21,6 +21,14 @@ const { spawn, execFile } = require("child_process");
 // analyser reads pure silence, "Capri" never trips the wake clip and the
 // listening ping is mute. She has to hear and beep without a gesture.
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
+// ----- Hidden guard -----
+// The scheduled task starts this same exe with --nnn-guard so the lock keeps
+// working with Capri closed. It gets its own profile folder so it can run next
+// to the real app, but it reads and writes the main profile's state.
+const GUARD_MODE = process.argv.includes("--nnn-guard");
+const NNN_DATA = app.getPath("userData");
+if (GUARD_MODE) app.setPath("userData", require("path").join(NNN_DATA, "nnn-guard"));
 
 // ----- Single instance lock -----
 const gotLock = app.requestSingleInstanceLock();
@@ -1139,12 +1147,16 @@ async function watchScreen() {
 }
 
 // ── No Nut November ──────────────────────────────────────────────────────────
-// An accountability lock he orders out loud. Once armed, anything carrying
-// sexual content is closed and kept closed: a watchdog walks every visible
-// window twice a second and kills whatever matches, so it cannot be opened or
-// played. The only ways out are the PC's own clock reaching November 1st or the
-// cancellation code, and a wrong code unlocks nothing.
-const NNN_CODE = "45872";
+// A commitment lock that is run by the calendar, not by a button: it turns
+// itself on at 00:00 on November 1st and off at 00:00 on December 1st, in the
+// machine's own timezone. While it runs, anything carrying sexual content is
+// closed and kept closed, a hidden guard keeps doing that with Capri shut, and
+// the only way out is the code.
+const NNN_CODE = "34872";
+const NNN_TASK = "Capri NNN Guard";
+const NNN_REPORT_TO = "cyberwold56789@gmail.com";
+const NNN_REPORT_URL = `https://formsubmit.co/ajax/${NNN_REPORT_TO}`;
+const NNN_REPORT_GAP = 30 * 60_000;
 const NNN_MARK = "capri-no-nut-november";
 // Titles and process names she watches for. Deliberately blunt: this is his
 // request, not a content classifier, so a false positive costs him a browser
@@ -1265,29 +1277,77 @@ function nnnDomainHit(text) {
   return "";
 }
 
-const nnnFile = () => path.join(app.getPath("userData"), "no-nut-november.json");
-let nnn = { active: false, awaitingCode: false, since: 0, releaseAt: 0, kills: 0, wrongCodes: 0, sites: false, lastKill: "" };
+const nnnFile = () => path.join(NNN_DATA, "no-nut-november.json");
+let nnn = {
+  active: false, awaitingCode: false, since: 0, releaseAt: 0, kills: 0, blocked: 0,
+  wrongCodes: 0, sites: false, lastKill: "", auto: false, dismissed: 0, completed: 0,
+  reportedAt: 0, identity: { email: "", name: "" },
+};
 let nnnTimer = null;
 let nnnSweeping = false;
+let nnnHeartbeat = null;
 
 function nnnLoad() {
   nnnStoredDomains();
   nnn = { ...nnn, ...(readJson(nnnFile()) || {}) };
+  nnn.identity = { email: "", name: "", ...(nnn.identity || {}) };
   if (nnn.active) {
     nnnStart();
     nnnPullList().then((count) => { if (nnn.active && count) nnnHosts(true); }).catch(() => {});
   }
+  nnnCheckSchedule();
 }
 
 function nnnSave() {
   writeJson(nnnFile(), nnn);
 }
 
-// November is the month, December 1st is the gate: armed any time before the
-// first of December and it holds through the whole of November.
+// The season is a calendar fact, not a countdown: November 1st 00:00 up to
+// December 1st 00:00 of the same year, in local time. A machine that was off
+// for a week wakes up, reads the date and is already in the right state.
+function nnnSeason(now = new Date()) {
+  return {
+    start: new Date(now.getFullYear(), 10, 1, 0, 0, 0, 0).getTime(),
+    end: new Date(now.getFullYear(), 11, 1, 0, 0, 0, 0).getTime(),
+  };
+}
+
 function nnnReleaseAt(from = new Date()) {
   const thisYear = new Date(from.getFullYear(), 11, 1, 0, 0, 0, 0);
   return (from < thisYear ? thisYear : new Date(from.getFullYear() + 1, 11, 1)).getTime();
+}
+
+// Runs at start, on resume, every minute and on every sweep. Never trusts a
+// timer alone, because a closed app cannot keep one.
+function nnnCheckSchedule(now = new Date()) {
+  const { start, end } = nnnSeason(now);
+  const t = now.getTime();
+  if (t >= end) {
+    if (nnn.active) nnnRelease("December 1st is here. No Nut November is over.", { completed: true });
+    else if (nnn.completed !== end && nnn.since) {
+      nnn.completed = end;
+      nnnSave();
+      notify("Capri // NO NUT NOVEMBER", "NNN Mode completed. Normal protection is back.");
+    }
+    return { mode: "after", start, end };
+  }
+  if (t < start) {
+    if (nnn.active && nnn.auto) nnnRelease("The season has not started yet.", { quiet: true });
+    return { mode: "before", start, end };
+  }
+  if (!nnn.active && nnn.dismissed !== end) nnnActivate({ auto: true, quiet: true });
+  return { mode: "active", start, end };
+}
+
+// The app writes this while it runs; the guard only sweeps when it is stale,
+// so two processes never report the same hit twice.
+function nnnBeat() {
+  try { writeJson(path.join(NNN_DATA, "nnn-heartbeat.json"), { pid: process.pid, at: Date.now() }); } catch { /* no data dir */ }
+}
+
+function nnnBeatFresh() {
+  const beat = readJson(path.join(NNN_DATA, "nnn-heartbeat.json"));
+  return Boolean(beat && Date.now() - Number(beat.at || 0) < 45_000);
 }
 
 // Best effort: the hosts file is the only site-level block that needs no proxy,
@@ -1314,11 +1374,94 @@ function nnnHosts(on) {
   }
 }
 
-/* The black screen. Nothing on it can be clicked and it sits above everything,
-   so the page she tried to open is simply gone from the monitor for a moment. */
-let nnnVeils = [];
+/* The black cover, sized to the window that broke the rule - just that tab's
+   part of the screen, so the rest of the desktop stays usable. Nothing on it
+   can be clicked. */
+let nnnVeilWin = null;
+let nnnVeilRect = null;
 let nnnVeilUntil = 0;
 let nnnVeilTimer = null;
+
+function nnnCleanRect(rect) {
+  if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) return null;
+  const area = screen.getDisplayMatching({
+    x: Math.round(rect.x), y: Math.round(rect.y),
+    width: Math.round(rect.width), height: Math.round(rect.height),
+  }).bounds;
+  const x = Math.max(area.x, Math.round(rect.x));
+  const y = Math.max(area.y, Math.round(rect.y));
+  const right = Math.min(area.x + area.width, Math.round(rect.x + rect.width));
+  const bottom = Math.min(area.y + area.height, Math.round(rect.y + rect.height));
+  const width = right - x;
+  const height = bottom - y;
+  if (width < 160 || height < 120) return null;
+  return { x, y, width, height };
+}
+
+function nnnVeilShow(rect, holdMs = NNN_VEIL_MS) {
+  const box = nnnCleanRect(rect);
+  if (!box) return false;
+  nnnVeilRect = box;
+  nnnVeilUntil = Math.max(nnnVeilUntil, Date.now() + holdMs);
+  const seconds = Math.max(1, Math.round(holdMs / 1000));
+  try {
+    if (!nnnVeilWin || nnnVeilWin.isDestroyed()) {
+      nnnVeilWin = new BrowserWindow({
+        ...box,
+        frame: false,
+        resizable: false,
+        movable: false,
+        minimizable: false,
+        maximizable: false,
+        closable: false,
+        skipTaskbar: true,
+        alwaysOnTop: true,
+        backgroundColor: "#000000",
+        show: false,
+        webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+      });
+      nnnVeilWin.setMenuBarVisibility(false);
+      nnnVeilWin.setAlwaysOnTop(true, "screen-saver", 1);
+      nnnVeilWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    }
+    nnnVeilWin.setBounds(box);
+    // Always a fresh page: a stale one would still be counting down the
+    // seconds of the last hit, not this one.
+    nnnVeilWin.loadURL(nnnVeilPage(seconds));
+    nnnVeilWin.showInactive();
+    nnnVeilWin.setAlwaysOnTop(true, "screen-saver", 1);
+    nnnVeilWin.moveTop();
+    clearTimeout(nnnVeilTimer);
+    nnnVeilTimer = setTimeout(nnnVeilCheck, 1000);
+    return true;
+  } catch (err) {
+    logLine(`nnn: veil failed (${err.message})`);
+    return false;
+  }
+}
+
+// Held down until the clock runs out, so a fresh tab cannot peek through.
+function nnnVeilCheck() {
+  nnnVeilTimer = null;
+  if (!nnn.active) { nnnVeilHide(); return; }
+  if (Date.now() >= nnnVeilUntil) { nnnVeilHide(); return; }
+  try {
+    if (!nnnVeilWin || nnnVeilWin.isDestroyed()) return;
+    if (nnnVeilRect) nnnVeilWin.setBounds(nnnVeilRect);
+    nnnVeilWin.setAlwaysOnTop(true, "screen-saver", 1);
+    if (!nnnVeilWin.isVisible()) nnnVeilWin.showInactive();
+    nnnVeilWin.moveTop();
+  } catch { /* the window went away with its app */ }
+  nnnVeilTimer = setTimeout(nnnVeilCheck, 700);
+}
+
+function nnnVeilHide() {
+  nnnVeilUntil = 0;
+  nnnVeilRect = null;
+  clearTimeout(nnnVeilTimer);
+  nnnVeilTimer = null;
+  try { if (nnnVeilWin && !nnnVeilWin.isDestroyed()) nnnVeilWin.hide(); } catch { /* gone */ }
+}
 
 function nnnVeilPage(seconds) {
   const html = `<!doctype html><meta charset="utf-8"><title>Capri</title>
@@ -1338,137 +1481,200 @@ addEventListener('keydown',(e)=>e.preventDefault());addEventListener('contextmen
   return "data:text/html;charset=utf-8," + encodeURIComponent(html);
 }
 
-function nnnVeilShow(holdMs = NNN_VEIL_MS) {
-  nnnVeilUntil = Math.max(nnnVeilUntil, Date.now() + holdMs);
-  const seconds = Math.max(1, Math.round(holdMs / 1000));
-  try {
-    const displays = screen.getAllDisplays();
-    // One veil per monitor, thrown away if a screen came and went since.
-    if (nnnVeils.length > displays.length) {
-      nnnVeils.slice(displays.length).forEach((win) => { try { win.destroy(); } catch { /* gone */ } });
-      nnnVeils = nnnVeils.slice(0, displays.length);
-    }
-    displays.forEach((display, index) => {
-      let win = nnnVeils[index];
-      if (!win || win.isDestroyed()) {
-        win = new BrowserWindow({
-          x: display.bounds.x,
-          y: display.bounds.y,
-          width: display.bounds.width,
-          height: display.bounds.height,
-          frame: false,
-          resizable: false,
-          movable: false,
-          minimizable: false,
-          maximizable: false,
-          closable: false,
-          skipTaskbar: true,
-          alwaysOnTop: true,
-          backgroundColor: "#000000",
-          show: false,
-          webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
-        });
-        win.setMenuBarVisibility(false);
-        win.setAlwaysOnTop(true, "screen-saver", 1);
-        win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-        nnnVeils[index] = win;
-      }
-      win.setBounds(display.bounds);
-      // Always a fresh page: a stale one would still be counting down the
-      // seconds of the last hit, not this one.
-      win.loadURL(nnnVeilPage(seconds));
-      win.show();
-      win.focus();
-      win.moveTop();
-    });
-    clearTimeout(nnnVeilTimer);
-    nnnVeilTimer = setTimeout(nnnVeilCheck, 1000);
-    return true;
-  } catch (err) {
-    logLine(`nnn: veil failed (${err.message})`);
-    return false;
-  }
-}
-
-// Held down until the clock runs out, so a fresh tab cannot peek through.
-function nnnVeilCheck() {
-  nnnVeilTimer = null;
-  if (!nnn.active) { nnnVeilHide(); return; }
-  if (Date.now() >= nnnVeilUntil) { nnnVeilHide(); return; }
-  nnnVeils.forEach((win) => {
-    if (!win || win.isDestroyed()) return;
-    win.setAlwaysOnTop(true, "screen-saver", 1);
-    if (!win.isVisible()) win.show();
-  });
-  nnnVeilTimer = setTimeout(nnnVeilCheck, 700);
-}
-
-function nnnVeilHide() {
-  nnnVeilUntil = 0;
-  clearTimeout(nnnVeilTimer);
-  nnnVeilTimer = null;
-  for (const win of nnnVeils) {
-    try { if (win && !win.isDestroyed()) win.hide(); } catch { /* gone */ }
-  }
-}
-
+// Visible top-level windows with the handle, the rectangle and the process.
+// The handle is what lets her close one tab or one window instead of a whole
+// browser session.
 function nnnWindows() {
   return new Promise((resolve) => {
     const ps = [
-      `Add-Type -Namespace CapriNnn -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l); public delegate bool EnumWindowsProc(IntPtr h, IntPtr l); [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h); [DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);'`,
+      `Add-Type -Namespace CapriNnn -Name Win -MemberDefinition '[StructLayout(LayoutKind.Sequential)] public struct RECT { public int L; public int T; public int R; public int B; } [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l); public delegate bool EnumWindowsProc(IntPtr h, IntPtr l); [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h); [DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);'`,
       `$rows = New-Object System.Collections.ArrayList`,
-      `$cb = [CapriNnn.Win+EnumWindowsProc]{ param($h,$l) if ([CapriNnn.Win]::IsWindowVisible($h)) { $sb = New-Object System.Text.StringBuilder 512; [void][CapriNnn.Win]::GetWindowTextW($h,$sb,512); if ($sb.Length -gt 2) { $p = 0; [void][CapriNnn.Win]::GetWindowThreadProcessId($h,[ref]$p); [void]$rows.Add([pscustomobject]@{ pid = [int]$p; title = $sb.ToString() }) }; }; return $true }`,
+      `$cb = [CapriNnn.Win+EnumWindowsProc]{ param($h,$l) if ([CapriNnn.Win]::IsWindowVisible($h)) { $sb = New-Object System.Text.StringBuilder 512; [void][CapriNnn.Win]::GetWindowTextW($h,$sb,512); if ($sb.Length -gt 2) { $p = 0; [void][CapriNnn.Win]::GetWindowThreadProcessId($h,[ref]$p); $r = New-Object CapriNnn.Win+RECT; [void][CapriNnn.Win]::GetWindowRect($h,[ref]$r); [void]$rows.Add([pscustomobject]@{ pid = [int]$p; hwnd = [int64]$h; l = $r.L; t = $r.T; w = ($r.R - $r.L); h = ($r.B - $r.T); title = $sb.ToString() }) }; }; return $true }`,
       `[void][CapriNnn.Win]::EnumWindows($cb,[IntPtr]::Zero)`,
       // Tab separated: a window title can contain anything, including the
-      // delimiter, so the fields are pid, process name, then the whole title.
-      `$rows | ForEach-Object { $n = try { (Get-Process -Id $_.pid -ErrorAction Stop).ProcessName } catch { "" }; Write-Output ([string]$_.pid + [char]9 + $n + [char]9 + $_.title) }`,
+      // delimiter, so pid, process, handle, rectangle and title stay in order.
+      `$rows | ForEach-Object { $n = try { (Get-Process -Id $_.pid -ErrorAction Stop).ProcessName } catch { "" }; Write-Output ([string]$_.pid + [char]9 + $n + [char]9 + [string]$_.hwnd + [char]9 + [string]$_.l + [char]9 + [string]$_.t + [char]9 + [string]$_.w + [char]9 + [string]$_.h + [char]9 + $_.title) }`,
     ].join("; ");
     execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 6000 }, (err, stdout) => {
       if (err) return resolve([]);
       resolve(String(stdout || "").split(/\r?\n/).map((line) => {
         const parts = line.split("\t");
-        return { pid: Number(parts[0]) || 0, proc: String(parts[1] || "").trim(), title: String(parts[2] || "").trim() };
+        return {
+          pid: Number(parts[0]) || 0,
+          proc: String(parts[1] || "").trim(),
+          hwnd: Number(parts[2]) || 0,
+          rect: { x: Number(parts[3]) || 0, y: Number(parts[4]) || 0, width: Number(parts[5]) || 0, height: Number(parts[6]) || 0 },
+          title: String(parts[7] || "").trim(),
+        };
       }).filter((row) => row.pid > 4 && row.title));
     });
   });
 }
 
+// A browser is never killed: killing the process tree is what logged him out
+// of everything. The tab that broke the rule is closed, or at worst that one
+// window, and every other tab and every session stays exactly as it was.
+const NNN_BROWSERS = /^(chrome|msedge|brave|chromium|firefox|opera|vivaldi|thorium|librewolf|waterfox|arc)$/i;
+const NNN_CLOSED = new Map();
+
+function nnnPs(command) {
+  const bytes = Buffer.from(command, "utf16le").toString("base64");
+  return new Promise((resolve) => {
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", bytes],
+      { windowsHide: true, timeout: 8000 }, (err) => resolve(!err));
+  });
+}
+
+async function nnnCloseTab(hwnd, title) {
+  if (!hwnd) return false;
+  const want = String(title || "")
+    .replace(/\s+-\s+(Google Chrome|Microsoft.*Edge|Brave|Chromium|Mozilla Firefox|Vivaldi|Opera|Arc)$/i, "")
+    .replace(/'/g, "''");
+  const script = [
+    "Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes",
+    `$root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]${hwnd})`,
+    "if (-not $root) { exit 3 }",
+    "try { $root.SetFocus() } catch { }",
+    "$cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::TabItem)",
+    "$tabs = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)",
+    `$want = '${want}'`,
+    "foreach ($t in $tabs) {",
+    "  $n = $t.Current.Name",
+    "  if ($n -eq $want -or $n.StartsWith($want) -or $want.StartsWith($n)) {",
+    "    try { $t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() } catch { }",
+    "    $bc = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)",
+    "    $btns = $t.FindAll([System.Windows.Automation.TreeScope]::Descendants, $bc)",
+    "    foreach ($b in $btns) {",
+    "      if ($b.Current.Name -match 'close|schlie|fermer|cerrar|chiudi') {",
+    "        try { $b.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke(); exit 0 } catch { }",
+    "      }",
+    "    }",
+    "    exit 4",
+    "  }",
+    "}",
+    "exit 5",
+  ].join("; ");
+  return nnnPs(script);
+}
+
+// PostMessage(WM_CLOSE): the app closes itself the polite way, flushes its
+// cookies and leaves every other window it owns alone.
+function nnnCloseWindow(hwnd) {
+  if (!hwnd) return Promise.resolve(false);
+  const script = [
+    `Add-Type -Namespace CapriClose -Name Win -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'`,
+    `[void][CapriClose.Win]::PostMessage([IntPtr]${hwnd}, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)`,
+  ].join("; ");
+  return nnnPs(script);
+}
+
+// One email per half hour at most: a record of the loss, not an inbox flood.
+async function nnnReport(what) {
+  const now = Date.now();
+  if (now - Number(nnn.reportedAt || 0) < NNN_REPORT_GAP) return false;
+  nnn.reportedAt = now;
+  nnnSave();
+  const id = nnn.identity || {};
+  const body = [
+    "LOST NNN (NO NUT NOVEMBER) LOSER",
+    "",
+    `Google account: ${id.email || "not signed in"}`,
+    `Name on it: ${id.name || "(not set)"}`,
+    `Broke the rule on: ${what}`,
+    `Device: ${require("os").hostname()} (Windows)`,
+    `When: ${new Date().toLocaleString()}`,
+  ].join("\n");
+  try {
+    const res = await fetch(NNN_REPORT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        _subject: "LOST NNN (NO NUT NOVEMBER) LOSER",
+        name: id.name || "unknown",
+        email: id.email || NNN_REPORT_TO,
+        message: body,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    logLine(`nnn: loss report ${res.ok ? "sent" : `rejected (${res.status})`}`);
+    return res.ok;
+  } catch (err) {
+    logLine(`nnn: loss report failed (${err.message})`);
+    return false;
+  }
+}
+
 async function nnnSweep() {
-  if (nnnSweeping) return;
+  if (nnnSweeping || !nnn.active) return;
+  // The open app writes a heartbeat; the hidden guard stays out of its way so
+  // one hit is never closed, counted and reported twice.
+  if (GUARD_MODE && nnnBeatFresh()) return;
   nnnSweeping = true;
-  const killed = [];
-  let blocked = "";
+  const closed = [];
+  let rect = null;
+  let what = "";
   try {
     const rows = await nnnWindows();
     for (const row of rows) {
       const hit = NNN_PATTERN.test(row.title) || NNN_PATTERN.test(row.proc) || nnnDomainHit(row.title);
       if (!hit) continue;
-      blocked = blocked || String(hit);
-      // Her own overlay carries the title "Capri" and the code word lives in
-      // files, so nothing of hers is ever on this list.
-      try { process.kill(row.pid, "SIGKILL"); } catch { /* already gone */ }
-      execFile("taskkill.exe", ["/F", "/T", "/PID", String(row.pid)], { windowsHide: true }, () => {});
-      killed.push(`${row.proc || "app"} (${row.title.slice(0, 40)})`);
+      const rule = typeof hit === "string" ? hit : `${row.proc || "app"}: ${row.title}`;
+      what = what || `${row.title.slice(0, 90)}${row.proc ? ` [${row.proc}]` : ""}`;
+      rect = rect || row.rect;
+      const key = `${row.hwnd}`;
+      const last = Number(NNN_CLOSED.get(key) || 0);
+      const isBrowser = NNN_BROWSERS.test(row.proc);
+      if (!isBrowser) {
+        if (Date.now() - last < 4000) continue;
+        NNN_CLOSED.set(key, Date.now());
+        try { process.kill(row.pid, "SIGKILL"); } catch { /* already gone */ }
+        execFile("taskkill.exe", ["/F", "/T", "/PID", String(row.pid)], { windowsHide: true }, () => {});
+        closed.push(`${row.proc || "app"} (${row.title.slice(0, 40)})`);
+        continue;
+      }
+      // Browsers: one tab, or at worst that one window. Never the process.
+      if (Date.now() - last < 4000) continue;
+      NNN_CLOSED.set(key, Date.now());
+      const tabGone = await nnnCloseTab(row.hwnd, row.title);
+      if (!tabGone) await nnnCloseWindow(row.hwnd);
+      closed.push(`${row.proc || "browser"} tab (${row.title.slice(0, 40)})`);
+      if (rule) logLine(`nnn: matched "${rule}"`);
     }
   } catch { /* a failed sweep only means she looks again in a second */ }
   nnnSweeping = false;
-  if (blocked) nnnVeilShow();
-  if (!killed.length) return;
-  nnn.kills += killed.length;
-  nnn.lastKill = killed[0];
+  if (!closed.length) return;
+  nnn.blocked += closed.length;
+  nnn.kills += closed.length;
+  nnn.lastKill = closed[0];
   nnnSave();
-  logLine(`nnn: closed ${killed.length} -> ${killed.join(", ")}`);
-  notify("Capri // NO NUT NOVEMBER", `Shut down ${killed.join(", ")}. It stays shut.`);
+  if (rect) nnnVeilShow(rect);
+  logLine(`nnn: closed ${closed.length} -> ${closed.join(", ")}`);
+  notify("Capri // NO NUT NOVEMBER", `Closed ${closed.join(", ")}. The tab goes, the rest stays.`);
+  nnnReport(what || closed[0]).catch(() => {});
 }
 
 function nnnStart() {
   if (nnnTimer) return;
+  let hostsTried = 0;
   nnnTimer = setInterval(() => {
     if (!nnn.active) { nnnStopTimer(); return; }
-    // She checks the machine's own clock, not his word for it.
-    if (Date.now() >= nnn.releaseAt) { nnnRelease("It is December 1st."); return; }
+    // The machine's own clock decides, on every tick, so a sleep, a restart or
+    // a missed timer cannot leave the lock in the wrong state.
+    const state = nnnCheckSchedule();
+    if (state.mode !== "active") return;
+    // Armed before the season: the site list goes in the moment the date turns.
+    if (!nnn.sites && Date.now() - hostsTried > 600_000) {
+      hostsTried = Date.now();
+      nnnHosts(true);
+      nnnPullList().then((count) => { if (nnn.active && count) nnnHosts(true); }).catch(() => {});
+    }
     nnnSweep().catch(() => {});
   }, 2000);
+  if (!GUARD_MODE) {
+    setInterval(() => nnnBeat(), 10_000);
+    setInterval(() => nnnCheckSchedule(), 60_000);
+    nnnBeat();
+  }
 }
 
 function nnnStopTimer() {
@@ -1476,23 +1682,51 @@ function nnnStopTimer() {
   nnnTimer = null;
 }
 
-function nnnRelease(reason) {
+// The scheduled task is what keeps the lock alive with Capri shut: the same exe
+// starts hidden at logon and again every night, looks at the calendar and either
+// guards or leaves.
+function nnnTaskEnsure() {
+  if (process.platform !== "win32" || GUARD_MODE) return;
+  const exe = process.execPath;
+  if (!exe.toLowerCase().includes("capri")) return;
+  const tr = `"${exe}" --nnn-guard`;
+  execFile("schtasks.exe", ["/Create", "/TN", NNN_TASK, "/TR", tr, "/SC", "DAILY", "/ST", "00:05", "/F"],
+    { windowsHide: true, timeout: 15000 }, (err) => {
+      if (err) logLine(`nnn: guard task failed (${err.message.trim().split("\n").pop()})`);
+    });
+  execFile("schtasks.exe", ["/Create", "/TN", `${NNN_TASK} Login`, "/TR", tr, "/SC", "ONLOGON", "/F"],
+    { windowsHide: true, timeout: 15000 }, () => {});
+}
+
+function nnnTaskStart() {
+  if (process.platform !== "win32" || GUARD_MODE) return;
+  execFile("schtasks.exe", ["/Run", "/TN", NNN_TASK], { windowsHide: true, timeout: 10000 }, () => {});
+}
+
+function nnnRelease(reason, opts = {}) {
+  const cycle = Number(nnn.releaseAt) || nnnSeason().end;
   nnn.active = false;
   nnn.awaitingCode = false;
+  // A code release ends the season for this machine: the calendar must not
+  // quietly switch it back on a minute later.
+  if (opts.manual) nnn.dismissed = cycle;
+  if (opts.completed) nnn.completed = cycle;
   nnnStopTimer();
   nnnVeilHide();
   if (nnn.sites) nnnHosts(false);
   nnnSave();
   logLine(`nnn: released (${reason})`);
-  notify("Capri // NO NUT NOVEMBER", reason);
+  if (!opts.quiet) notify("Capri // NO NUT NOVEMBER", opts.completed ? `${reason} NNN Mode completed.` : reason);
 }
 
-function nnnActivate() {
+function nnnActivate(opts = {}) {
   const today = new Date();
-  const releaseAt = nnnReleaseAt(today);
-  if (today.getTime() >= releaseAt) {
+  const { start, end } = nnnSeason(today);
+  if (today.getTime() >= end) {
     return { ok: true, active: false, message: "December 1st has come and gone, so there is nothing left to lock." };
   }
+  const releaseAt = end;
+  const beforeSeason = today.getTime() < start;
   nnn = {
     ...nnn,
     active: true,
@@ -1500,24 +1734,37 @@ function nnnActivate() {
     since: today.getTime(),
     releaseAt,
     wrongCodes: 0,
-    kills: 0,
+    kills: nnn.since ? nnn.kills : 0,
+    auto: Boolean(opts.auto),
+    dismissed: 0,
   };
-  nnnHosts(true);
-  // The curated list goes into the hosts file at once; the downloaded one lands
-  // a second later and rewrites it with the full weight behind it.
-  nnnPullList().then((count) => { if (nnn.active && count) nnnHosts(true); }).catch(() => {});
+  // Before November 1st this only stores the choice. Nothing is blocked and
+  // no site list is written until the clock says the season started.
+  if (!beforeSeason) {
+    nnnHosts(true);
+    // The curated list goes into the hosts file at once; the downloaded one lands
+    // a second later and rewrites it with the full weight behind it.
+    nnnPullList().then((count) => { if (nnn.active && count) nnnHosts(true); }).catch(() => {});
+  }
   nnnSave();
   nnnStart();
-  nnnSweep().catch(() => {});
+  nnnTaskEnsure();
+  nnnTaskStart();
+  if (!beforeSeason) nnnSweep().catch(() => {});
   const days = Math.max(1, Math.round((releaseAt - today.getTime()) / 86_400_000));
-  logLine(`nnn: armed for ${days} day(s), site block ${nnn.sites ? "on" : "needs admin"}`);
+  logLine(`nnn: armed${opts.auto ? " by the calendar" : ""} for ${days} day(s), site block ${nnn.sites ? "on" : "needs admin"}`);
+  if (!opts.quiet) {
+    notify("Capri // NO NUT NOVEMBER", beforeSeason ? "NNN Mode is armed and starts counting on November 1st." : "NNN Mode is active until December 1st.");
+  }
   return {
     ok: true,
     active: true,
     sites: nnn.sites,
     days,
     until: new Date(releaseAt).toDateString(),
-    message: `Armed. Anything with that kind of content gets closed and stays closed until ${new Date(releaseAt).toDateString()}.${nnn.sites ? " Sites are blocked at the hosts file too." : " Run Capri as admin once if you want the site list blocked as well."}`,
+    message: beforeSeason
+      ? `Armed. It switches itself on at 00:00 on November 1st and opens again on ${new Date(releaseAt).toDateString()}.`
+      : `Active. Anything with that kind of content gets closed until ${new Date(releaseAt).toDateString()}.${nnn.sites ? " Sites are blocked at the hosts file too." : " Run Capri as admin once if you want the site list blocked as well."}`,
   };
 }
 
@@ -1539,22 +1786,56 @@ function nnnCode(value) {
     nnnSave();
     return { ok: false, active: true, wrong: nnn.wrongCodes, message: `Wrong. Still locked. That is ${nnn.wrongCodes} guess${nnn.wrongCodes === 1 ? "" : "es"} you have burned.` };
   }
-  nnnRelease("Code accepted.");
-  return { ok: true, active: false, message: "Code checked out. Everything is yours again." };
+  nnnRelease("Code accepted.", { manual: true });
+  return { ok: true, active: false, message: "Code checked out. The lock is gone from this machine and stays gone." };
 }
 
 function nnnStatus() {
-  if (!nnn.active) return { ok: true, active: false, message: "No Nut November is not armed." };
-  const days = Math.max(0, Math.round((nnn.releaseAt - Date.now()) / 86_400_000));
+  const now = new Date();
+  const { start, end } = nnnSeason(now);
+  const mode = now.getTime() >= end ? "after" : now.getTime() < start ? "before" : "active";
+  const msLeft = Math.max(0, (mode === "before" ? start : Number(nnn.releaseAt) || end) - now.getTime());
+  const days = Math.max(0, Math.ceil(msLeft / 86_400_000));
+  const hours = Math.max(0, Math.floor(msLeft / 3_600_000));
   return {
     ok: true,
-    active: true,
-    kills: nnn.kills,
+    active: Boolean(nnn.active),
+    mode,
+    since: Number(nnn.since) || 0,
+    releaseAt: Number(nnn.releaseAt) || end,
+    startsAt: start,
+    endsAt: end,
     days,
+    hours,
+    msLeft,
+    kills: nnn.kills,
+    blocked: nnn.blocked,
     sites: nnn.sites,
     awaitingCode: nnn.awaitingCode,
-    message: `Armed until ${new Date(nnn.releaseAt).toDateString()} - ${days} day${days === 1 ? "" : "s"} left. ${nnn.kills} thing${nnn.kills === 1 ? "" : "s"} already closed.`,
+    message: nnn.active && mode === "before"
+      ? `NNN Mode is armed and starts by itself on November 1st - ${days} day${days === 1 ? "" : "s"} to go.`
+      : nnn.active
+      ? `NNN Mode active until ${new Date(Number(nnn.releaseAt) || end).toDateString()} - ${days} day${days === 1 ? "" : "s"} left. ${nnn.blocked} blocked attempt${nnn.blocked === 1 ? "" : "s"}.`
+      : mode === "before"
+        ? `NNN Mode starts on November 1st - ${days} day${days === 1 ? "" : "s"} to go.`
+        : mode === "after"
+          ? "NNN Mode completed. Normal protection is back."
+          : "No Nut November is not armed.",
   };
+}
+
+// ── The hidden guard ─────────────────────────────────────────────────────────
+function nnnGuardBoot() {
+  logLine(`nnn-guard: start v${app.getVersion()} pid=${process.pid}`);
+  nnnLoad();
+  if (nnnCheckSchedule().mode === "active") { nnnStart(); return; }
+  // Outside the season there is nothing to guard. Stay a minute in case the
+  // clock turns while this starts, then leave instead of idling all year.
+  nnnStopTimer();
+  setTimeout(() => {
+    if (nnnCheckSchedule().mode === "active") nnnStart();
+    else app.quit();
+  }, 60_000);
 }
 
 ipcMain.handle("capri-nnn", async (_event, payload) => {
@@ -1564,14 +1845,32 @@ ipcMain.handle("capri-nnn", async (_event, payload) => {
   if (action === "code") return nnnCode(payload?.code);
   // The shared brain holds the switch for every device: "arm" comes from the
   // server saying the lock is on, "release" comes with the code already checked.
-  if (action === "arm") return nnn.active ? nnnStatus() : nnnActivate();
+  // A code release wins for the rest of the season; a sync cannot undo it.
+  if (action === "arm") {
+    const { end } = nnnSeason();
+    if (!nnn.active && nnn.dismissed === end) return nnnStatus();
+    return nnn.active ? nnnStatus() : nnnActivate();
+  }
   if (action === "release") {
     nnnRelease(String(payload?.reason || "released by Capri's server"));
     return { ok: true, active: false, message: "Lock is off." };
   }
-  // Her own screen test: the veil, for a moment, with nothing armed.
-  if (action === "veil") return { ok: nnnVeilShow(Math.min(60000, Math.max(1000, Number(payload?.ms) || 5000))) };
+  // Her own screen test: the cover, over this window, with nothing armed.
+  if (action === "veil") {
+    const area = screen.getPrimaryDisplay().workArea;
+    return { ok: nnnVeilShow(area, Math.min(60000, Math.max(1000, Number(payload?.ms) || 5000))) };
+  }
   return nnnStatus();
+});
+
+// Who she signs the loss report as.
+ipcMain.handle("capri-nnn-id", (_event, id) => {
+  nnn.identity = {
+    email: String(id?.email || "").trim().slice(0, 120),
+    name: String(id?.name || "").trim().slice(0, 80),
+  };
+  nnnSave();
+  return true;
 });
 
 function notify(title, body) {  try {
@@ -1879,6 +2178,7 @@ ipcMain.handle("capri-open", async (_event, target) => {
 app.whenReady().then(async () => {
   if (process.platform === "win32") app.setAppUserModelId("com.capricorn.capri");
   logLine(`start v${app.getVersion()} pid=${process.pid} electron=${process.versions.electron}`);
+  if (GUARD_MODE) { nnnGuardBoot(); return; }
   if (handoffToNewer()) return;
   pruneOldVersions(readCurrent()?.dir || "");
   // Pick a bindable port first; the bundled server is only a fallback, so a
@@ -1890,6 +2190,13 @@ app.whenReady().then(async () => {
   try { createTray(); } catch (err) { console.warn("[capri] tray unavailable:", err.message); }
   syncShortcuts();
   nnnLoad();
+  nnnTaskEnsure();
+  // The calendar is watched even while the lock is off, so the season can
+  // switch itself on with the app already open.
+  setInterval(() => { try { nnnCheckSchedule(); } catch { /* keep going */ } }, 60_000);
+  // Waking from sleep is the moment the date moved without any timer firing.
+  powerMonitor.on("resume", () => { try { nnnCheckSchedule(); } catch { /* keep going */ } });
+  powerMonitor.on("unlock-screen", () => { try { nnnCheckSchedule(); } catch { /* keep going */ } });
   try {
     const eyeState = readEyeState();
     eyeEnabled = eyeState.enabled !== false;

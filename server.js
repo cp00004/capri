@@ -1040,7 +1040,7 @@ function fallbackBanter(ctx) {
    code: the spoken phrase is public, so without this a stranger who learned the
    words could seal shut everybody else's machine. */
 const NNN_FILE = path.join(DATA_DIR, ".capri-nnn.json");
-const NNN_PASSCODE = String(process.env.CAPRI_NNN_CODE || "45872");
+const NNN_PASSCODE = String(process.env.CAPRI_NNN_CODE || "34872");
 
 function nnnDecemberOne(from = new Date()) {
   const gate = new Date(from.getFullYear(), 11, 1);
@@ -1064,6 +1064,7 @@ function nnnPayload(state) {
   const days = state.armed ? Math.max(0, Math.ceil((releaseAt - Date.now()) / 86_400_000)) : 0;
   return {
     armed: Boolean(state.armed),
+    armedAt: Number(state.since) || 0,
     releaseAt,
     until: state.armed ? new Date(releaseAt).toDateString() : "",
     days,
