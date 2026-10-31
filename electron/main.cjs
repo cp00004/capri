@@ -780,6 +780,7 @@ let eyeDismissed = false;
 const eyeApi = { base: "", token: "", session: "", key: "" };
 let eyeCursorTimer = null;
 let eyeWatchTimer = null;
+let eyeTopTimer = null;
 let eyeTrack = { key: "", since: 0, said: "" };
 let eyeLastSay = 0;
 let eyeBusy = false;
@@ -857,10 +858,19 @@ function createEye() {
 function showEye() {
   if (!eyeEnabled) return;
   const eye = createEye();
-  if (eye.isVisible()) return;
+  if (eye.isVisible()) {
+    // Already out: make sure nothing has stacked over her in the meantime.
+    try { eye.setAlwaysOnTop(true, "screen-saver"); eye.moveTop(); } catch { /* older electron */ }
+    return;
+  }
   eye.setBounds(eyeBounds());
   try { eye.setIgnoreMouseEvents(true, { forward: true }); } catch { /* older electron */ }
+  // showInactive() does not restore the topmost band on Windows and the flag can
+  // drop across a hide/show cycle, which buried her behind whatever was clicked
+  // last. Re-assert it every time she comes back on screen.
+  try { eye.setAlwaysOnTop(true, "screen-saver"); } catch { /* older electron */ }
   eye.showInactive();
+  try { eye.moveTop(); } catch { /* older electron */ }
   startEyeTimers();
   sendEyeConfig();
   sendEyeLive(true);
@@ -923,13 +933,21 @@ function startEyeTimers() {
     } catch { /* display swap */ }
   }, 32);
   eyeWatchTimer = setInterval(watchScreen, 5000);
+  // Windows hands the top of the stack to whatever was clicked last, and a
+  // click-through window never gets a focus event to notice. Keep her above it.
+  eyeTopTimer = setInterval(() => {
+    if (!eyeWin || eyeWin.isDestroyed() || !eyeWin.isVisible()) return;
+    try { eyeWin.setAlwaysOnTop(true, "screen-saver"); eyeWin.moveTop(); } catch { /* older electron */ }
+  }, 20_000);
 }
 
 function stopEyeTimers() {
   clearInterval(eyeCursorTimer);
   clearInterval(eyeWatchTimer);
+  clearInterval(eyeTopTimer);
   eyeCursorTimer = null;
   eyeWatchTimer = null;
+  eyeTopTimer = null;
 }
 
 // Process names are not what a person calls the app; the comments should say
