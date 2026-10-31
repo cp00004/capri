@@ -1716,7 +1716,22 @@ function nnnTaskEnsure() {
       if (err) logLine(`nnn: guard task failed (${err.message.trim().split("\n").pop()})`);
     });
   execFile("schtasks.exe", ["/Create", "/TN", `${NNN_TASK} Login`, "/TR", tr, "/SC", "ONLOGON", "/F"],
-    { windowsHide: true, timeout: 15000 }, () => {});
+    { windowsHide: true, timeout: 15000 }, (err) => {
+      // ONLOGON needs admin on some machines; a Startup shortcut is the same
+      // promise without elevation.
+      if (err) nnnLoginShortcut(exe);
+    });
+}
+
+function nnnLoginShortcut(exe) {
+  const dir = path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+  const lnk = path.join(dir, "Capri NNN Guard.lnk").replace(/'/g, "''");
+  const target = exe.replace(/'/g, "''");
+  const ps = `$s=(New-Object -ComObject WScript.Shell).CreateShortcut('${lnk}');$s.TargetPath='${target}';$s.Arguments='--nnn-guard';$s.WindowStyle=7;$s.Save()`;
+  execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps],
+    { windowsHide: true, timeout: 20000 }, (err) => {
+      if (err) logLine(`nnn: login shortcut failed (${err.message.trim().split("\n").pop()})`);
+    });
 }
 
 function nnnTaskStart() {
