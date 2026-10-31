@@ -44,4 +44,15 @@ final class EyePrefs {
 	static boolean enabled(Context context) {
 		return context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean("enabled", true);
 	}
+
+	// The background ear defaults on: the point is that she answers with the
+	// app closed. The page can switch it off, and it only runs while the eye or
+	// the NNN lock is live.
+	static boolean wake(Context context) {
+		return context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean("wakeBackground", true);
+	}
+
+	static void setWake(Context context, boolean on) {
+		context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit().putBoolean("wakeBackground", on).apply();
+	}
 }

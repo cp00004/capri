@@ -101,6 +101,14 @@ const IS_HOSTED_WEB = !IS_NATIVE && !/^(localhost|127\.0\.0\.1)$/.test(location.
 const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
 const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
+// Android ships Google's recognizer behind a native bridge. When it is there,
+// wake and orders go through it instead of recording a clip and waiting for the
+// PC to transcribe.
+function nativeVoice() {
+  if (!IS_NATIVE) return false;
+  try { return window.CapriVoice?.available?.() === "1"; } catch { return false; }
+}
+
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
 const APP_VERSION = "4.5.3";
@@ -1201,6 +1209,10 @@ async function startListening(force = false) {
     state.streaming = false;
     rec.listenQueued = false;
   }
+  if (nativeVoice()) {
+    startNativeOrder(force);
+    return;
+  }
   if (!window.isSecureContext) {
     showNotice(
       "Phone mics only unlock on a secure page. On the PC run npm run cert, reopen the https link, and trust Capri Local once. The keyboard still works.",
@@ -1349,6 +1361,9 @@ function setWakeWordEnabled(enabled) {
     wakeWord.starting = false;
     try { recognition?.stop(); } catch { /* already stopped */ }
     stopMicWake();
+    nativeOrder = false;
+    clearTimeout(nativeOrderTimer);
+    try { window.CapriVoice?.stop?.(); } catch { /* older build */ }
     if (!rec.active && !state.streaming) setPhase("idle");
     return;
   }
@@ -1731,6 +1746,125 @@ async function checkWakeClip(blob) {
   startListening(true);
 }
 
+/* Native ear (Android). Google's recognizer hears the name and the order in one
+   pass, so there is no clip upload and no wait on the PC. */
+let nativeOrder = false;
+let nativeOrderTimer = null;
+
+function nativeChime() {
+  if (wakeWord.chimed) return;
+  wakeWord.chimed = true;
+  playListeningChime();
+}
+
+function startNativeWake() {
+  if (!wakeWord.enabled || document.hidden || eyeLive || rec.active || rec.starting
+      || state.streaming || state.phase === "thinking" || speech.busy) return;
+  if (!nativeVoice()) { wakeWord.micEngine = true; startMicWake(); return; }
+  stopMicWake();
+  wakeWord.micEngine = false;
+  wakeWord.active = true;
+  wakeWord.starting = false;
+  paintWakeWord();
+  try { window.CapriVoice.startWake(); } catch { /* older build */ }
+}
+
+function startNativeOrder(force = false) {
+  if (!nativeVoice()) { startListening(force); return; }
+  clearTimeout(nativeOrderTimer);
+  nativeOrder = true;
+  wakeWord.active = false;
+  wakeWord.starting = false;
+  paintWakeWord();
+  try { window.CapriVoice.stop(); } catch { /* already idle */ }
+  stopMicWake();
+  state.streaming = false;
+  setPhase("listening");
+  clearHeard();
+  nativeChime();
+  try {
+    window.CapriVoice.listen();
+  } catch {
+    nativeOrder = false;
+    wakeWord.chimed = false;
+    setPhase("idle");
+    resumeWakeWord();
+    return;
+  }
+  nativeOrderTimer = setTimeout(() => {
+    if (!nativeOrder) return;
+    nativeOrder = false;
+    try { window.CapriVoice.stop(); } catch { /* already idle */ }
+    setPhase("idle");
+    showNotice("I did not catch that. Tap the mic and talk right away.", null, null, 6000);
+    resumeWakeWord();
+  }, 12000);
+}
+
+window.capriVoiceHeard = (text, remainder) => {
+  const heard = String(text || "").trim();
+  const rest = String(remainder || "").trim();
+  const wasOrder = nativeOrder;
+  nativeOrder = false;
+  clearTimeout(nativeOrderTimer);
+  nativeOrderTimer = null;
+  if (!heard) {
+    setPhase("idle");
+    resumeWakeWord();
+    return;
+  }
+  if (wasOrder) {
+    wakeWord.chimed = false;
+    showHeard(heard);
+    respond(heard);
+    return;
+  }
+  // Wake result. An order in the same breath runs at once.
+  if (rest.split(/\s+/).filter(Boolean).length >= 1) {
+    wakeWord.chimed = false;
+    nativeChime();
+    showHeard(rest);
+    respond(rest);
+    return;
+  }
+  nativeChime();
+  startNativeOrder(true);
+};
+
+window.capriVoiceError = (code) => {
+  clearTimeout(nativeOrderTimer);
+  nativeOrderTimer = null;
+  const wasOrder = nativeOrder;
+  nativeOrder = false;
+  wakeWord.chimed = false;
+  if (wasOrder) {
+    setPhase("idle");
+    showNotice("The phone's recognizer did not answer. Tap the mic and try again.", null, null, 7000);
+    resumeWakeWord();
+    return;
+  }
+  if (code === "unavailable") {
+    wakeWord.micEngine = true;
+    startMicWake();
+    return;
+  }
+  setTimeout(() => { if (wakeWord.enabled && !document.hidden) startNativeWake(); }, 1200);
+};
+
+// An order heard while the app was closed arrives with the launch.
+function checkNativeCommand() {
+  if (!IS_NATIVE || !nativeVoice()) return;
+  let cmd = "";
+  try { cmd = String(window.CapriVoice?.command?.() || "").trim(); } catch { return; }
+  if (!cmd) return;
+  setTimeout(() => { showHeard(cmd); respond(cmd); }, 900);
+}
+
+setTimeout(checkNativeCommand, 1500);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) checkNativeCommand();
+});
+
 function startWakeWord() {
   if (Date.now() < (wakeWord.suppressedUntil || 0)) {
     // A tap is being served right now; re-arm after it.
@@ -1738,6 +1872,10 @@ function startWakeWord() {
     return;
   }
   if (!wakeWord.enabled || document.hidden || eyeLive || wakeWord.active || wakeWord.starting || cmdRec.active || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
+  if (nativeVoice()) {
+    startNativeWake();
+    return;
+  }
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition || wakeWord.micEngine || IS_DESKTOP_APP) {
     // Chrome's recognizer needs Google's speech service; Electron has none, and

@@ -5,6 +5,7 @@ import android.app.AlarmManager;
 import android.app.AppOpsManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
@@ -39,6 +40,18 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
 	private static final int CAPRI_PERMISSION_REQUEST = 1723;
 	private boolean nnnAdminAsked = false;
+	private WebView web;
+	private final CapriVoice.Sink voiceSink = new CapriVoice.Sink() {
+		@Override
+		public void onHeard(String text, String remainder) {
+			callJs("capriVoiceHeard", text, remainder);
+		}
+
+		@Override
+		public void onError(String code) {
+			callJs("capriVoiceError", code, "");
+		}
+	};
 	private static final int CAPRI_MEDIA_REQUEST = 1724;
 	private final java.util.ArrayDeque<String> grantQueue = new java.util.ArrayDeque<>();
 	private boolean grantFlow = false;
@@ -79,9 +92,11 @@ public class MainActivity extends BridgeActivity {
 
 		WebView webView = getBridge() != null ? getBridge().getWebView() : null;
 		if (webView != null) {
+			web = webView;
 			webView.addJavascriptInterface(new DeviceBridge(), "CapriDevice");
 			webView.addJavascriptInterface(new EyeBridge(), "CapriEyes");
 			webView.addJavascriptInterface(new PermBridge(), "CapriPerms");
+			webView.addJavascriptInterface(new VoiceBridge(), "CapriVoice");
 			// The page needs the mic without a second tap after the OS dialog.
 			webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
 		}
@@ -417,6 +432,55 @@ public class MainActivity extends BridgeActivity {
 		}
 	}
 
+	// Google's own ear, used by the page while it is open. The service uses the
+	// same singleton when the app is closed, so only one session is ever live.
+	private class VoiceBridge {
+		@JavascriptInterface
+		public String available() {
+			return CapriVoice.available(MainActivity.this) ? "1" : "0";
+		}
+
+		@JavascriptInterface
+		public String startWake() {
+			runOnUiThread(() -> CapriVoice.start(MainActivity.this, true, voiceSink));
+			return "ok";
+		}
+
+		@JavascriptInterface
+		public String listen() {
+			runOnUiThread(() -> CapriVoice.start(MainActivity.this, false, voiceSink));
+			return "ok";
+		}
+
+		@JavascriptInterface
+		public void stop() {
+			runOnUiThread(CapriVoice::stop);
+		}
+
+		// An order heard while Capri was closed, handed over at launch.
+		@JavascriptInterface
+		public String command() {
+			Intent intent = getIntent();
+			String fromIntent = intent == null ? null : intent.getStringExtra("capri_cmd");
+			if (intent != null) intent.removeExtra("capri_cmd");
+			SharedPreferences prefs = getSharedPreferences("capri_voice", MODE_PRIVATE);
+			String pending = prefs.getString("pending", "");
+			prefs.edit().remove("pending").apply();
+			if (fromIntent != null && !fromIntent.isEmpty()) return fromIntent;
+			return pending;
+		}
+	}
+
+	private void callJs(String fn, String first, String second) {
+		WebView target = web;
+		if (target == null) return;
+		String script = "window." + fn + "&&window." + fn + "(" + org.json.JSONObject.quote(String.valueOf(first == null ? "" : first))
+				+ "," + org.json.JSONObject.quote(String.valueOf(second == null ? "" : second)) + ")";
+		target.post(() -> {
+			try { target.evaluateJavascript(script, null); } catch (Exception err) { /* page gone */ }
+		});
+	}
+
 	// The gallery scan needs media access; on Android 13+ that is two different
 	// grants, and the overlay has its own screen. Asked once when the lock arms.
 	void askNnnPermissions() {
@@ -451,6 +515,9 @@ public class MainActivity extends BridgeActivity {
 	@Override
 	public void onResume() {
 		super.onResume();
+		// The page owns the ear while it is visible; the service takes it back
+		// when the window goes away.
+		EyeService.backgroundVoice(this, false);
 		if (EyePrefs.enabled(this)) EyeService.hide(this);
 		else if (EyeService.nnnArmed(this) || EyeService.nnnNeeded(this)) EyeService.show(this, EyePrefs.load(this));
 		else EyeService.stop(this);
@@ -461,6 +528,18 @@ public class MainActivity extends BridgeActivity {
 			NnnAdmin.request(this);
 		}
 		if (grantFlow) new android.os.Handler(getMainLooper()).postDelayed(this::nextGrant, 700);
+	}
+
+	@Override
+	protected void onPause() {
+		super.onPause();
+		EyeService.backgroundVoice(this, true);
+	}
+
+	@Override
+	protected void onNewIntent(Intent intent) {
+		super.onNewIntent(intent);
+		setIntent(intent);
 	}
 
 	private String launch(String raw) {

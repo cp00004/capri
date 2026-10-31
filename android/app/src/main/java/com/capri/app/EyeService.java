@@ -14,7 +14,9 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ServiceInfo;
 import android.graphics.PixelFormat;
+import android.media.AudioManager;
 import android.media.MediaMetadata;
+import android.media.ToneGenerator;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
@@ -180,7 +182,6 @@ public class EyeService extends Service {
 			stopWatching();
 			return START_STICKY;
 		}
-
 		JSONObject cfg = new JSONObject();
 		try { cfg = new JSONObject(intent == null ? "{}" : String.valueOf(intent.getStringExtra(EXTRA_CONFIG))); } catch (Exception err) { /* defaults */ }
 		if (!cfg.optBoolean("enabled", true)) {
@@ -195,6 +196,7 @@ public class EyeService extends Service {
 				startForegroundSafe();
 				stopWatching();
 				startNnn();
+				backgroundVoice(this, true);
 				return START_STICKY;
 			}
 			stopWatching();
@@ -214,7 +216,65 @@ public class EyeService extends Service {
 			nnnCheckSchedule(this);
 			startNnn();
 		}
+		backgroundVoice(this, true);
 		return START_STICKY;
+	}
+
+	// ── The ear with the app closed ─────────────────────────────────────────
+	private static boolean bgVoice = false;
+
+	// Google's recognizer runs in this foreground service, so "Capri" still
+	// works after the window is gone. When the name (and an order) lands, she
+	// pings, opens herself and hands the order to the page.
+	static void backgroundVoice(Context context, boolean on) {
+		boolean wanted = on && EyePrefs.wake(context)
+				&& (EyePrefs.enabled(context) || nnnArmed(context) || nnnNeeded(context));
+		if (!wanted) {
+			if (bgVoice) {
+				bgVoice = false;
+				CapriVoice.stop();
+			}
+			return;
+		}
+		if (bgVoice && CapriVoice.running()) return;
+		bgVoice = true;
+		final Context app = context.getApplicationContext();
+		CapriVoice.start(app, true, new CapriVoice.Sink() {
+			@Override
+			public void onHeard(String text, String remainder) {
+				bgVoice = false;
+				ping(app);
+				String order = String.valueOf(remainder == null ? "" : remainder).trim();
+				app.getSharedPreferences("capri_voice", Context.MODE_PRIVATE)
+						.edit().putString("pending", order).apply();
+				openFromVoice(app, order);
+			}
+
+			@Override
+			public void onError(String code) {
+				if ("unavailable".equals(code)) bgVoice = false;
+			}
+		});
+	}
+
+	private static void ping(Context context) {
+		try {
+			final ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 70);
+			tone.startTone(ToneGenerator.TONE_PROP_BEEP, 140);
+			new Handler(Looper.getMainLooper()).postDelayed(tone::release, 600);
+		} catch (Exception err) { /* silent is fine */ }
+	}
+
+	private static void openFromVoice(Context context, String order) {
+		Intent open = new Intent(context, MainActivity.class);
+		open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP
+				| Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+		open.putExtra("capri_cmd", order);
+		try {
+			context.startActivity(open);
+		} catch (Exception err) {
+			Alerts.show(context, "Capri heard you", order.isEmpty() ? "Tap to answer." : order);
+		}
 	}
 
 	private void startForegroundSafe() {
@@ -1092,6 +1152,8 @@ public class EyeService extends Service {
 	@Override
 	public void onDestroy() {
 		running = false;
+		bgVoice = false;
+		CapriVoice.stop();
 		stopWatching();
 		stopNnn();
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE);
