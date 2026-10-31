@@ -33,6 +33,7 @@ final class CapriVoice {
 	private static int quietStreak;
 	private static int clientErrors;
 	private static long sessionToken;
+	private static long sessionStartedAt;
 	private static long lastCallbackAt;
 	private static String lastText = "";
 
@@ -132,6 +133,7 @@ final class CapriVoice {
 		sessionActive = true;
 		final long token = ++sessionToken;
 		touch();
+		sessionStartedAt = lastCallbackAt;
 		try {
 			recognizer.startListening(intent());
 		} catch (Exception err) {
@@ -143,7 +145,8 @@ final class CapriVoice {
 		// rebuild. If nothing at all arrives, rebuild it.
 		MAIN.postDelayed(() -> {
 			if (running && token == sessionToken && sessionActive
-					&& android.os.SystemClock.uptimeMillis() - lastCallbackAt > 8000) {
+					&& lastCallbackAt == sessionStartedAt
+					&& android.os.SystemClock.uptimeMillis() - sessionStartedAt > 8000) {
 				hardRestart();
 			}
 		}, 8500);
@@ -175,6 +178,17 @@ final class CapriVoice {
 			restartQueued = false;
 			if (running) listen();
 		}, delay);
+	}
+
+	private static void cancelCurrent() {
+		sessionActive = false;
+		sessionToken += 1;
+		final SpeechRecognizer r = recognizer;
+		if (r != null) {
+			MAIN.post(() -> {
+				try { r.cancel(); } catch (Exception err) { /* idle */ }
+			});
+		}
 	}
 
 	// While hunting for the name she is mostly hearing silence, so every
@@ -279,6 +293,27 @@ final class CapriVoice {
 		@Override public void onBufferReceived(byte[] buffer) {}
 		@Override public void onEndOfSpeech() {
 			touch();
+			// Some recognizers stop talking after end-of-speech and never send a
+			// final result. If nothing arrives, take the partial and move on.
+			final long token = sessionToken;
+			MAIN.postDelayed(() -> {
+				if (!running || token != sessionToken || !sessionActive || restartQueued) return;
+				sessionActive = false;
+				if (!lastText.isEmpty() && !finalSeen) {
+					if (wakeMode) {
+						String rest = wakeRemainder(lastText);
+						if (rest != null && !rest.isEmpty()) {
+							deliver(lastText);
+							return;
+						}
+					} else {
+						deliver(lastText);
+						return;
+					}
+				}
+				cancelCurrent();
+				schedule(quietDelay());
+			}, 1500);
 		}
 
 		@Override public void onPartialResults(Bundle partial) {
