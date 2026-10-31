@@ -1035,6 +1035,78 @@ function fallbackBanter(ctx) {
   return lines[fallbackCursor % lines.length];
 }
 
+/* ---------------------------------------------------------------- no nut november
+   One switch that every device reads. Both the arm and the release ask for the
+   code: the spoken phrase is public, so without this a stranger who learned the
+   words could seal shut everybody else's machine. */
+const NNN_FILE = path.join(DATA_DIR, ".capri-nnn.json");
+const NNN_PASSCODE = String(process.env.CAPRI_NNN_CODE || "45872");
+
+function nnnDecemberOne(from = new Date()) {
+  const gate = new Date(from.getFullYear(), 11, 1);
+  return (from < gate ? gate : new Date(from.getFullYear() + 1, 11, 1)).getTime();
+}
+
+function nnnRead() {
+  let state = { armed: false, since: 0, releaseAt: 0, wrong: 0 };
+  try { state = { ...state, ...JSON.parse(fs.readFileSync(NNN_FILE, "utf8")) }; } catch { /* first run */ }
+  if (state.armed && Date.now() >= Number(state.releaseAt)) state.armed = false;
+  return state;
+}
+
+function nnnWrite(state) {
+  try { fs.writeFileSync(NNN_FILE, JSON.stringify(state)); }
+  catch (err) { console.log(`nnn: save failed (${err.message})`); }
+}
+
+function nnnPayload(state) {
+  const releaseAt = Number(state.releaseAt) || 0;
+  const days = state.armed ? Math.max(0, Math.ceil((releaseAt - Date.now()) / 86_400_000)) : 0;
+  return {
+    armed: Boolean(state.armed),
+    releaseAt,
+    until: state.armed ? new Date(releaseAt).toDateString() : "",
+    days,
+    message: state.armed
+      ? `No Nut November is on for every device until ${new Date(releaseAt).toDateString()} - ${days} day${days === 1 ? "" : "s"} left.`
+      : "No Nut November is off.",
+  };
+}
+
+async function handleNoNutGlobal(req, res, action) {
+  if (action === "state") return json(res, 200, nnnPayload(nnnRead()));
+
+  let body = {};
+  try { body = (await readBody(req, 4000)) || {}; } catch (err) { return json(res, 400, { error: err.message }); }
+  if (action !== "arm" && action !== "release") return json(res, 404, { error: "unknown_action" });
+
+  const state = nnnRead();
+  const given = String(body.code || "").replace(/\D/g, "").slice(0, 16);
+  if (!given) return json(res, 400, { error: "need_code", message: "Give me the cancellation code." });
+  if (given !== NNN_PASSCODE) {
+    state.wrong = Number(state.wrong || 0) + 1;
+    nnnWrite(state);
+    return json(res, 403, { error: "wrong_code", message: `Wrong. Nothing changes. That is ${state.wrong} bad code${state.wrong === 1 ? "" : "s"} you have burned.` });
+  }
+
+  if (action === "arm") {
+    const releaseAt = nnnDecemberOne();
+    if (releaseAt <= Date.now()) {
+      const off = { ...state, armed: false };
+      return json(res, 200, { ...nnnPayload(off), message: "December 1st has come and gone, so there is nothing left to lock." });
+    }
+    const next = { armed: true, since: Date.now(), releaseAt, wrong: 0 };
+    nnnWrite(next);
+    console.log(`nnn: armed for every device until ${new Date(releaseAt).toDateString()}`);
+    return json(res, 200, { ...nnnPayload(next), message: `Armed on every device until ${new Date(releaseAt).toDateString()}.` });
+  }
+
+  const next = { armed: false, since: 0, releaseAt: 0, wrong: 0 };
+  nnnWrite(next);
+  console.log("nnn: released for every device");
+  return json(res, 200, { ...nnnPayload(next), message: "Code checked out. Every device is open again." });
+}
+
 async function handleBanter(req, res) {
   const ip = req.socket.remoteAddress || "?";
   const now = Date.now();
@@ -2149,6 +2221,12 @@ const handler = async (req, res) => {
   // the PC agent: authenticated by CAPRI_HANDS_TOKEN, not by pairing
   if (req.method === "GET" && pathname === "/api/hands/next") return handleHandsNext(req, res);
   if (req.method === "POST" && pathname === "/api/hands/result") return handleHandsResult(req, res);
+
+  // No Nut November travels outside the paired-device gate: the state is public
+  // so any device honours it, and both writes are guarded by the code itself.
+  if (req.method === "GET" && pathname === "/api/nnn") return handleNoNutGlobal(req, res, "state");
+  if (req.method === "POST" && pathname === "/api/nnn/arm") return handleNoNutGlobal(req, res, "arm");
+  if (req.method === "POST" && pathname === "/api/nnn/release") return handleNoNutGlobal(req, res, "release");
 
   // every /api route below needs a local or paired caller
   if (pathname.startsWith("/api/")) {

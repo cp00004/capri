@@ -16,6 +16,12 @@ const {
 
 const { spawn, execFile } = require("child_process");
 
+// Her ear runs on an AudioContext that nobody tapped a button to start. With
+// Chromium's default autoplay policy that context comes up suspended, so the
+// analyser reads pure silence, "Capri" never trips the wake clip and the
+// listening ping is mute. She has to hear and beep without a gesture.
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
 // ----- Single instance lock -----
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -1168,9 +1174,11 @@ function nnnSave() {
   writeJson(nnnFile(), nnn);
 }
 
+// November is the month, December 1st is the gate: armed any time before the
+// first of December and it holds through the whole of November.
 function nnnReleaseAt(from = new Date()) {
-  const thisYear = new Date(from.getFullYear(), 10, 1, 0, 0, 0, 0);
-  return (from < thisYear ? thisYear : new Date(from.getFullYear() + 1, 10, 1)).getTime();
+  const thisYear = new Date(from.getFullYear(), 11, 1, 0, 0, 0, 0);
+  return (from < thisYear ? thisYear : new Date(from.getFullYear() + 1, 11, 1)).getTime();
 }
 
 // Best effort: the hosts file is the only site-level block that needs no proxy,
@@ -1247,7 +1255,7 @@ function nnnStart() {
   nnnTimer = setInterval(() => {
     if (!nnn.active) { nnnStopTimer(); return; }
     // She checks the machine's own clock, not his word for it.
-    if (Date.now() >= nnn.releaseAt) { nnnRelease("It is November 1st."); return; }
+    if (Date.now() >= nnn.releaseAt) { nnnRelease("It is December 1st."); return; }
     nnnSweep().catch(() => {});
   }, 2000);
 }
@@ -1269,10 +1277,10 @@ function nnnRelease(reason) {
 
 function nnnActivate() {
   const today = new Date();
-  if (today.getMonth() === 10 && today.getDate() === 1) {
-    return { ok: true, active: false, message: "It is already November 1st, so there is nothing to lock." };
-  }
   const releaseAt = nnnReleaseAt(today);
+  if (today.getTime() >= releaseAt) {
+    return { ok: true, active: false, message: "December 1st has come and gone, so there is nothing left to lock." };
+  }
   nnn = {
     ...nnn,
     active: true,
