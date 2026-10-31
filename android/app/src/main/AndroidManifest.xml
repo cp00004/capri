@@ -65,12 +65,34 @@
         <receiver
             android:name=".ReminderReceiver"
             android:exported="false" />
+        <!-- The lock runs with Capri closed: boot, clock changes and the nightly
+             alarm all bring the watcher back, which then reads the date. -->
+        <receiver
+            android:name=".NnnReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="com.capri.app.NNN_NIGHT" />
+            </intent-filter>
+        </receiver>
     <meta-data android:name="com.google.android.gms.auth.api.signin.ClientId" android:value="240583618801-6l8bpgneim3nfker6kbbbj4brt2gjrg2.apps.googleusercontent.com" />
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- The lock comes back after a reboot instead of waiting for a tap. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- APK updates are installed by Capri itself, like the desktop build. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- The gallery is checked for 18+ files (name and folder) during the season. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Capacitor's WebView asks for these together; an undeclared one denies the whole getUserMedia call. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />

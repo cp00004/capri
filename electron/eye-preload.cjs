@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("capriEye", {
   onPinned: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-pinned", (_e, v) => cb(Boolean(v))); },
   onConfig: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-config", (_e, c) => cb(c || {})); },
   onLive: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-live", (_e, v) => cb(Boolean(v))); },
+  onNnn: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-nnn", (_e, v) => cb(String(v || ""))); },
   onMove: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-move", (_e, d) => cb(d || {})); },
   setPinned: (v) => ipcRenderer.send("eye-set-pinned", Boolean(v)),
   clickThrough: (v) => ipcRenderer.send("eye-click-through", Boolean(v)),

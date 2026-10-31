@@ -103,7 +103,7 @@ const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.4.3";
+const APP_VERSION = "4.5.0";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -2213,7 +2213,8 @@ const BARE_CODE = /^[\s"'.,!?-]*(\d{3,8})[\s"'.,!?-]*$/i;
 // and nobody has to say the order twice.
 const NNN_SERVER = DEFAULT_TUNNEL;
 const NNN_POLL_MS = 180000;
-let nnnGlobal = { armed: false, releaseAt: 0, until: "", days: 0, message: "" };
+let nnnGlobal = { armed: false, armedAt: 0, releaseAt: 0, until: "", days: 0, message: "" };
+let nnnLocal = null;       // last answer from this machine's shell
 let nnnAwaitingArmCode = false;
 let nnnSyncing = false;
 
@@ -2231,12 +2232,37 @@ async function nativeNoNut(action, code, reason) {
   }
   if (window.CapriEyes?.noNut) {
     try {
-      return JSON.parse(window.CapriEyes.noNut(JSON.stringify({ action, reason: String(reason || "") })));
+      return JSON.parse(window.CapriEyes.noNut(JSON.stringify({ action, code, reason: String(reason || "") })));
     } catch {
       return null;
     }
   }
   return null;
+}
+
+// The season is a fact about the calendar, not a timer: both the dashboard and
+// the shell read the same November 1st to December 1st window in local time.
+function nnnSeasonAt(now = new Date()) {
+  return {
+    start: new Date(now.getFullYear(), 10, 1, 0, 0, 0, 0).getTime(),
+    end: new Date(now.getFullYear(), 11, 1, 0, 0, 0, 0).getTime(),
+  };
+}
+
+function nnnModeAt(now = new Date()) {
+  const { start, end } = nnnSeasonAt(now);
+  return now.getTime() < start ? "before" : now.getTime() < end ? "active" : "after";
+}
+
+function nnnSpan(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (days > 0) return `${days}d ${hours}h ${String(mins).padStart(2, "0")}m`;
+  if (hours > 0) return `${hours}h ${String(mins).padStart(2, "0")}m ${String(secs).padStart(2, "0")}s`;
+  return `${mins}m ${String(secs).padStart(2, "0")}s`;
 }
 
 async function nnnServerState() {
@@ -2273,6 +2299,13 @@ function nnnNoSharedSwitch(out) {
   return out.status === 401 || out.status === 404 || /pair this device/i.test(String(out.message || ""));
 }
 
+async function nnnRefreshLocal() {
+  if (!nnnHasShell()) return null;
+  const local = await nativeNoNut("status");
+  if (local && typeof local.active === "boolean") nnnLocal = local;
+  return nnnLocal;
+}
+
 // Bring this machine in line with the shared switch. Anything she cannot reach
 // leaves the local lock alone, so a dead link never unlocks a live seal.
 async function nnnSync() {
@@ -2286,11 +2319,15 @@ async function nnnSync() {
   }
   if (!state) return null;
   nnnGlobal = state;
+  await nnnRefreshLocal();
   paintNnn();
   if (!nnnHasShell()) return state;
-  const shouldArm = state.armed && Date.now() < Number(state.releaseAt || 0);
-  const local = await nativeNoNut("status");
+  const local = nnnLocal;
   if (!local || typeof local.active !== "boolean") return state;
+  // A code release is final for the season on this machine; a stale shared
+  // switch must not quietly switch it back on.
+  const dismissed = Number(local.dismissed || 0) === nnnSeasonAt().end;
+  const shouldArm = state.armed && Date.now() < Number(state.releaseAt || 0) && !dismissed;
   if (shouldArm && !local.active) await nativeNoNut("arm");
   else if (!state.armed && local.active && !local.awaitingCode) {
     await nativeNoNut("release", "", "the shared switch is off");
@@ -2301,56 +2338,163 @@ async function nnnSync() {
 function nnnStartSync() {
   setTimeout(() => { void nnnSync(); }, 6000);
   setInterval(() => { void nnnSync(); }, NNN_POLL_MS);
+  setInterval(() => { void nnnRefreshLocal().then(paintNnn); }, 15000);
+  setInterval(paintNnn, 1000);
 }
 
 // The same switch, by hand: two buttons and the code, for anyone who would
 // rather not say it out loud.
 const nnnStateEl = document.getElementById("nnnState");
 const nnnCodeEl = document.getElementById("nnnCode");
+const nnnBadgeEl = document.getElementById("nnnBadge");
+const nnnHeadlineEl = document.getElementById("nnnHeadline");
+const nnnTimerEl = document.getElementById("nnnTimer");
+const nnnDetailEl = document.getElementById("nnnDetail");
+const nnnBlockedEl = document.getElementById("nnnBlocked");
+const nnnGuardEl = document.getElementById("nnnGuard");
+const nnnArmRow = document.getElementById("nnnArmRow");
+const nnnRecoveryRow = document.getElementById("nnnRecoveryRow");
 
 function paintNnn() {
-  if (!nnnStateEl) return;
-  const armed = Boolean(nnnGlobal.armed) && Date.now() < Number(nnnGlobal.releaseAt || 0);
-  nnnStateEl.textContent = armed ? `locked - ${nnnGlobal.days || 0} day${nnnGlobal.days === 1 ? "" : "s"} left` : "off";
-  nnnStateEl.classList.toggle("bad", armed);
+  const now = Date.now();
+  const season = nnnSeasonAt();
+  const cal = nnnModeAt();
+  const serverArmed = Boolean(nnnGlobal.armed) && now < Number(nnnGlobal.releaseAt || 0);
+  const localActive = Boolean(nnnLocal?.active);
+  const active = localActive || serverArmed || (cal === "active" && !nnnHasShell());
+  const mode = active ? "active" : cal;
+  const blocked = Number(nnnLocal?.blocked ?? nnnGlobal.blocked ?? 0);
+  const sites = Boolean(nnnLocal?.sites);
+
+  if (nnnHeadlineEl) {
+    nnnHeadlineEl.textContent = mode === "active"
+      ? "NNN MODE ACTIVE"
+      : mode === "after"
+        ? "NNN MODE COMPLETED"
+        : "NNN MODE ARMS NOVEMBER 1";
+  }
+  if (nnnTimerEl) {
+    const left = mode === "active"
+      ? Math.max(0, (Number(nnnLocal?.releaseAt) || Number(nnnGlobal.releaseAt) || season.end) - now)
+      : mode === "before" ? Math.max(0, season.start - now) : 0;
+    nnnTimerEl.textContent = mode === "after" ? "season complete" : nnnSpan(left);
+  }
+  if (nnnDetailEl) {
+    nnnDetailEl.textContent = mode === "active"
+      ? (nnnLocal?.message || `Closing 18+ tabs and blocking the site list until ${new Date(season.end).toDateString()}. Keeps running with Capri closed.`)
+      : mode === "after"
+        ? "December 1st has passed. The lock is off and normal controls are back."
+        : "It switches itself on at midnight on November 1st in your local time. Set it up now; the countdown does the rest.";
+  }
+  if (nnnBlockedEl) {
+    nnnBlockedEl.textContent = `${blocked} blocked attempt${blocked === 1 ? "" : "s"}`;
+  }
+  if (nnnGuardEl) {
+    nnnGuardEl.textContent = !nnnHasShell()
+      ? "this browser: protection runs in Capri desktop / Android"
+      : sites
+        ? "browser guard: tabs closed + site list active"
+        : "browser guard: tabs closed (site list needs admin once)";
+  }
+  if (nnnStateEl) {
+    nnnStateEl.textContent = mode === "active" ? "LOCKED" : mode === "after" ? "done" : active ? "armed" : "off";
+    nnnStateEl.classList.toggle("bad", mode === "active");
+  }
+  // Before the season: the setup button. During: nothing but the disclosed
+  // recovery code. After: nothing at all, settings are normal again.
+  nnnArmRow?.classList.toggle("hidden", mode !== "before" || active);
+  nnnRecoveryRow?.classList.toggle("hidden", mode !== "active");
+  if (nnnBadgeEl) {
+    const show = mode === "active" || (mode === "before" && active);
+    nnnBadgeEl.classList.toggle("hidden", !show);
+    if (show) nnnBadgeEl.textContent = `NNN ${nnnTimerEl?.textContent || ""}`;
+  }
 }
 
 async function nnnOrder(order) {
   const code = String(nnnCodeEl?.value || "").replace(/\D/g, "");
-  if (!code) {
-    showNotice("Type the code first - it is the one that cancels the mode.", null, null, 6000);
-    return;
-  }
-  const out = await nnnServerOrder(order, code);
-  if (!out) {
-    showNotice("No way to Capri's server just now, so the switch stays as it is.", null, null, 7000);
-    return;
-  }
-  if (!out.ok) {
-    if (nnnNoSharedSwitch(out)) {
-      const local = await nativeNoNut(order === "arm" ? "activate" : "release", "", order === "arm" ? "sealed here" : "opened here");
-      if (order === "arm") nnnAskOverlay();
-      paintNnn();
-      showNotice(`Her server needs a redeploy before one switch can seal every device, so this one ${order === "arm" ? "is sealed" : "is open"}: ${local?.message || ""}`, null, null, 10000);
+  if (order === "arm") {
+    if (!code) {
+      showNotice("Type the code first - it is the one that cancels the mode.", null, null, 6000);
       return;
     }
+    const out = await nnnServerOrder("arm", code);
+    if (!out) {
+      const local = await nativeNoNut("activate");
+      nnnLocal = local;
+      paintNnn();
+      showNotice(`No way to Capri's server just now, so this machine alone is armed: ${local?.message || "locked until December 1st."}`, null, null, 10000);
+      return;
+    }
+    if (!out.ok) {
+      if (nnnNoSharedSwitch(out)) {
+        const local = await nativeNoNut("activate");
+        nnnLocal = local;
+        nnnAskOverlay();
+        paintNnn();
+        showNotice(`Her server needs a redeploy before one switch can seal every device, so this one is armed: ${local?.message || ""}`, null, null, 10000);
+        return;
+      }
+      showNotice(out.message || "Wrong code. Nothing changes.", null, null, 7000);
+      return;
+    }
+    nnnGlobal = out;
+    nnnLocal = await nativeNoNut("arm");
+    nnnAskOverlay();
+    paintNnn();
+    showNotice(out.message || "Armed on every device.", null, null, 8000);
+    return;
+  }
+
+  // Release is the recovery path only: the code is the whole gate.
+  if (!code) {
+    showNotice("Deactivation needs the recovery code.", null, null, 6000);
+    return;
+  }
+  const out = await nnnServerOrder("release", code);
+  if (out && out.ok) {
+    nnnGlobal = out;
+    nnnLocal = await nativeNoNut("release", "", "opened by the recovery code");
+  } else if (!out || nnnNoSharedSwitch(out)) {
+    nnnLocal = await nativeNoNut("code", code);
+    if (nnnLocal?.active) {
+      showNotice(nnnLocal.message || "Wrong code. Nothing changes.", null, null, 7000);
+      return;
+    }
+    nnnGlobal = { ...nnnGlobal, armed: false };
+  } else {
     showNotice(out.message || "Wrong code. Nothing changes.", null, null, 7000);
     return;
   }
-  nnnGlobal = out;
-  await nativeNoNut(order === "arm" ? "arm" : "release", "", order === "arm" ? "sealed by the switch" : "opened by the switch");
-  if (order === "arm") nnnAskOverlay();
+  if (nnnCodeEl) nnnCodeEl.value = "";
   paintNnn();
-  showNotice(out.message || (order === "arm" ? "Sealed on every device." : "Open again on every device."), null, null, 8000);
+  showNotice(nnnLocal?.message || (out?.message) || "Code checked out. The lock is off.", null, null, 8000);
 }
 
 document.getElementById("nnnArmBtn")?.addEventListener("click", () => nnnOrder("arm"));
 document.getElementById("nnnReleaseBtn")?.addEventListener("click", () => nnnOrder("release"));
+nnnBadgeEl?.addEventListener("click", () => {
+  document.getElementById("settingsBtn")?.click();
+  document.getElementById("nnnField")?.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+
+// Who the loss report signs itself with. The Google account is already known
+// to the shell for memory; this hands it to the lock as well.
+function pushNnnIdentity(profile) {
+  const email = String(profile?.email || "");
+  const name = String(profile?.name || profile?.preferredName || "");
+  if (!email && !name) return;
+  try { window.capriNative?.noNutId?.(email, name); } catch { /* older shell */ }
+  try { window.CapriEyes?.identify?.(email, name); } catch { /* older build */ }
+}
 
 // The phone's black screen is an overlay window, and Android only hands that
 // over on request. Returns true when she just sent you to the grant screen.
 function nnnAskOverlay() {
   if (!IS_NATIVE) return false;
+  // The gallery check needs media access, and the black screen needs the
+  // overlay grant. Ask for both when the lock is armed.
+  try { window.CapriEyes?.grantMedia?.(); } catch { /* older build */ }
   const grants = readPhoneGrants();
   if (!grants || grants.overlay) return false;
   try {
@@ -2422,19 +2566,20 @@ async function handleNoNut(userText) {
     );
     return true;
   }
-  if (code && !phrase) return false;
 
   const status = nnnHasShell() ? await nativeNoNut("status") : null;
+  if (status) nnnLocal = status;
   const state = nnnGlobal.armed ? nnnGlobal : ((await nnnSync()) || nnnGlobal);
   const lockedHere = Boolean(status?.active);
+  if (code && !phrase && !state.armed && !status?.awaitingCode) return false;
 
   if (code) {
-    // The number only means the code while she has asked for it.
-    if (!state.armed && !(status && status.awaitingCode)) return false;
     const out = await nnnServerOrder("release", code);
     if (out && out.ok) {
       nnnGlobal = out;
-      await nativeNoNut("release", "", "released by the code you said");
+      nnnLocal = await nativeNoNut("release", "", "released by the code you said");
+      if (nnnCodeEl) nnnCodeEl.value = "";
+      paintNnn();
       await sayLocally(out.message || "Code checked out. Every device is open again.", userText);
       return true;
     }
@@ -2442,7 +2587,15 @@ async function handleNoNut(userText) {
       await sayLocally(out.message || "Wrong code. Nothing changes.", userText);
       return true;
     }
+    // No shared switch, or no server at all: the machine in front still holds
+    // the code, and a correct one really turns the lock off here.
     const local = await nativeNoNut("code", code);
+    if (local && local.active === false) {
+      nnnLocal = local;
+      nnnGlobal = { ...nnnGlobal, armed: false };
+      if (nnnCodeEl) nnnCodeEl.value = "";
+      paintNnn();
+    }
     await sayLocally(local?.message || "That did not work. Still locked.", userText);
     return true;
   }
@@ -2908,6 +3061,7 @@ function applyProfile(profile) {
     writeMirror(profile);
   }
   restoreRecentHistory(profile);
+  pushNnnIdentity(profile);
 
   const signedIn = Boolean(profile.google);
   el.accountName.textContent = signedIn ? (profile.email || profile.name || "google account") : "this pc";
@@ -3973,9 +4127,32 @@ function initUpdates() {
       });
       el.updateAction.onclick = () => {
         const url = feed.apk || feed.page || STORE_URL;
-        if (window.CapriDevice?.open) window.CapriDevice.open(url);
+        if (window.CapriDevice?.installUpdate && feed.apk) {
+          const reply = String(window.CapriDevice.installUpdate(feed.apk) || "");
+          showNotice(
+            reply === "ok"
+              ? "Downloading the update. Android will open the installer when it lands."
+              : "Allow Capri to install apps, then tap update again.",
+            null, null, 10000,
+          );
+        } else if (window.CapriDevice?.open) window.CapriDevice.open(url);
         else window.open(url, "_system");
       };
+      // The PC installs its own updates, so the phone does too: fetch the APK
+      // straight into the system installer, once per new version.
+      if (window.CapriDevice?.installUpdate && feed.apk) {
+        const seen = `capri.apk.auto.${feed.version}`;
+        if (!localStorage.getItem(seen)) {
+          localStorage.setItem(seen, "1");
+          showUpdateScreen({
+            kicker: `CAPRI v${feed.version} IS OUT`,
+            title: "UPDATING CAPRI",
+            note: "Downloading the new APK. Android will ask you to install it; your sign-in and memory stay.",
+            percent: -1,
+          });
+          window.CapriDevice.installUpdate(feed.apk);
+        }
+      }
     })
     .catch(() => { /* offline: try again next launch */ });
 }

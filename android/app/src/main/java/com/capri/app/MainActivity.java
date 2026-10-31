@@ -19,9 +19,15 @@ import android.webkit.WebView;
 import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +38,7 @@ import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
 	private static final int CAPRI_PERMISSION_REQUEST = 1723;
+	private static final int CAPRI_MEDIA_REQUEST = 1724;
 	private final java.util.ArrayDeque<String> grantQueue = new java.util.ArrayDeque<>();
 	private boolean grantFlow = false;
 	private boolean thenRuntime = false;
@@ -79,6 +86,7 @@ public class MainActivity extends BridgeActivity {
 		}
 
 		requestRuntime(false);
+		NnnReceiver.schedule(this);
 	}
 
 	// Everything the phone has to hand over before she can actually watch: mic,
@@ -236,6 +244,7 @@ public class MainActivity extends BridgeActivity {
 	@Override
 	public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
 		super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+		if (requestCode == CAPRI_MEDIA_REQUEST) return;
 		if (requestCode == CAPRI_PERMISSION_REQUEST && thenRuntime) {
 			thenRuntime = false;
 			nextGrant();
@@ -296,6 +305,56 @@ public class MainActivity extends BridgeActivity {
 				return "err:" + err.getMessage();
 			}
 		}
+
+		// APK updates land the same way the PC's do: the app fetches the build,
+		// then hands the system installer the package. No browser detour.
+		@JavascriptInterface
+		public String installUpdate(String url) {
+			final String link = String.valueOf(url == null ? "" : url).trim();
+			if (!link.startsWith("https://")) return "err:url";
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
+				runOnUiThread(() -> {
+					try {
+						startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+								Uri.parse("package:" + getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+					} catch (Exception err) { /* no settings page */ }
+				});
+				Alerts.show(MainActivity.this, "Capri update", "Allow Capri to install apps, then tap update again.");
+				return "err:permission";
+			}
+			Alerts.show(MainActivity.this, "Capri update", "Downloading the new build...");
+			new Thread(() -> {
+				HttpURLConnection conn = null;
+				try {
+					conn = (HttpURLConnection) new URL(link).openConnection();
+					conn.setConnectTimeout(15000);
+					conn.setReadTimeout(60000);
+					conn.setInstanceFollowRedirects(true);
+					if (conn.getResponseCode() != 200) throw new Exception("status " + conn.getResponseCode());
+					File out = new File(getCacheDir(), "capri-update.apk");
+					InputStream in = conn.getInputStream();
+					FileOutputStream os = new FileOutputStream(out);
+					byte[] buf = new byte[65536];
+					int n;
+					while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+					os.close();
+					in.close();
+					Uri apk = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", out);
+					Intent it = new Intent(Intent.ACTION_VIEW)
+							.setDataAndType(apk, "application/vnd.android.package-archive")
+							.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+					runOnUiThread(() -> {
+						try { startActivity(it); }
+						catch (Exception err) { Alerts.show(MainActivity.this, "Capri update", "Could not open the installer."); }
+					});
+				} catch (Exception err) {
+					Alerts.show(MainActivity.this, "Capri update", "Update download failed. Try once from the download panel.");
+				} finally {
+					if (conn != null) conn.disconnect();
+				}
+			}).start();
+			return "ok";
+		}
 	}
 
 	// The watcher, plus the bits of the shell the web page cannot reach: system
@@ -344,6 +403,38 @@ public class MainActivity extends BridgeActivity {
 		public String noNut(String payload) {
 			return EyeService.noNut(MainActivity.this, payload);
 		}
+
+		// The Google account the loss report signs itself with.
+		@JavascriptInterface
+		public void identify(String email, String name) {
+			EyeService.identify(MainActivity.this, email, name);
+		}
+
+		@JavascriptInterface
+		public void grantMedia() {
+			askNnnPermissions();
+		}
+	}
+
+	// The gallery scan needs media access; on Android 13+ that is two different
+	// grants, and the overlay has its own screen. Asked once when the lock arms.
+	void askNnnPermissions() {
+		runOnUiThread(() -> {
+			ArrayList<String> missing = new ArrayList<>();
+			if (Build.VERSION.SDK_INT >= 33) {
+				if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
+					missing.add(Manifest.permission.READ_MEDIA_IMAGES);
+				}
+				if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_VIDEO) != PackageManager.PERMISSION_GRANTED) {
+					missing.add(Manifest.permission.READ_MEDIA_VIDEO);
+				}
+			} else if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+				missing.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+			}
+			if (!missing.isEmpty()) {
+				ActivityCompat.requestPermissions(MainActivity.this, missing.toArray(new String[0]), CAPRI_MEDIA_REQUEST);
+			}
+		});
 	}
 
 	@Override
@@ -351,13 +442,16 @@ public class MainActivity extends BridgeActivity {
 		// Fires while we still count as foreground, so the watcher service is
 		// allowed to start. Watching is off while you are inside the app.
 		super.onUserLeaveHint();
-		if (EyePrefs.enabled(this)) EyeService.show(this, EyePrefs.load(this));
+		if (EyePrefs.enabled(this) || EyeService.nnnArmed(this) || EyeService.nnnNeeded(this)) {
+			EyeService.show(this, EyePrefs.load(this));
+		}
 	}
 
 	@Override
 	public void onResume() {
 		super.onResume();
 		if (EyePrefs.enabled(this)) EyeService.hide(this);
+		else if (EyeService.nnnArmed(this) || EyeService.nnnNeeded(this)) EyeService.show(this, EyePrefs.load(this));
 		else EyeService.stop(this);
 		if (grantFlow) new android.os.Handler(getMainLooper()).postDelayed(this::nextGrant, 700);
 	}

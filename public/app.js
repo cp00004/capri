@@ -103,7 +103,7 @@ const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.4.3";
+const APP_VERSION = "4.5.0";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -2492,6 +2492,9 @@ function pushNnnIdentity(profile) {
 // over on request. Returns true when she just sent you to the grant screen.
 function nnnAskOverlay() {
   if (!IS_NATIVE) return false;
+  // The gallery check needs media access, and the black screen needs the
+  // overlay grant. Ask for both when the lock is armed.
+  try { window.CapriEyes?.grantMedia?.(); } catch { /* older build */ }
   const grants = readPhoneGrants();
   if (!grants || grants.overlay) return false;
   try {
@@ -4124,9 +4127,32 @@ function initUpdates() {
       });
       el.updateAction.onclick = () => {
         const url = feed.apk || feed.page || STORE_URL;
-        if (window.CapriDevice?.open) window.CapriDevice.open(url);
+        if (window.CapriDevice?.installUpdate && feed.apk) {
+          const reply = String(window.CapriDevice.installUpdate(feed.apk) || "");
+          showNotice(
+            reply === "ok"
+              ? "Downloading the update. Android will open the installer when it lands."
+              : "Allow Capri to install apps, then tap update again.",
+            null, null, 10000,
+          );
+        } else if (window.CapriDevice?.open) window.CapriDevice.open(url);
         else window.open(url, "_system");
       };
+      // The PC installs its own updates, so the phone does too: fetch the APK
+      // straight into the system installer, once per new version.
+      if (window.CapriDevice?.installUpdate && feed.apk) {
+        const seen = `capri.apk.auto.${feed.version}`;
+        if (!localStorage.getItem(seen)) {
+          localStorage.setItem(seen, "1");
+          showUpdateScreen({
+            kicker: `CAPRI v${feed.version} IS OUT`,
+            title: "UPDATING CAPRI",
+            note: "Downloading the new APK. Android will ask you to install it; your sign-in and memory stay.",
+            percent: -1,
+          });
+          window.CapriDevice.installUpdate(feed.apk);
+        }
+      }
     })
     .catch(() => { /* offline: try again next launch */ });
 }

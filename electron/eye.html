@@ -148,6 +148,19 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  /* Under the eye, above nothing else: the No Nut November countdown. */
+  #nnnbar {
+    position: absolute;
+    left: 0; right: 0; bottom: 2px;
+    z-index: 5;
+    text-align: center;
+    font: 8.5px/1.2 "Share Tech Mono", ui-monospace, monospace;
+    letter-spacing: .6px;
+    color: rgba(77, 255, 157, .92);
+    text-shadow: 0 0 6px rgba(77, 255, 157, .45);
+    pointer-events: none;
+  }
+  #nnnbar[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -169,6 +182,7 @@
       <div id="scan"></div>
     </div>
     <div id="bubble"><b>CAPRI // EYE <i id="mode"></i></b><span id="line"></span></div>
+    <div id="nnnbar" hidden></div>
   </div>
 
 <script>
@@ -711,6 +725,12 @@
     Object.assign(cfg, data || {});
     if (!cfg.base) cfg.base = location.origin === "null" ? "" : location.origin;
     if (state.live && wakeOn.on) wakeRec.on ? null : startWake();
+  });
+
+  const nnnBar = document.getElementById("nnnbar");
+  window.capriEye?.onNnn((text) => {
+    nnnBar.textContent = text || "";
+    nnnBar.hidden = !text;
   });
 
   // Hidden eye means no mic: stop listening the moment the overlay goes away.

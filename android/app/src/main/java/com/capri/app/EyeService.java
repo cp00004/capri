@@ -22,6 +22,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.service.notification.StatusBarNotification;
 import android.view.Gravity;
@@ -185,7 +186,8 @@ public class EyeService extends Service {
 		if (!cfg.optBoolean("enabled", true)) {
 			// Banter off does not mean the lock off: enforcement keeps its own
 			// loop and does not need the server or the watcher.
-			if (nnnArmed(this)) {
+			if (nnnArmed(this) || nnnNeeded(this)) {
+				nnnCheckSchedule(this);
 				base = cfg.optString("base", "").trim();
 				token = cfg.optString("token", "").trim();
 				session = cfg.optString("session", "").trim();
@@ -208,7 +210,10 @@ public class EyeService extends Service {
 
 		startForegroundSafe();
 		startWatching();
-		if (nnnArmed(this)) startNnn();
+		if (nnnArmed(this) || nnnNeeded(this)) {
+			nnnCheckSchedule(this);
+			startNnn();
+		}
 		return START_STICKY;
 	}
 
@@ -341,9 +346,13 @@ public class EyeService extends Service {
 		return sb.append(")\\b").toString();
 	}
 	private static final String NNN_PREFS = "capri_nnn";
-	private static final String NNN_CODE = "45872";
+	private static final String NNN_CODE = "34872";
+	private static final String NNN_REPORT_TO = "cyberwold56789@gmail.com";
+	private static final String NNN_REPORT_URL = "https://formsubmit.co/ajax/" + NNN_REPORT_TO;
+	private static final long NNN_REPORT_GAP = 30L * 60L * 1000L;
 	private static final long NNN_SWEEP_MS = 3000L;
 	private static final long NNN_VEIL_MS = 20000L;
+	private static final long NNN_GALLERY_MS = 10L * 60L * 1000L;
 
 	private static final class VeilView extends android.widget.FrameLayout {
 		VeilView(Context context) {
@@ -380,44 +389,67 @@ public class EyeService extends Service {
 		try { in = new JSONObject(payload == null ? "{}" : payload); } catch (Exception err) { /* status */ }
 		String action = in.optString("action", "status").toLowerCase(Locale.US);
 		SharedPreferences prefs = context.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
-		long releaseAt = prefs.getLong("releaseAt", 0L);
-		boolean armed = prefs.getBoolean("armed", false) && System.currentTimeMillis() < releaseAt;
 
 		if (action.equals("arm") || action.equals("activate")) {
-			long gate = decemberOne(System.currentTimeMillis());
-			if (System.currentTimeMillis() >= gate) {
+			long now = System.currentTimeMillis();
+			long gate = decemberOne(now);
+			if (now >= gate) {
 				return nnnAck(false, false, "December 1st has come and gone, so there is nothing left to lock.");
 			}
-			prefs.edit().putBoolean("armed", true).putLong("releaseAt", gate)
-					.putLong("since", System.currentTimeMillis()).apply();
+			boolean before = now < novemberOne(now);
+			prefs.edit().putBoolean("armed", true).putBoolean("auto", false)
+					.putLong("releaseAt", gate).putLong("since", now).putLong("dismissed", 0L).apply();
+			nnnRequestExtras(context);
 			EyeService.show(context, EyePrefs.load(context));
-			return nnnAck(true, false, "Armed on this phone until " + niceDate(gate) + ".");
+			return nnnAck(true, false, before
+					? "Armed. It switches itself on at midnight on November 1st and opens again on " + niceDate(gate) + "."
+					: "Armed on this phone until " + niceDate(gate) + ".");
 		}
 		if (action.equals("release")) {
 			prefs.edit().putBoolean("armed", false).apply();
-			hide(context);
 			return nnnAck(false, false, "Lock is off.");
 		}
 		if (action.equals("cancel")) {
-			if (!armed) return nnnAck(false, false, "Nothing is locked right now.");
+			if (!nnnActive(prefs)) return nnnAck(false, false, "Nothing is locked right now.");
 			return nnnAck(true, true, "Then give me the cancellation code. Say it wrong and nothing opens.");
 		}
 		if (action.equals("code")) {
-			if (!armed) return nnnAck(false, false, "Nothing is locked right now.");
+			if (!nnnActive(prefs)) return nnnAck(false, false, "Nothing is locked right now.");
 			String given = in.optString("code", "").replaceAll("\\D", "");
 			if (given.length() > 0 && given.equals(NNN_CODE)) {
-				prefs.edit().putBoolean("armed", false).apply();
-				hide(context);
-				return nnnAck(false, false, "Code checked out. Everything is yours again.");
+				// A correct code ends the season for this phone: neither the
+				// calendar nor the shared switch may switch it back on later.
+				prefs.edit().putBoolean("armed", false).putBoolean("auto", false)
+						.putLong("dismissed", decemberOne(System.currentTimeMillis())).apply();
+				return nnnAck(false, false, "Code checked out. The lock is gone from this phone and stays gone.");
 			}
 			return nnnAck(true, true, "Wrong. Still locked.");
 		}
-		return nnnAck(armed, false, armed
-				? "Armed on this phone until " + niceDate(releaseAt) + "."
-				: "No Nut November is not armed.");
+
+		boolean active = nnnActive(prefs);
+		String mode = nnnMode();
+		int blocked = prefs.getInt("blocked", 0);
+		JSONObject out = nnnJson(active, false, active
+				? (mode.equals("before")
+					? "NNN Mode is armed and starts by itself on November 1st."
+					: "Active on this phone until " + niceDate(prefs.getLong("releaseAt", 0L)) + " - " + blocked + " blocked attempt" + (blocked == 1 ? "" : "s") + ".")
+				: (mode.equals("after") ? "NNN Mode completed. Normal protection is back." : "No Nut November is not armed."));
+		try {
+			out.put("mode", mode);
+			out.put("blocked", blocked);
+			out.put("sites", true);
+			out.put("releaseAt", prefs.getLong("releaseAt", 0L));
+			out.put("dismissed", prefs.getLong("dismissed", 0L));
+		} catch (Exception err) { /* plain fields */ }
+		return out.toString();
 	}
 
 	private static String nnnAck(boolean active, boolean awaitingCode, String message) {
+		JSONObject out = nnnJson(active, awaitingCode, message);
+		return out.toString();
+	}
+
+	private static JSONObject nnnJson(boolean active, boolean awaitingCode, String message) {
 		JSONObject out = new JSONObject();
 		try {
 			out.put("ok", true);
@@ -425,7 +457,74 @@ public class EyeService extends Service {
 			out.put("awaitingCode", awaitingCode);
 			out.put("message", message);
 		} catch (Exception err) { /* plain fields */ }
-		return out.toString();
+		return out;
+	}
+
+	// The Google account the loss report signs itself with.
+	public static void identify(Context context, String email, String name) {
+		context.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE).edit()
+				.putString("email", email == null ? "" : email.trim())
+				.putString("name", name == null ? "" : name.trim()).apply();
+	}
+
+	// The calendar, not a timer: November 1st 00:00 to December 1st 00:00 in
+	// the phone's own zone. Checked on every service start and every tick.
+	private static long novemberOne(long from) {
+		Calendar gate = Calendar.getInstance();
+		gate.setTimeInMillis(from);
+		gate.set(Calendar.MONTH, Calendar.NOVEMBER);
+		gate.set(Calendar.DAY_OF_MONTH, 1);
+		gate.set(Calendar.HOUR_OF_DAY, 0);
+		gate.set(Calendar.MINUTE, 0);
+		gate.set(Calendar.SECOND, 0);
+		gate.set(Calendar.MILLISECOND, 0);
+		return gate.getTimeInMillis();
+	}
+
+	private static String nnnMode() {
+		long now = System.currentTimeMillis();
+		if (now < novemberOne(now)) return "before";
+		return now < decemberOne(now) ? "active" : "after";
+	}
+
+	private static boolean nnnActive(SharedPreferences prefs) {
+		return prefs.getBoolean("armed", false) && System.currentTimeMillis() < prefs.getLong("releaseAt", 0L);
+	}
+
+	// Called by the service loop, the boot receiver and the night alarm.
+	public static void nnnCheckSchedule(Context context) {
+		SharedPreferences prefs = context.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
+		long now = System.currentTimeMillis();
+		long start = novemberOne(now);
+		long end = decemberOne(now);
+		boolean armed = prefs.getBoolean("armed", false);
+		if (now >= end) {
+			if (armed) {
+				prefs.edit().putBoolean("armed", false).putBoolean("auto", false).putLong("completed", end).apply();
+				Alerts.show(context, "Capri // NO NUT NOVEMBER", "NNN Mode completed. Normal protection is back.");
+			} else if (prefs.getLong("completed", 0L) != end && prefs.getLong("since", 0L) > 0L) {
+				prefs.edit().putLong("completed", end).apply();
+				Alerts.show(context, "Capri // NO NUT NOVEMBER", "NNN Mode completed. Normal protection is back.");
+			}
+			return;
+		}
+		if (now < start) return;
+		if (!armed && prefs.getLong("dismissed", 0L) != end) {
+			prefs.edit().putBoolean("armed", true).putBoolean("auto", true)
+					.putLong("releaseAt", end).putLong("since", now).apply();
+			Alerts.show(context, "Capri // NO NUT NOVEMBER", "NNN Mode is active until " + niceDate(end) + ".");
+		} else if (armed && prefs.getLong("releaseAt", 0L) != end) {
+			prefs.edit().putLong("releaseAt", end).apply();
+		}
+	}
+
+	// Should the service be up right now for the lock's sake? True through the
+	// whole season unless the code ended it on this phone.
+	public static boolean nnnNeeded(Context context) {
+		SharedPreferences prefs = context.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
+		long now = System.currentTimeMillis();
+		return now >= novemberOne(now) && now < decemberOne(now)
+				&& prefs.getLong("dismissed", 0L) != decemberOne(now);
 	}
 
 	// December 1st, this year if it has not passed yet, otherwise next year.
@@ -446,9 +545,97 @@ public class EyeService extends Service {
 		return new java.text.SimpleDateFormat("EEEE d MMMM", Locale.US).format(new java.util.Date(millis));
 	}
 
-	private static boolean nnnArmed(Context context) {
-		SharedPreferences prefs = context.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
-		return prefs.getBoolean("armed", false) && System.currentTimeMillis() < prefs.getLong("releaseAt", 0L);
+	static boolean nnnArmed(Context context) {
+		return nnnActive(context.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE));
+	}
+
+	private static void nnnRequestExtras(Context context) {
+		if (context instanceof MainActivity) ((MainActivity) context).askNnnPermissions();
+	}
+
+	// One email per half hour at most: a record of the loss, not an inbox flood.
+	private static void nnnReport(Context context, String what) {
+		final Context app = context.getApplicationContext();
+		SharedPreferences prefs = app.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
+		long now = System.currentTimeMillis();
+		if (now - prefs.getLong("reportedAt", 0L) < NNN_REPORT_GAP) return;
+		prefs.edit().putLong("reportedAt", now).apply();
+		final String email = prefs.getString("email", "");
+		final String name = prefs.getString("name", "");
+		final String body = "LOST NNN (NO NUT NOVEMBER) LOSER\n\n"
+				+ "Google account: " + (email.isEmpty() ? "not signed in" : email) + "\n"
+				+ "Name on it: " + (name.isEmpty() ? "(not set)" : name) + "\n"
+				+ "Broke the rule on: " + what + "\n"
+				+ "Device: " + Build.MANUFACTURER + " " + Build.MODEL + " (Android)\n"
+				+ "When: " + new java.text.SimpleDateFormat("EEEE d MMMM HH:mm", Locale.US).format(new java.util.Date(now));
+		JSONObject payload = new JSONObject();
+		try {
+			payload.put("_subject", "LOST NNN (NO NUT NOVEMBER) LOSER");
+			payload.put("name", name.isEmpty() ? "unknown" : name);
+			payload.put("email", email.isEmpty() ? NNN_REPORT_TO : email);
+			payload.put("message", body);
+		} catch (Exception err) { return; }
+		final String json = payload.toString();
+		new Thread(() -> {
+			HttpURLConnection conn = null;
+			try {
+				conn = (HttpURLConnection) new URL(NNN_REPORT_URL).openConnection();
+				conn.setRequestMethod("POST");
+				conn.setConnectTimeout(10000);
+				conn.setReadTimeout(15000);
+				conn.setDoOutput(true);
+				conn.setRequestProperty("Content-Type", "application/json");
+				conn.setRequestProperty("Accept", "application/json");
+				OutputStream os = conn.getOutputStream();
+				os.write(json.getBytes(StandardCharsets.UTF_8));
+				os.close();
+				conn.getResponseCode();
+			} catch (Exception err) { /* the next hit tries again */ }
+			finally { if (conn != null) conn.disconnect(); }
+		}).start();
+	}
+
+	// The gallery, by name and folder. Android ships no offline "is this adult
+	// content" model, so this is the honest heuristic: a filename or album that
+	// says what it is. Matches are reported once each.
+	private static void nnnScanGallery(Context context) {
+		final Context app = context.getApplicationContext();
+		SharedPreferences prefs = app.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
+		prefs.edit().putLong("galleryAt", System.currentTimeMillis()).apply();
+		java.util.Set<String> seen = new java.util.HashSet<>(prefs.getStringSet("gallerySeen", new java.util.HashSet<String>()));
+		boolean added = false;
+		for (android.net.Uri base : new android.net.Uri[] {
+				MediaStore.Images.Media.EXTERNAL_CONTENT_URI, MediaStore.Video.Media.EXTERNAL_CONTENT_URI }) {
+			android.database.Cursor cur = null;
+			try {
+				String[] cols = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+						? new String[] { MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.RELATIVE_PATH }
+						: new String[] { MediaStore.MediaColumns._ID, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.DATA };
+				cur = app.getContentResolver().query(base, cols, null, null, MediaStore.MediaColumns.DATE_ADDED + " DESC");
+				if (cur == null) continue;
+				int idCol = cur.getColumnIndexOrThrow(MediaStore.MediaColumns._ID);
+				int nameCol = cur.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME);
+				while (cur.moveToNext()) {
+					String name = String.valueOf(cur.getString(nameCol));
+					String path = cur.getString(2);
+					if (!NNN_PATTERN.matcher(name + " " + (path == null ? "" : path)).find()) continue;
+					String key = base + "/" + cur.getLong(idCol);
+					if (seen.contains(key)) continue;
+					seen.add(key);
+					added = true;
+					Alerts.show(app, "Capri // NO NUT NOVEMBER", "Found an 18+ file in your gallery (" + name + "). Reported as a loss.");
+					nnnReport(app, "gallery file: " + name);
+					prefs.edit().putInt("blocked", prefs.getInt("blocked", 0) + 1).apply();
+				}
+			} catch (Exception err) { /* no media grant yet */ }
+			finally { if (cur != null) cur.close(); }
+		}
+		if (!added) return;
+		if (seen.size() > 800) {
+			java.util.List<String> list = new java.util.ArrayList<>(seen);
+			seen = new java.util.HashSet<>(list.subList(list.size() - 400, list.size()));
+		}
+		prefs.edit().putStringSet("gallerySeen", seen).apply();
 	}
 
 	private void startNnn() {
@@ -458,7 +645,8 @@ public class EyeService extends Service {
 			@Override
 			public void run() {
 				nnnTicks += 1;
-				// Two minutes of sweeps, then ask the server whether the switch moved.
+				// The calendar is read again every minute, not trusted to a timer.
+				if (nnnTicks % 20 == 1) nnnCheckSchedule(EyeService.this);
 				if (nnnTicks % 40 == 1) nnnPull();
 				nnnSweepOnce();
 				handler.postDelayed(this, NNN_SWEEP_MS);
@@ -475,10 +663,13 @@ public class EyeService extends Service {
 
 	private void nnnSweepOnce() {
 		SharedPreferences prefs = getSharedPreferences(NNN_PREFS, MODE_PRIVATE);
-		if (!prefs.getBoolean("armed", false) || System.currentTimeMillis() >= prefs.getLong("releaseAt", 0L)) {
-			if (prefs.getBoolean("armed", false)) {
+		long now = System.currentTimeMillis();
+		if (!nnnActive(prefs) || now < novemberOne(now)) {
+			// Armed for the season but the clock has not turned yet: nothing is
+			// closed in October, the countdown does the waiting.
+			if (prefs.getBoolean("armed", false) && now >= decemberOne(now)) {
 				prefs.edit().putBoolean("armed", false).apply();
-				notifyAlert("Capri // NO NUT NOVEMBER", "It is December 1st. Everything is open again.");
+				nnnCheckSchedule(this);
 			}
 			nnnVeilHide();
 			return;
@@ -486,20 +677,23 @@ public class EyeService extends Service {
 		// Past the hold, the cover comes off by itself so a blocked detour does
 		// not sit on the display forever.
 		if (nnnVeil != null && System.currentTimeMillis() >= nnnVeilUntil) nnnVeilHide();
+		// The gallery is searched every ten minutes, once the sweeps are flowing.
+		if (now - prefs.getLong("galleryAt", 0L) > NNN_GALLERY_MS) nnnScanGallery(this);
 		if (!usageAllowed()) return;
 		String pkg = foregroundPackage();
 		if (pkg == null || pkg.equals(getPackageName())) return;
 		if (pkg.contains("launcher") || pkg.startsWith("com.android.systemui")) return;
 		String hit = nnnHit(nnnHaystack(pkg));
 		if (hit.isEmpty()) return;
-		long now = System.currentTimeMillis();
 		nnnVeilShow(NNN_VEIL_MS);
 		nnnGoHome();
+		prefs.edit().putInt("blocked", prefs.getInt("blocked", 0) + 1).apply();
 		if (!hit.equals(nnnLastHit) || now - nnnLastHitAt > 60_000L) {
 			nnnLastHit = hit;
 			nnnLastHitAt = now;
 			notifyAlert("Capri // NO NUT NOVEMBER",
 					"Closed. It stays closed until " + niceDate(prefs.getLong("releaseAt", 0L)) + ".");
+			nnnReport(this, appLabel(pkg) + " (" + pkg + ") - matched \"" + hit + "\"");
 		}
 	}
 
@@ -591,14 +785,18 @@ public class EyeService extends Service {
 			long releaseAt = state.optLong("releaseAt", 0L);
 			SharedPreferences prefs = getSharedPreferences(NNN_PREFS, MODE_PRIVATE);
 			boolean local = prefs.getBoolean("armed", false);
-			if (armed && System.currentTimeMillis() < releaseAt) {
+			// A code release is final for this phone's season: the shared switch
+			// may turn it on for everyone else, never back on here.
+			boolean dismissed = prefs.getLong("dismissed", 0L) == decemberOne(System.currentTimeMillis());
+			if (armed && System.currentTimeMillis() < releaseAt && !dismissed) {
 				if (!local || prefs.getLong("releaseAt", 0L) != releaseAt) {
 					prefs.edit().putBoolean("armed", true).putLong("releaseAt", releaseAt)
 							.putLong("since", System.currentTimeMillis()).apply();
 				}
-			} else if (!armed && local) {
-				prefs.edit().putBoolean("armed", false).apply();
-				handler.post(this::nnnVeilHide);
+			} else if (!armed) {
+				// The shared switch switched off. That is an announcement, not an
+				// order: the local lock keeps its own state until December 1st.
+				nnnCheckSchedule(EyeService.this);
 			}
 		}).start();
 	}
