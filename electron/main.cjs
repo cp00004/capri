@@ -78,11 +78,11 @@ async function findFreePort(start, tries = 20) {
 }
 let PORT = Number(process.env.PORT || 4173);
 let APP_URL = `http://localhost:${PORT}`;
-// Her brain, keys and Google memory live on the hosted server, so the window
-// opens that build and drives PC actions over the native bridge. The bundled
-// server stays as an offline fallback so the shell still opens without a link.
+// The installed shell always talks to its own bundled server. Opening the
+// static Pages build here put every API call on a host that answers POST with
+// 405, which killed chat, the mic and the text commands.
 const REMOTE_URL = process.env.CAPRI_START_URL || "https://cp00004.github.io/capri/";
-const START_URL = REMOTE_URL;
+const START_URL = APP_URL;
 
 // Electron ships its own node runtime; ELECTRON_RUN_AS_NODE runs the server
 // with it. The packaged binary is Capri.exe, not electron.exe, so never rely
@@ -95,7 +95,7 @@ let tray   = null;
 let server = null;
 let restarts = 0;
 let quitting = false;
-let usingRemote = true;
+let usingRemote = false;
 let updateChecked = false;
 let lastUpdateCheckAt = 0;
 
@@ -492,7 +492,6 @@ async function installOverlay(feed, latest) {
 }
 
 async function checkForUpdates() {
-  if (usingRemote === false) return; // offline fallback, no point
   if (Date.now() - lastUpdateCheckAt < 5 * 60_000) return;
   lastUpdateCheckAt = Date.now();
   try {
@@ -717,6 +716,7 @@ function createWindow() {
     try { child.webContents.setUserAgent(cleanUA); } catch { /* popup already gone */ }
   });
 
+  let localRetries = 0;
   win.webContents.on("did-fail-load", (_event, code, description, failedUrl, isMainFrame) => {
     if (!isMainFrame || code === -3) return; // aborted, not a real outage
     console.warn(`[capri] load failed (${code} ${description}) ${failedUrl}`);
@@ -727,21 +727,27 @@ function createWindow() {
       return;
     }
     if (!APP_URL.startsWith(String(failedUrl || ""))) return;
-    // Both the hosted build and the local fallback are gone - say so instead
-    // of sitting on a black window.
+    // The bundled server starts a beat after the window; give it two more
+    // chances before claiming she is offline.
+    if (localRetries < 2) {
+      localRetries += 1;
+      waitForServer(20).then((ok) => {
+        if (ok) win.loadURL(APP_URL).catch(() => {});
+      });
+      return;
+    }
     win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(
       `<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;` +
       `background:#07000c;color:#ff4fd8;font:16px/1.5 system-ui"><div style="text-align:center">` +
       `<h1 style="font:600 22px system-ui;letter-spacing:2px">CAPRI // OFFLINE</h1>` +
-      `<p style="color:#9ad">No link to the hosted build and the local server did not answer.</p>` +
-      `<p><a href="${REMOTE_URL}" style="color:#6ff">retry</a></p></div></body>`
+      `<p style="color:#9ad">Her local server did not answer. Check the connection and retry.</p>` +
+      `<p><a href="${APP_URL}" style="color:#6ff">retry</a></p></div></body>`
     )).catch(() => {});
   });
 
   // Both listeners are in place before the first navigation now.
   win.loadURL(START_URL).catch((err) => {
-    logLine(`remote load rejected: ${err?.code || err?.message || err}`);
-    if (usingRemote) win.loadURL(APP_URL).catch(() => {});
+    logLine(`local load rejected: ${err?.code || err?.message || err}`);
   });
 
   // Give the page a moment to settle before touching the network again.
