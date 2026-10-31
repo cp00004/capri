@@ -120,25 +120,33 @@
   }
   @keyframes scan { from { top: 16%; } to { top: 84%; } }
 
-  /* Sits directly under her: no dead gap between the eye and the line. */
+  /* Sits directly under her: hugs the line instead of spanning the overlay. */
   #bubble {
     position: relative;
-    margin-top: 3px;
-    width: 100%;
-    max-height: 92px; overflow: hidden;
-    padding: 7px 9px;
+    margin-top: 2px;
+    width: fit-content;
+    max-width: 100%;
+    max-height: 52px; overflow: hidden;
+    padding: 3px 6px;
+    font-size: 10px; line-height: 1.22;
     background: rgba(7, 0, 12, .93);
     border: 1px solid rgba(77, 255, 157, .55);
     border-left: 2px solid var(--pink);
-    box-shadow: 0 0 22px rgba(77, 255, 157, .18);
+    box-shadow: 0 0 14px rgba(77, 255, 157, .16);
     opacity: 0; translate: 0 -6px;
     transition: opacity .2s ease, translate .2s ease;
     pointer-events: none;
     z-index: 4;
   }
   #bubble.show { opacity: 1; translate: 0 0; }
-  #bubble b { display: block; font-size: 9px; letter-spacing: 2px; color: var(--mint); margin-bottom: 2px; }
+  #bubble b { display: block; font-size: 7px; letter-spacing: 1.2px; color: var(--mint); margin-bottom: 1px; }
   #bubble b i { font-style: normal; color: var(--pink); }
+  #line {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 </style>
 </head>
 <body>

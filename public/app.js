@@ -10,6 +10,7 @@ const SESSION_KEY = "capri.session";
 const VOICE_ENGINE_KEY = "capri.voiceEngine";
 const OWN_KEY = "capri.modelKey";
 const SERVER_KEY = "capri.server";
+const PROFILE_MIRROR = "capri.profileMirror";
 
 const normBase = (v) => String(v || "").trim().replace(/\/+$/, "");
 
@@ -102,7 +103,7 @@ const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.2.8";
+const APP_VERSION = "4.2.9";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -774,7 +775,10 @@ function paintVoiceHint() {
     ? "Uses whatever voice your browser has. Always available, never quite her."
     : v?.note || "Neural voice with a show-matched edge.";
   if (el.prefName && state.profile) {
-    el.prefName.value = state.profile.preferredName || "";
+    const name = state.profile.preferredName || state.profile.settings?.preferredName || "";
+    // Never blank the field: an empty server profile means it lost the file, not
+    // that the user un-set their name.
+    if (name && !el.prefName.matches(":focus")) el.prefName.value = name;
   }
   // app banter
   const ab = state.profile?.settings?.app_banter;
@@ -2407,9 +2411,127 @@ document.querySelectorAll(".dl-card").forEach((card) => {
 
 /* ---------------------------------------------------------------- profile */
 
-function applyProfile(profile) {
+// Her profile is one JSON file next to the server. A reinstall, or a redeploy on
+// the free host, takes that file with it and the next Google sign-in hands back a
+// blank one - so the name you set and every setting look forgotten. Keep a copy
+// on the device and hand it back whenever the server comes home empty.
+const MIRROR_KEYS = ["voice", "glitch", "timeFormat", "app_banter"];
+
+function mirrorSlot(profile) {
+  return `${PROFILE_MIRROR}.${String((profile && (profile.sub || profile.email)) || "this pc")}`;
+}
+
+function readMirror(profile) {
+  try {
+    return JSON.parse(localStorage.getItem(mirrorSlot(profile)) || "null") || null;
+  } catch {
+    return null;
+  }
+}
+
+// Every copy this device has kept, newest first, so a name typed before signing
+// in is not thrown away when the account lands on a fresh profile.
+function scanMirrors() {
+  const rows = [];
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key || !key.startsWith(`${PROFILE_MIRROR}.`) || key === `${PROFILE_MIRROR}.last`) continue;
+      const row = JSON.parse(localStorage.getItem(key) || "null");
+      if (row && typeof row === "object") rows.push(row);
+    }
+  } catch { /* storage refused */ }
+  return rows.sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
+}
+
+function writeMirrorRow(profile, row) {
   if (!profile) return;
-  state.profile = profile;
+  const slot = mirrorSlot(profile);
+  try {
+    localStorage.setItem(slot, JSON.stringify(row));
+    // Which copy belongs to this device's last account, so boot can show the name
+    // and the settings before the server has answered.
+    localStorage.setItem(`${PROFILE_MIRROR}.last`, slot);
+  } catch { /* private browsing keeps working without the copy */ }
+}
+
+function writeMirror(profile) {
+  const prev = readMirror(profile) || {};
+  const settings = profile.settings || {};
+  const row = { ...prev, at: Date.now(), born: String(profile.createdAt || prev.born || "") };
+  row.preferredName = String(profile.preferredName || settings.preferredName || "").trim() || prev.preferredName || "";
+  for (const key of MIRROR_KEYS) if (settings[key] !== undefined) row[key] = settings[key];
+  writeMirrorRow(profile, row);
+  return row;
+}
+
+// Record what the user chose the moment they choose it, before the server agrees.
+function mirrorPayload(payload, profile) {
+  const who = profile || state.profile;
+  if (!who) return;
+  const prev = readMirror(who) || {};
+  const row = { ...prev, at: Date.now() };
+  if (payload.preferredName !== undefined) row.preferredName = String(payload.preferredName || "").trim();
+  for (const key of MIRROR_KEYS) {
+    if (payload.settings && payload.settings[key] !== undefined) row[key] = payload.settings[key];
+  }
+  writeMirrorRow(who, row);
+}
+
+function applyMirror(row) {
+  if (!row) return;
+  if (row.preferredName && el.prefName && !el.prefName.matches(":focus")) el.prefName.value = row.preferredName;
+  if (row.voice) {
+    state.voicePreset = row.voice;
+    state.orpheusVoice = row.voice;
+    localStorage.setItem("capri.voicePreset", row.voice);
+    localStorage.setItem("capri.voice", row.voice);
+    if (el.voiceSelect) el.voiceSelect.value = row.voice;
+  }
+  if (row.glitch) setGlitchLevel(row.glitch);
+  if (row.timeFormat && el.timeFormat) el.timeFormat.value = row.timeFormat;
+  if (row.app_banter === "on" || row.app_banter === "off") {
+    const on = row.app_banter === "on";
+    localStorage.setItem("capri.appBanter", on ? "1" : "0");
+    window.capriAppBanter = on;
+  }
+}
+
+function hydrateFromMirror() {
+  const slot = localStorage.getItem(`${PROFILE_MIRROR}.last`);
+  if (!slot) return;
+  try {
+    applyMirror(JSON.parse(localStorage.getItem(slot) || "null"));
+  } catch { /* nothing worth restoring */ }
+}
+
+let mirrorHeal = false;
+
+async function healProfile(profile, row) {
+  const payload = { settings: {} };
+  if (row.preferredName) payload.preferredName = row.preferredName;
+  for (const key of MIRROR_KEYS) {
+    const value = row[key];
+    if (value !== undefined && value !== null && value !== "") payload.settings[key] = value;
+  }
+  if (!payload.preferredName && !Object.keys(payload.settings).length) return;
+  mirrorHeal = true;
+  try {
+    const res = await api("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.profile) applyProfile(data.profile);
+  } catch {
+    /* offline: the device copy still drives the UI, try again next boot */
+  } finally {
+    mirrorHeal = false;
+  }
+}
+
+function pullProfile(profile) {
   const settings = profile.settings || {};
   if (settings.voice && settings.voice !== state.voicePreset) {
     state.voicePreset = settings.voice;
@@ -2421,6 +2543,26 @@ function applyProfile(profile) {
     el.prefName.value = settings.preferredName || profile.preferredName || "";
   }
   if (el.timeFormat) el.timeFormat.value = settings.timeFormat || "auto";
+}
+
+function applyProfile(profile) {
+  if (!profile) return;
+  state.profile = profile;
+
+  let row = readMirror(profile);
+  if (!row && !String(profile.preferredName || "").trim()) {
+    row = scanMirrors().find((r) => String(r.preferredName || "").trim()) || null;
+  }
+  const born = String(profile.createdAt || "");
+  const rebuilt = Boolean(row && row.born && born && row.born !== born);
+  const nameLost = Boolean(row && row.preferredName && !String(profile.preferredName || "").trim());
+  if (row && !mirrorHeal && (rebuilt || nameLost)) {
+    applyMirror(row);
+    healProfile(profile, row);
+  } else {
+    pullProfile(profile);
+    writeMirror(profile);
+  }
 
   const signedIn = Boolean(profile.google);
   el.accountName.textContent = signedIn ? (profile.email || profile.name || "google account") : "this pc";
@@ -2472,7 +2614,9 @@ async function refreshLive() {
   }
 }
 
-async function saveProfile(payload) {  if (!state.profile) return;
+async function saveProfile(payload) {
+  if (!state.profile) return;
+  mirrorPayload(payload);
   try {
     const res = await api("/api/profile", {
       method: "PATCH",
@@ -3273,6 +3417,7 @@ async function boot() {
   if (!state.config) showNotice("Connecting to Capri…", null, null, 0);
   // A token saved next to the app survives the update that wiped localStorage.
   if (!state.session) await restoreSession();
+  hydrateFromMirror();
   let cfg = null;
   try {
     cfg = await fetchConfig();

@@ -331,12 +331,13 @@ public class EyeService extends Service {
 
 		bubble = new TextView(this);
 		bubble.setTextColor(Color.parseColor("#EAF6FF"));
-		bubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+		bubble.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
 		bubble.setTypeface(Typeface.create("sans-serif-condensed", Typeface.NORMAL));
-		bubble.setMaxWidth(dp(240));
-		bubble.setMaxLines(4);
+		bubble.setLineSpacing(0, .92f);
+		bubble.setMaxWidth(dp(190));
+		bubble.setMaxLines(3);
 		bubble.setEllipsize(TextUtils.TruncateAt.END);
-		bubble.setPadding(dp(10), dp(8), dp(10), dp(8));
+		bubble.setPadding(dp(7), dp(4), dp(7), dp(5));
 		GradientDrawable card = new GradientDrawable();
 		card.setColor(Color.parseColor("#E607000C"));
 		card.setStroke(dp(1), Color.parseColor("#8C4DFF9D"));
