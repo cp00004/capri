@@ -13,6 +13,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.ServiceInfo;
+import android.graphics.PixelFormat;
 import android.media.MediaMetadata;
 import android.media.session.MediaController;
 import android.media.session.MediaSessionManager;
@@ -23,6 +24,11 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.provider.Settings;
 import android.service.notification.StatusBarNotification;
+import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.WindowManager;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
@@ -35,10 +41,13 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Calendar;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 // Screen watching on the phone. There is no floating eye here: she reads what
 // you are actually doing - the track, the video, the chat - and answers as a
@@ -69,6 +78,14 @@ public class EyeService extends Service {
 	private long lastSayAt = 0;
 	private String saidKey = "";
 	private boolean polling = false;
+
+	private Runnable nnnTick;
+	private int nnnTicks = 0;
+	private View nnnVeil = null;
+	private long nnnVeilUntil = 0;
+	private String nnnLastHit = "";
+	private long nnnLastHitAt = 0;
+	private boolean nnnPulling = false;
 
 	private static boolean running = false;
 
@@ -166,7 +183,20 @@ public class EyeService extends Service {
 		JSONObject cfg = new JSONObject();
 		try { cfg = new JSONObject(intent == null ? "{}" : String.valueOf(intent.getStringExtra(EXTRA_CONFIG))); } catch (Exception err) { /* defaults */ }
 		if (!cfg.optBoolean("enabled", true)) {
+			// Banter off does not mean the lock off: enforcement keeps its own
+			// loop and does not need the server or the watcher.
+			if (nnnArmed(this)) {
+				base = cfg.optString("base", "").trim();
+				token = cfg.optString("token", "").trim();
+				session = cfg.optString("session", "").trim();
+				apiKey = cfg.optString("key", "").trim();
+				startForegroundSafe();
+				stopWatching();
+				startNnn();
+				return START_STICKY;
+			}
 			stopWatching();
+			stopNnn();
 			stopSelf();
 			return START_NOT_STICKY;
 		}
@@ -178,6 +208,7 @@ public class EyeService extends Service {
 
 		startForegroundSafe();
 		startWatching();
+		if (nnnArmed(this)) startNnn();
 		return START_STICKY;
 	}
 
@@ -284,6 +315,313 @@ public class EyeService extends Service {
 				polling = false;
 			}
 		}).start();
+	}
+
+	/* ------------------------------------------------------- no nut november */
+	// The same switch the PC obeys: the server holds it, so arming it once seals
+	// every device until December 1st. On a phone she cannot kill another app, so
+	// the answer is a black screen over the whole display plus a push back to the
+	// home screen - the blocked page is gone and nothing under it can be tapped.
+	private static final String[] NNN_WORDS = {
+		"porn", "pornhub", "onlyfans", "fansly", "chaturbate", "stripchat", "livejasmin", "camsoda",
+		"bongacams", "cam4", "mydirtyhobby", "brazzers", "naughty", "nude", "nudes", "nsfw",
+		"hentai", "eroge", "erotic", "sex", "xnxx", "xvideos", "xhamster", "redtube", "youporn",
+		"spankbang", "tube8", "eporner", "beeg", "fetlife", "kink", "leaked", "adult", "xxx",
+		"boobs", "milf", "blowjob", "orgy", "bdsm", "webcam model", "cam show", "camshow",
+	};
+	private static final Pattern NNN_PATTERN = Pattern.compile(nnAlternation(), Pattern.CASE_INSENSITIVE);
+
+	// Built by hand: String.join needs API 26 and she still runs on 24.
+	private static String nnAlternation() {
+		StringBuilder sb = new StringBuilder("\\b(?:");
+		for (int i = 0; i < NNN_WORDS.length; i++) {
+			if (i > 0) sb.append("|");
+			sb.append(NNN_WORDS[i]);
+		}
+		return sb.append(")\\b").toString();
+	}
+	private static final String NNN_PREFS = "capri_nnn";
+	private static final String NNN_CODE = "45872";
+	private static final long NNN_SWEEP_MS = 3000L;
+	private static final long NNN_VEIL_MS = 20000L;
+
+	private static final class VeilView extends android.widget.FrameLayout {
+		VeilView(Context context) {
+			super(context);
+			setBackgroundColor(0xFF000000);
+			setClickable(true);
+			setFocusable(true);
+			setFocusableInTouchMode(true);
+			android.widget.TextView label = new android.widget.TextView(context);
+			label.setText("NO NUT NOVEMBER\nthis screen is closed");
+			label.setTextColor(0xFFFF4FA3);
+			label.setTextSize(14f);
+			label.setLetterSpacing(0.28f);
+			label.setGravity(Gravity.CENTER);
+			addView(label, new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+		}
+
+		// Swallow everything: no back, no taps, nothing reaching the app behind.
+		@Override
+		public boolean dispatchKeyEvent(KeyEvent event) {
+			return true;
+		}
+
+		@Override
+		public boolean onTouchEvent(MotionEvent event) {
+			return true;
+		}
+	}
+
+	// Called from the web page through CapriEyes.noNut, and from the watcher
+	// itself when the shared switch says the lock is on.
+	public static String noNut(Context context, String payload) {
+		JSONObject in = new JSONObject();
+		try { in = new JSONObject(payload == null ? "{}" : payload); } catch (Exception err) { /* status */ }
+		String action = in.optString("action", "status").toLowerCase(Locale.US);
+		SharedPreferences prefs = context.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
+		long releaseAt = prefs.getLong("releaseAt", 0L);
+		boolean armed = prefs.getBoolean("armed", false) && System.currentTimeMillis() < releaseAt;
+
+		if (action.equals("arm") || action.equals("activate")) {
+			long gate = decemberOne(System.currentTimeMillis());
+			if (System.currentTimeMillis() >= gate) {
+				return nnnAck(false, false, "December 1st has come and gone, so there is nothing left to lock.");
+			}
+			prefs.edit().putBoolean("armed", true).putLong("releaseAt", gate)
+					.putLong("since", System.currentTimeMillis()).apply();
+			EyeService.show(context, EyePrefs.load(context));
+			return nnnAck(true, false, "Armed on this phone until " + niceDate(gate) + ".");
+		}
+		if (action.equals("release")) {
+			prefs.edit().putBoolean("armed", false).apply();
+			hide(context);
+			return nnnAck(false, false, "Lock is off.");
+		}
+		if (action.equals("cancel")) {
+			if (!armed) return nnnAck(false, false, "Nothing is locked right now.");
+			return nnnAck(true, true, "Then give me the cancellation code. Say it wrong and nothing opens.");
+		}
+		if (action.equals("code")) {
+			if (!armed) return nnnAck(false, false, "Nothing is locked right now.");
+			String given = in.optString("code", "").replaceAll("\\D", "");
+			if (given.length() > 0 && given.equals(NNN_CODE)) {
+				prefs.edit().putBoolean("armed", false).apply();
+				hide(context);
+				return nnnAck(false, false, "Code checked out. Everything is yours again.");
+			}
+			return nnnAck(true, true, "Wrong. Still locked.");
+		}
+		return nnnAck(armed, false, armed
+				? "Armed on this phone until " + niceDate(releaseAt) + "."
+				: "No Nut November is not armed.");
+	}
+
+	private static String nnnAck(boolean active, boolean awaitingCode, String message) {
+		JSONObject out = new JSONObject();
+		try {
+			out.put("ok", true);
+			out.put("active", active);
+			out.put("awaitingCode", awaitingCode);
+			out.put("message", message);
+		} catch (Exception err) { /* plain fields */ }
+		return out.toString();
+	}
+
+	// December 1st, this year if it has not passed yet, otherwise next year.
+	private static long decemberOne(long from) {
+		Calendar gate = Calendar.getInstance();
+		gate.setTimeInMillis(from);
+		gate.set(Calendar.MONTH, Calendar.DECEMBER);
+		gate.set(Calendar.DAY_OF_MONTH, 1);
+		gate.set(Calendar.HOUR_OF_DAY, 0);
+		gate.set(Calendar.MINUTE, 0);
+		gate.set(Calendar.SECOND, 0);
+		gate.set(Calendar.MILLISECOND, 0);
+		if (from >= gate.getTimeInMillis()) gate.add(Calendar.YEAR, 1);
+		return gate.getTimeInMillis();
+	}
+
+	private static String niceDate(long millis) {
+		return new java.text.SimpleDateFormat("EEEE d MMMM", Locale.US).format(new java.util.Date(millis));
+	}
+
+	private static boolean nnnArmed(Context context) {
+		SharedPreferences prefs = context.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
+		return prefs.getBoolean("armed", false) && System.currentTimeMillis() < prefs.getLong("releaseAt", 0L);
+	}
+
+	private void startNnn() {
+		handler.removeCallbacks(nnnTick);
+		nnnTicks = 0;
+		nnnTick = new Runnable() {
+			@Override
+			public void run() {
+				nnnTicks += 1;
+				// Two minutes of sweeps, then ask the server whether the switch moved.
+				if (nnnTicks % 40 == 1) nnnPull();
+				nnnSweepOnce();
+				handler.postDelayed(this, NNN_SWEEP_MS);
+			}
+		};
+		handler.postDelayed(nnnTick, 1500L);
+	}
+
+	private void stopNnn() {
+		if (handler != null && nnnTick != null) handler.removeCallbacks(nnnTick);
+		nnnTick = null;
+		nnnVeilHide();
+	}
+
+	private void nnnSweepOnce() {
+		SharedPreferences prefs = getSharedPreferences(NNN_PREFS, MODE_PRIVATE);
+		if (!prefs.getBoolean("armed", false) || System.currentTimeMillis() >= prefs.getLong("releaseAt", 0L)) {
+			if (prefs.getBoolean("armed", false)) {
+				prefs.edit().putBoolean("armed", false).apply();
+				notifyAlert("Capri // NO NUT NOVEMBER", "It is December 1st. Everything is open again.");
+			}
+			nnnVeilHide();
+			return;
+		}
+		// Past the hold, the cover comes off by itself so a blocked detour does
+		// not sit on the display forever.
+		if (nnnVeil != null && System.currentTimeMillis() >= nnnVeilUntil) nnnVeilHide();
+		if (!usageAllowed()) return;
+		String pkg = foregroundPackage();
+		if (pkg == null || pkg.equals(getPackageName())) return;
+		if (pkg.contains("launcher") || pkg.startsWith("com.android.systemui")) return;
+		String hit = nnnHit(nnnHaystack(pkg));
+		if (hit.isEmpty()) return;
+		long now = System.currentTimeMillis();
+		nnnVeilShow(NNN_VEIL_MS);
+		nnnGoHome();
+		if (!hit.equals(nnnLastHit) || now - nnnLastHitAt > 60_000L) {
+			nnnLastHit = hit;
+			nnnLastHitAt = now;
+			notifyAlert("Capri // NO NUT NOVEMBER",
+					"Closed. It stays closed until " + niceDate(prefs.getLong("releaseAt", 0L)) + ".");
+		}
+	}
+
+	// Everything the phone will say about this moment: the app, its package, the
+	// screen inside it, the track playing, the last notification.
+	private String nnnHaystack(String pkg) {
+		StringBuilder sb = new StringBuilder();
+		sb.append(appLabel(pkg)).append(' ').append(pkg);
+		String hint = activityHint(pkg);
+		if (!hint.isEmpty()) sb.append(' ').append(hint);
+		String[] media = activeMedia(pkg);
+		if (media != null) sb.append(' ').append(media[0]).append(' ').append(media[1]);
+		String[] note = noteFor(pkg);
+		if (note != null) sb.append(' ').append(note[0]).append(' ').append(note[1]);
+		String component = foregroundComponent(pkg);
+		if (component != null) sb.append(' ').append(component);
+		return sb.toString();
+	}
+
+	private String nnnHit(String haystack) {
+		Matcher m = NNN_PATTERN.matcher(String.valueOf(haystack));
+		return m.find() ? m.group() : "";
+	}
+
+	private void nnnVeilShow(long holdMs) {
+		nnnVeilUntil = Math.max(nnnVeilUntil, System.currentTimeMillis() + holdMs);
+		if (nnnVeil != null) return;
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) return;
+		nnnVeilAdd(holdMs, false);
+		if (nnnVeil == null) nnnVeilAdd(holdMs, true);
+	}
+
+	private void nnnVeilAdd(long holdMs, boolean unfocusable) {
+		try {
+			WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+			if (wm == null) return;
+			VeilView veil = new VeilView(this);
+			int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+					? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+					: WindowManager.LayoutParams.TYPE_PHONE;
+			int flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+					| WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+					| WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+					| WindowManager.LayoutParams.FLAG_FULLSCREEN;
+			if (unfocusable) flags |= WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE;
+			WindowManager.LayoutParams p = new WindowManager.LayoutParams(
+					WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+					type, flags, PixelFormat.OPAQUE);
+			p.gravity = Gravity.TOP | Gravity.START;
+			wm.addView(veil, p);
+			nnnVeil = veil;
+		} catch (Exception err) {
+			// No overlay grant, or the build refuses the window: the home push still works.
+		}
+	}
+
+	private void nnnVeilHide() {
+		nnnVeilUntil = 0;
+		if (nnnVeil == null) return;
+		try {
+			((WindowManager) getSystemService(WINDOW_SERVICE)).removeView(nnnVeil);
+		} catch (Exception err) { /* already off */ }
+		nnnVeil = null;
+	}
+
+	private void nnnGoHome() {
+		try {
+			Intent home = new Intent(Intent.ACTION_MAIN);
+			home.addCategory(Intent.CATEGORY_HOME);
+			home.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+			startActivity(home);
+		} catch (Exception err) { /* no launcher to go to */ }
+	}
+
+	// The shared switch, read straight from the backend so the phone honours it
+	// with the web view shut.
+	private void nnnPull() {
+		if (nnnPulling || base.isEmpty()) return;
+		nnnPulling = true;
+		final String url = base + "/api/nnn";
+		new Thread(() -> {
+			String body = httpGet(url);
+			nnnPulling = false;
+			if (body == null) return;
+			JSONObject state = new JSONObject();
+			try { state = new JSONObject(body); } catch (Exception err) { return; }
+			if (!state.has("armed")) return;
+			boolean armed = state.optBoolean("armed", false);
+			long releaseAt = state.optLong("releaseAt", 0L);
+			SharedPreferences prefs = getSharedPreferences(NNN_PREFS, MODE_PRIVATE);
+			boolean local = prefs.getBoolean("armed", false);
+			if (armed && System.currentTimeMillis() < releaseAt) {
+				if (!local || prefs.getLong("releaseAt", 0L) != releaseAt) {
+					prefs.edit().putBoolean("armed", true).putLong("releaseAt", releaseAt)
+							.putLong("since", System.currentTimeMillis()).apply();
+				}
+			} else if (!armed && local) {
+				prefs.edit().putBoolean("armed", false).apply();
+				handler.post(this::nnnVeilHide);
+			}
+		}).start();
+	}
+
+	private String httpGet(String url) {
+		HttpURLConnection conn = null;
+		try {
+			conn = (HttpURLConnection) new URL(url).openConnection();
+			conn.setRequestMethod("GET");
+			conn.setConnectTimeout(8000);
+			conn.setReadTimeout(12000);
+			if (conn.getResponseCode() != 200) return null;
+			BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+			StringBuilder sb = new StringBuilder();
+			String row;
+			while ((row = reader.readLine()) != null) sb.append(row);
+			reader.close();
+			return sb.toString();
+		} catch (Exception err) {
+			return null;
+		} finally {
+			if (conn != null) conn.disconnect();
+		}
 	}
 
 	private static final class Sight {
@@ -550,6 +888,7 @@ public class EyeService extends Service {
 	public void onDestroy() {
 		running = false;
 		stopWatching();
+		stopNnn();
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE);
 		else stopForeground(true);
 		super.onDestroy();

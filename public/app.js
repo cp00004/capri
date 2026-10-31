@@ -2294,6 +2294,18 @@ function nnnStartSync() {
   setInterval(() => { void nnnSync(); }, NNN_POLL_MS);
 }
 
+// The phone's black screen is an overlay window, and Android only hands that
+// over on request. Returns true when she just sent you to the grant screen.
+function nnnAskOverlay() {
+  if (!IS_NATIVE) return false;
+  const grants = readPhoneGrants();
+  if (!grants || grants.overlay) return false;
+  try {
+    phoneBridge()?.request?.("overlay");
+  } catch { /* older build */ }
+  return true;
+}
+
 // Her own words for a local order: on screen, out loud, in the transcript, in
 // the eye, and in a notification if she is sitting in the background.
 async function sayLocally(text, userText) {
@@ -2341,8 +2353,9 @@ async function handleNoNut(userText) {
     }
     nnnGlobal = out;
     await nativeNoNut("arm");
+    const cover = nnnAskOverlay();
     await sayLocally(
-      out.message || `Armed on every device until ${out.until || "December 1st"}.`,
+      `${out.message || `Armed on every device until ${out.until || "December 1st"}.`}${cover ? " Android will ask for the cover screen - allow it, or she can only push the app away." : ""}`,
       userText,
     );
     return true;

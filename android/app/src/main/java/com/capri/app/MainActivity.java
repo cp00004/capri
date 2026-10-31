@@ -125,6 +125,7 @@ public class MainActivity extends BridgeActivity {
 			out.put("usage", usage);
 			out.put("alarms", alarms);
 			out.put("battery", battery);
+			out.put("overlay", overlayAllowed());
 			out.put("core", mic && notes && usage);
 		} catch (Exception err) {
 			// a missing reading is just a missing grant
@@ -156,6 +157,16 @@ public class MainActivity extends BridgeActivity {
 		}
 	}
 
+	// The black lock screen is an overlay window, so it needs the same grant the
+	// old floating eye used to.
+	private boolean overlayAllowed() {
+		try {
+			return Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this);
+		} catch (Exception err) {
+			return false;
+		}
+	}
+
 	private void openGrant(String which) {
 		if (which.isEmpty() || which.equals("all")) {
 			startGrantFlow();
@@ -170,6 +181,7 @@ public class MainActivity extends BridgeActivity {
 			case "usage":
 			case "alarms":
 			case "battery":
+			case "overlay":
 				openSettingsPage(which);
 				break;
 			default:
@@ -257,6 +269,11 @@ public class MainActivity extends BridgeActivity {
 					intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
 					intent.putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName());
 					break;
+				case "overlay":
+					intent = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+							? new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName()))
+							: new Intent(Settings.ACTION_SETTINGS);
+					break;
 				default:
 					intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
 			}
@@ -319,6 +336,13 @@ public class MainActivity extends BridgeActivity {
 		@JavascriptInterface
 		public void scheduleReminder(int seconds, String message) {
 			Alerts.schedule(MainActivity.this, seconds, message);
+		}
+
+		// The No Nut November switch. Replies with JSON so the page can read her
+		// answer the same way it reads the PC shell's.
+		@JavascriptInterface
+		public String noNut(String payload) {
+			return EyeService.noNut(MainActivity.this, payload);
 		}
 	}
 
