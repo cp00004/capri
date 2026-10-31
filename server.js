@@ -1941,9 +1941,44 @@ function audioExtension(type) {
   return "webm";
 }
 
+async function geminiStt(buffer, type) {
+  const key = GEMINI_KEYS[0];
+  if (!key) return null;
+  const model = process.env.CAPRI_STT_GEMINI_MODEL || GEMINI_MODEL;
+  try {
+    const upstream = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{
+            role: "user",
+            parts: [
+              { text: "Transcribe the speech in this audio exactly. Reply with the spoken words only and nothing else." },
+              { inline_data: { mime_type: type, data: buffer.toString("base64") } },
+            ],
+          }],
+          generationConfig: { temperature: 0 },
+        }),
+      }
+    );
+    if (!upstream.ok) return null;
+    const data = await upstream.json();
+    const text = (data?.candidates?.[0]?.content?.parts || [])
+      .map((part) => part?.text || "")
+      .join(" ")
+      .trim();
+    return text;
+  } catch {
+    return null;
+  }
+}
+
 async function handleStt(req, res) {
-  const key = GROQ_KEYS[0];
-  if (!key) return json(res, 500, { error: "No GROQ_API_KEY set." });
+  if (!GROQ_KEYS.length && !GEMINI_KEYS.length) {
+    return json(res, 500, { error: "No GROQ_API_KEY set." });
+  }
 
   const type = String(req.headers["content-type"] || "audio/webm").split(";")[0].trim();
   const chunks = [];
@@ -1965,29 +2000,53 @@ async function handleStt(req, res) {
   // wake matcher expects ("Copy" instead of "Capri" broke hands-free use).
   const hint = String(req.headers["x-capri-prompt"] || "").trim().slice(0, 240);
 
-  try {
-    const form = new FormData();
-    form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
-    form.append("model", STT_MODEL);
-    form.append("response_format", "json");
-    form.append("temperature", "0");
-    if (hint) form.append("prompt", hint);
+  let limited = false;
+  let failure = null;
+  for (const key of GROQ_KEYS) {
+    try {
+      const form = new FormData();
+      form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
+      form.append("model", STT_MODEL);
+      form.append("response_format", "json");
+      form.append("temperature", "0");
+      if (hint) form.append("prompt", hint);
 
-    const upstream = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${key}` },
-      body: form,
-    });
+      const upstream = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key}` },
+        body: form,
+      });
 
-    const raw = await upstream.text();
-    if (!upstream.ok) return json(res, 502, { error: "stt_failed", message: friendlyError(upstream.status, raw) });
-
-    let text = "";
-    try { text = String(JSON.parse(raw)?.text || ""); } catch { /* leave empty */ }
-    json(res, 200, { text: text.trim() });
-  } catch (err) {
-    json(res, 502, { error: "stt_failed", message: err.message });
+      const raw = await upstream.text();
+      if (!upstream.ok) {
+        if (upstream.status === 429 || upstream.status === 401 || upstream.status >= 500) {
+          if (upstream.status === 429) limited = true;
+          failure = friendlyError(upstream.status, raw);
+          continue;
+        }
+        failure = friendlyError(upstream.status, raw);
+        break;
+      }
+      let text = "";
+      try { text = String(JSON.parse(raw)?.text || ""); } catch { /* leave empty */ }
+      return json(res, 200, { text: text.trim() });
+    } catch (err) {
+      failure = err.message;
+    }
   }
+
+  // One bucket can run dry while the account still has capacity elsewhere.
+  const fallback = await geminiStt(buffer, type);
+  if (fallback !== null) return json(res, 200, { text: fallback, via: "gemini" });
+
+  if (limited) {
+    return json(res, 429, {
+      error: "rate_limited",
+      message: "Voice transcription is rate limited right now. Try again shortly.",
+    });
+  }
+  json(res, 502, { error: "stt_failed", message: failure || "No transcription engine answered." });
+}
 }
 
 // ---------------------------------------------------------------- pairing + access

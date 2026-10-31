@@ -49,6 +49,7 @@ final class CapriVoice {
 	private static String base = "";
 	private static String device = "";
 	private static String session = "";
+	private static volatile int lastStatus;
 
 	private CapriVoice() {}
 
@@ -140,9 +141,13 @@ final class CapriVoice {
 			String text = transcribe(clip);
 			if (!alive(mine)) return;
 			if (text == null) {
-				// No answer from the server: stay silent and try again later.
-				if (!wakeMode) { fail(mine, "network"); return; }
-				sleep(2500);
+				// A rate-limited or broken endpoint must not be hammered: the
+				// old retry loop is what starved the PC's wake word too.
+				if (!wakeMode) {
+					fail(mine, lastStatus == 429 ? "busy" : "network");
+					return;
+				}
+				sleep(lastStatus == 0 ? 2500 : 15000);
 				continue;
 			}
 			text = text.trim();
@@ -271,6 +276,7 @@ final class CapriVoice {
 	// ── Server transcription ────────────────────────────────────────────────
 	private static String transcribe(byte[] clip) {
 		if (base.isEmpty() || clip == null || clip.length < 45) return null;
+		lastStatus = 0;
 		HttpURLConnection conn = null;
 		try {
 			conn = (HttpURLConnection) new URL(base + "/api/stt").openConnection();
@@ -290,6 +296,7 @@ final class CapriVoice {
 				out.write(clip);
 			}
 			int code = conn.getResponseCode();
+			lastStatus = code;
 			InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
 			if (in == null) return null;
 			ByteArrayOutputStream raw = new ByteArrayOutputStream();
