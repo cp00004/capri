@@ -77,7 +77,9 @@ final class CapriVoice {
 			}, 250);
 			return;
 		}
-		MAIN.post(CapriVoice::listen);
+		// A warm recognizer still has to finish its cancel before it can start
+		// again; giving it a beat avoids a busy error and an extra retry.
+		MAIN.postDelayed(CapriVoice::listen, recognizer == null ? 0 : 180);
 	}
 
 	// Ends the current take but keeps the recognizer warm for the next one.
