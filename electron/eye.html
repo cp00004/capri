@@ -717,7 +717,7 @@
   window.capriEye?.onLive((live) => {
     state.live = Boolean(live);
     if (!state.live) {
-      stopWakeChunk();
+      shutdownWake();
       if (talk.active) stopTalk();
     } else {
       ghosts.length = 0;
@@ -745,7 +745,18 @@
   }
 
   const talk = { active: false, chunks: [], recorder: null, stream: null, stopTimer: null, heard: false, ctx: null, analyser: null, raf: null, silenceSince: 0, startedAt: 0 };
-  const wakeRec = { on: false, chunks: [], recorder: null, stream: null, timer: null, busy: false, ctx: null, heard: false };
+  const wakeRec = { on: false, chunks: [], recorder: null, stream: null, busy: false, ctx: null, analyser: null, raf: 0, speaking: false, startedAt: 0, quietAt: 0, cooldown: 0 };
+
+  // One context for the eye, resumed the moment it is made: a parked context
+  // hands the analyser flat silence, which reads as a room that never speaks.
+  let eyeCtx = null;
+  function eyeAudioCtx() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return null;
+    if (!eyeCtx || eyeCtx.state === "closed") eyeCtx = new Ctx();
+    if (eyeCtx.state === "suspended") eyeCtx.resume().catch(() => {});
+    return eyeCtx;
+  }
 
   function micApi() {
     return `${cfg.base || ""}/api`;
@@ -808,7 +819,7 @@
   async function startTalk() {
     if (talk.active) return stopTalk();
     if (typeof MediaRecorder === "undefined") { setMode("no mic"); return; }
-    stopWakeChunk();
+    shutdownWake();
     try {
       talk.stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -845,7 +856,7 @@
     mic.textContent = "STOP";
     setMode("listening");
     try {
-      talk.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      talk.ctx = eyeAudioCtx();
       const src = talk.ctx.createMediaStreamSource(talk.stream);
       talk.analyser = talk.ctx.createAnalyser();
       talk.analyser.fftSize = 512;
@@ -861,7 +872,6 @@
     cancelAnimationFrame(talk.raf);
     talk.raf = null;
     talk.analyser = null;
-    try { talk.ctx?.close().catch(() => {}); } catch { /* already closed */ }
     talk.ctx = null;
     if (!talk.active || !talk.recorder || talk.recorder.state === "inactive") return;
     try { talk.recorder.stop(); } catch { /* already stopped */ }
@@ -871,77 +881,149 @@
 
   /* Wake word: recorded in short clips while the eye is up, read by her own
      /api/stt, so "Capri ..." works even when Capri's window is away. */
+  /* Wake word: one mic held open and cut into clips by her own voice gate, so
+     there is no deaf stretch between "Capri" and the order, and no fixed window
+     that swallows the first syllable. Only a clip with sound in it goes to STT. */
+  const WAKE_RMS = 0.02;
+
+  function wakeRms() {
+    if (!wakeRec.analyser) return 1; // no meter: treat the room as talking
+    const buf = new Uint8Array(wakeRec.analyser.fftSize);
+    wakeRec.analyser.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i += 1) { const v = (buf[i] - 128) / 128; sum += v * v; }
+    return Math.sqrt(sum / buf.length);
+  }
+
   async function startWake() {
     if (!wakeOn.on || wakeRec.on || talk.active || !state.live) return;
     if (typeof MediaRecorder === "undefined" || !cfg.base) return;
-    try {
-      wakeRec.stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-    } catch {
-      wakeOn.on = false;
-      ear.classList.remove("on");
-      setMode("mic blocked");
-      return;
+    if (!wakeRec.stream) {
+      try {
+        wakeRec.stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+      } catch {
+        wakeOn.on = false;
+        ear.classList.remove("on");
+        setMode("mic blocked");
+        return;
+      }
+      try {
+        wakeRec.ctx = eyeAudioCtx();
+        const src = wakeRec.ctx.createMediaStreamSource(wakeRec.stream);
+        wakeRec.analyser = wakeRec.ctx.createAnalyser();
+        wakeRec.analyser.fftSize = 512;
+        src.connect(wakeRec.analyser);
+      } catch { wakeRec.analyser = null; }
     }
-    const mime = pickMime();
-    wakeRec.chunks = [];
-    wakeRec.heard = false;
-    wakeRec.recorder = mime ? new MediaRecorder(wakeRec.stream, { mimeType: mime }) : new MediaRecorder(wakeRec.stream);
-    wakeRec.recorder.ondataavailable = (e) => { if (e.data && e.data.size) wakeRec.chunks.push(e.data); };
-    wakeRec.recorder.start(120);
     wakeRec.on = true;
+    wakeRec.cooldown = 0;
     ear.classList.add("on");
     setMode("ear on");
-    // Silence costs nothing: only a clip with a voice in it is sent to her.
+    cancelAnimationFrame(wakeRec.raf);
+    wakeRec.raf = requestAnimationFrame(wakeLoop);
+  }
+
+  function wakeLoop() {
+    if (!wakeRec.on) return;
+    wakeRec.raf = requestAnimationFrame(wakeLoop);
+    // Her own voice, or a tap-to-talk take, owns the mic.
+    if (talk.active || wakeRec.busy) { if (wakeRec.speaking) stopWakeChunk(); return; }
+    const rms = wakeRms();
+    const now = performance.now();
+    if (!wakeRec.speaking) {
+      if (rms > WAKE_RMS && now > wakeRec.cooldown) beginWakeChunk();
+      return;
+    }
+    if (rms > WAKE_RMS) wakeRec.quietAt = now;
+    const length = now - wakeRec.startedAt;
+    if (length > 400 && now - wakeRec.quietAt > 480) return stopWakeChunk();
+    if (length > 3500) return stopWakeChunk();
+  }
+
+  function beginWakeChunk() {
+    if (!wakeRec.stream) return;
+    const mime = pickMime();
+    let rec;
     try {
-      wakeRec.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const src = wakeRec.ctx.createMediaStreamSource(wakeRec.stream);
-      const analyser = wakeRec.ctx.createAnalyser();
-      analyser.fftSize = 512;
-      src.connect(analyser);
-      const buf = new Uint8Array(analyser.fftSize);
-      const watch = setInterval(() => {
-        if (!wakeRec.on || !wakeRec.stream) { clearInterval(watch); return; }
-        analyser.getByteTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
-        if (Math.sqrt(sum / buf.length) > 0.025) wakeRec.heard = true;
-      }, 120);
-    } catch { wakeRec.heard = true; }
-    clearTimeout(wakeRec.timer);
-    wakeRec.timer = setTimeout(stopWakeChunk, 3600);
+      rec = mime ? new MediaRecorder(wakeRec.stream, { mimeType: mime }) : new MediaRecorder(wakeRec.stream);
+    } catch { wakeRec.cooldown = performance.now() + 1200; return; }
+    wakeRec.chunks = [];
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) wakeRec.chunks.push(e.data); };
+    rec.onstop = onWakeChunk;
+    wakeRec.recorder = rec;
+    wakeRec.speaking = true;
+    wakeRec.startedAt = performance.now();
+    wakeRec.quietAt = wakeRec.startedAt;
+    try {
+      rec.start(120);
+    } catch {
+      wakeRec.speaking = false;
+      wakeRec.recorder = null;
+      wakeRec.cooldown = performance.now() + 1200;
+    }
   }
 
   function stopWakeChunk() {
-    clearTimeout(wakeRec.timer);
-    wakeRec.on = false;
+    wakeRec.speaking = false;
     const rec = wakeRec.recorder;
     if (!rec || rec.state === "inactive") return;
-    rec.onstop = async () => {
-      const blob = new Blob(wakeRec.chunks, { type: rec.mimeType || "audio/webm" });
-      wakeRec.stream?.getTracks().forEach((t) => t.stop());
-      wakeRec.stream = null;
-      wakeRec.chunks = [];
-      wakeRec.busy = false;
-      try { wakeRec.ctx?.close().catch(() => {}); } catch { /* already closed */ }
-      wakeRec.ctx = null;
-      if (blob.size > 1200 && wakeRec.heard) {
-        const text = await transcribe(blob);
-        if (text && isWakePhrase(text)) {
-          const rest = wakeRemainder(text);
-          chime();
-          if (rest.split(/\s+/).filter(Boolean).length >= 2) ask(rest);
-          else { setTimeout(startTalk, 250); return; }
-        }
-      }
-      if (!talk.active && wakeOn.on && state.live) setTimeout(startWake, 320);
-    };
     try { rec.stop(); } catch { /* already stopped */ }
   }
 
+  // A clip thrown away on purpose: the mic is handing over to a real take.
+  function dropWakeChunk() {
+    const rec = wakeRec.recorder;
+    wakeRec.recorder = null;
+    wakeRec.chunks = [];
+    if (rec && rec.state !== "inactive") {
+      rec.onstop = null;
+      try { rec.stop(); } catch { /* already stopped */ }
+    }
+  }
+
+  async function onWakeChunk() {
+    const mime = wakeRec.recorder?.mimeType || "audio/webm";
+    wakeRec.recorder = null;
+    const blob = new Blob(wakeRec.chunks, { type: mime });
+    wakeRec.chunks = [];
+    wakeRec.cooldown = performance.now() + 350;
+    if (blob.size < 1200) return;
+    wakeRec.busy = true; // stand down while she reads it
+    const text = await transcribe(blob);
+    wakeRec.busy = false;
+    if (!wakeRec.on || talk.active) return;
+    if (text && isWakePhrase(text)) {
+      const rest = wakeRemainder(text);
+      chime();
+      if (rest.split(/\s+/).filter(Boolean).length >= 2) { ask(rest); return; }
+      // Ping first, then hand the mic to the order it just invited.
+      endWake();
+      setTimeout(startTalk, 160);
+      return;
+    }
+    if (!talk.active && wakeOn.on && state.live) wakeRec.cooldown = performance.now() + 200;
+  }
+
+  function endWake() {
+    wakeRec.on = false;
+    wakeRec.busy = false;
+    cancelAnimationFrame(wakeRec.raf);
+    wakeRec.raf = 0;
+    dropWakeChunk();
+  }
+
+  function shutdownWake() {
+    endWake();
+    wakeRec.stream?.getTracks().forEach((t) => t.stop());
+    wakeRec.stream = null;
+    wakeRec.analyser = null;
+    ear.classList.remove("on");
+  }
+
   function resumeWake() {
-    if (wakeOn.on && !talk.active && !wakeRec.on) setTimeout(startWake, 500);
+    if (wakeOn.on && !talk.active && !wakeRec.on) setTimeout(startWake, 400);
   }
 
   ear.addEventListener("click", () => {
@@ -953,21 +1035,21 @@
 
   function chime() {
     try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) return;
-      const ac = new Ctx();
+      const ac = eyeAudioCtx();
+      if (!ac) return;
       const osc = ac.createOscillator();
       const gain = ac.createGain();
+      const at = ac.currentTime + 0.02;
       osc.type = "sine";
-      osc.frequency.setValueAtTime(740, ac.currentTime);
-      osc.frequency.setValueAtTime(980, ac.currentTime + 0.075);
-      gain.gain.setValueAtTime(0.001, ac.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.07, ac.currentTime + 0.012);
-      gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.18);
+      osc.frequency.setValueAtTime(740, at);
+      osc.frequency.setValueAtTime(980, at + 0.075);
+      gain.gain.setValueAtTime(0.001, at);
+      gain.gain.exponentialRampToValueAtTime(0.07, at + 0.012);
+      gain.gain.exponentialRampToValueAtTime(0.001, at + 0.18);
       osc.connect(gain).connect(ac.destination);
-      osc.onended = () => ac.close().catch(() => {});
-      osc.start();
-      osc.stop(ac.currentTime + 0.19);
+      osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+      osc.start(at);
+      osc.stop(at + 0.19);
     } catch { /* optional */ }
   }
 
