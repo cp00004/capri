@@ -1781,11 +1781,10 @@ async function checkWakeClip(blob) {
   let text = "";
   try {
     const clip = await toWav(blob);
-    const res = await api("/api/stt", {
+    const res = await api("/api/stt?prompt=Capri%20is%20the%20assistant%27s%20name.%20The%20user%20says%20Capri.", {
       method: "POST",
       headers: {
         "Content-Type": clip.type || "audio/webm",
-        "X-Capri-Prompt": "Capri is the assistant's name. The user says Capri.",
       },
       body: clip,
     });

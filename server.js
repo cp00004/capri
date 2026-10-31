@@ -2016,7 +2016,11 @@ async function handleStt(req, res) {
 
   // A short hint keeps Whisper spelling the assistant's name the same way the
   // wake matcher expects ("Copy" instead of "Capri" broke hands-free use).
-  const hint = String(req.headers["x-capri-prompt"] || "").trim().slice(0, 240);
+  // It arrives as a query param because a custom header makes every hosted
+  // call fail preflight until the tunnel is redeployed.
+  const hint = String(
+    req.headers["x-capri-prompt"] || new URL(req.url, "http://capri.local").searchParams.get("prompt") || ""
+  ).trim().slice(0, 240);
 
   let limited = false;
   let failure = null;
@@ -2199,7 +2203,7 @@ const handler = async (req, res) => {
     if (trustedOrigin(req)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
-      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Capri-Profile, X-Capri-Device, X-Capri-Key, Bypass-Tunnel-Reminder");
+      res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Capri-Profile, X-Capri-Device, X-Capri-Key, X-Capri-Prompt, Bypass-Tunnel-Reminder");
       res.setHeader("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
       res.setHeader("Access-Control-Expose-Headers", "X-Capri-Pitch, X-Capri-Grit, X-Capri-Engine");
       res.setHeader("Access-Control-Max-Age", "600");
