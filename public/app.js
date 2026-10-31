@@ -2265,6 +2265,14 @@ async function nnnServerOrder(order, code) {
   }
 }
 
+// An old deployment has no shared switch at all: it answers these routes with
+// the pairing wall. That is a missing release, not a wrong code, so the caller
+// falls back to locking the machine in front of the user.
+function nnnNoSharedSwitch(out) {
+  if (!out || out.ok) return false;
+  return out.status === 401 || out.status === 404 || /pair this device/i.test(String(out.message || ""));
+}
+
 // Bring this machine in line with the shared switch. Anything she cannot reach
 // leaves the local lock alone, so a dead link never unlocks a live seal.
 async function nnnSync() {
@@ -2319,6 +2327,13 @@ async function nnnOrder(order) {
     return;
   }
   if (!out.ok) {
+    if (nnnNoSharedSwitch(out)) {
+      const local = await nativeNoNut(order === "arm" ? "activate" : "release", "", order === "arm" ? "sealed here" : "opened here");
+      if (order === "arm") nnnAskOverlay();
+      paintNnn();
+      showNotice(`Her server needs a redeploy before one switch can seal every device, so this one ${order === "arm" ? "is sealed" : "is open"}: ${local?.message || ""}`, null, null, 10000);
+      return;
+    }
     showNotice(out.message || "Wrong code. Nothing changes.", null, null, 7000);
     return;
   }
@@ -2386,6 +2401,15 @@ async function handleNoNut(userText) {
       return true;
     }
     if (!out.ok) {
+      if (nnnNoSharedSwitch(out)) {
+        const local = await nativeNoNut("activate");
+        const cover = nnnAskOverlay();
+        await sayLocally(
+          `Her server needs a redeploy before one switch can seal every device, so this machine alone is sealed: ${local?.message || "locked until December 1st."}${cover ? " Android will ask for the cover screen - allow it." : ""}`,
+          userText,
+        );
+        return true;
+      }
       await sayLocally(out.message || "Wrong code. Nothing changes.", userText);
       return true;
     }
