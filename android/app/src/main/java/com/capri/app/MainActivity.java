@@ -381,6 +381,12 @@ public class MainActivity extends BridgeActivity {
 			EyePrefs.save(MainActivity.this, config);
 		}
 
+		// The page's wake switch also decides whether the closed-app ear runs.
+		@JavascriptInterface
+		public void setWake(String on) {
+			EyePrefs.setWake(MainActivity.this, "1".equals(String.valueOf(on)));
+		}
+
 		@JavascriptInterface
 		public void show() {
 			EyeService.show(MainActivity.this, EyePrefs.load(MainActivity.this));
@@ -531,7 +537,7 @@ public class MainActivity extends BridgeActivity {
 	}
 
 	@Override
-	protected void onPause() {
+	public void onPause() {
 		super.onPause();
 		EyeService.backgroundVoice(this, true);
 	}

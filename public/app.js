@@ -1348,6 +1348,7 @@ function setWakeWordEnabled(enabled) {
   wakeWord.enabled = Boolean(enabled);
   wakeWord.chimePending = wakeWord.enabled;
   localStorage.setItem("capri.wakeWord", wakeWord.enabled ? "1" : "0");
+  try { window.CapriEyes?.setWake?.(wakeWord.enabled ? "1" : "0"); } catch { /* older build */ }
   paintWakeWord();
   if (!wakeWord.enabled) {
     wakeWord.pendingStart = false;
@@ -1862,7 +1863,25 @@ function checkNativeCommand() {
 
 setTimeout(checkNativeCommand, 1500);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) checkNativeCommand();
+  if (document.hidden) {
+    if (nativeVoice()) {
+      try { window.CapriVoice.stop(); } catch { /* older build */ }
+    }
+    wakeWord.active = false;
+    wakeWord.starting = false;
+    nativeOrder = false;
+    clearTimeout(nativeOrderTimer);
+    return;
+  }
+  checkNativeCommand();
+  resumeWakeWord();
+});
+window.addEventListener("focus", () => {
+  if (!IS_NATIVE) return;
+  wakeWord.active = false;
+  wakeWord.starting = false;
+  checkNativeCommand();
+  resumeWakeWord();
 });
 
 function startWakeWord() {
