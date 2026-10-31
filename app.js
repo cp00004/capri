@@ -122,6 +122,9 @@ const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
 const DEFAULT_BACKEND = REMOTE_ONLY ? DEFAULT_TUNNEL : "";
+// The installed desktop runs its own server, and the hosted one will not accept
+// its origin, so a saved tunnel must never be used for its API calls.
+const OWN_SERVER = IS_DESKTOP_APP || LOCAL_HOST;
 // Keep static/native builds pointed at the live tunnel.
 if (REMOTE_ONLY) {
   localStorage.setItem(API_KEY, DEFAULT_TUNNEL);
@@ -130,7 +133,7 @@ if (REMOTE_ONLY) {
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
   session: localStorage.getItem(SESSION_KEY) || "",
-  apiBase: REMOTE_ONLY ? DEFAULT_TUNNEL : (SAVED_BACKEND || ""),
+  apiBase: OWN_SERVER ? "" : (REMOTE_ONLY ? DEFAULT_TUNNEL : (SAVED_BACKEND || "")),
   config: null,
   profile: null,
   voices: [],
@@ -1781,11 +1784,10 @@ async function checkWakeClip(blob) {
   let text = "";
   try {
     const clip = await toWav(blob);
-    const res = await api("/api/stt", {
+    const res = await api("/api/stt?prompt=Capri%20is%20the%20assistant%27s%20name.%20The%20user%20says%20Capri.", {
       method: "POST",
       headers: {
         "Content-Type": clip.type || "audio/webm",
-        "X-Capri-Prompt": "Capri is the assistant's name. The user says Capri.",
       },
       body: clip,
     });
@@ -2710,9 +2712,17 @@ function paintNnn() {
   nnnArmRow?.classList.toggle("hidden", mode !== "before" || active);
   nnnRecoveryRow?.classList.toggle("hidden", mode !== "active");
   if (nnnBadgeEl) {
-    const show = mode === "active" || (mode === "before" && active);
+    // The countdown stays in the top bar through the whole season, not only
+    // once it is armed, so the phone always shows the clock.
+    const show = mode === "active" || mode === "before";
     nnnBadgeEl.classList.toggle("hidden", !show);
-    if (show) nnnBadgeEl.textContent = `NNN ${nnnTimerEl?.textContent || ""}`;
+    if (show) {
+      const left = nnnTimerEl?.textContent || "";
+      nnnBadgeEl.textContent = mode === "before" ? `NNN IN ${left}` : `NNN ${left}`;
+      nnnBadgeEl.title = mode === "before"
+        ? "No Nut November starts at midnight. Tap to set it up."
+        : "No Nut November is live. Tap for the dashboard.";
+    }
   }
 }
 

@@ -1048,4 +1048,5 @@ body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 
 .nnn-badge:hover { color: var(--white); border-color: var(--pink); }
 @media (max-width: 520px) {
   .nnn-timer { font-size: 21px; }
+  .nnn-badge { font-size: 10px; padding: 6px 10px; letter-spacing: 0.06em; }
 }
