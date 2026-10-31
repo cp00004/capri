@@ -116,7 +116,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.5.8";
+const APP_VERSION = "4.5.9";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -1724,17 +1724,70 @@ function endMicClip() {
   try { recorder.stop(); } catch { /* already stopped */ }
 }
 
+// The fallback transcriber only takes real audio files, so a recorded webm
+// clip is decoded and re-encoded as 16 kHz mono WAV. Anything unexpected falls
+// back to the original clip, which the primary path still understands.
+async function toWav(blob) {
+  if (/wav/.test(blob.type || "")) return blob;
+  let ctx;
+  try {
+    ctx = new AudioContext();
+    const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const rate = 16000;
+    const frames = Math.max(1, Math.ceil(buf.duration * rate));
+    const chans = buf.numberOfChannels;
+    const mix = new Float32Array(buf.length);
+    for (let c = 0; c < chans; c += 1) {
+      const data = buf.getChannelData(c);
+      for (let i = 0; i < data.length; i += 1) mix[i] += data[i] / chans;
+    }
+    const bytes = new ArrayBuffer(44 + frames * 2);
+    const view = new DataView(bytes);
+    const put = (at, str) => {
+      for (let i = 0; i < str.length; i += 1) view.setUint8(at + i, str.charCodeAt(i));
+    };
+    put(0, "RIFF");
+    view.setUint32(4, 36 + frames * 2, true);
+    put(8, "WAVEfmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, rate, true);
+    view.setUint32(28, rate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    put(36, "data");
+    view.setUint32(40, frames * 2, true);
+    const ratio = buf.sampleRate / rate;
+    for (let i = 0; i < frames; i += 1) {
+      const pos = i * ratio;
+      const a = Math.floor(pos);
+      const b = Math.min(a + 1, mix.length - 1);
+      const t = pos - a;
+      let v = (mix[a] || 0) * (1 - t) + (mix[b] || 0) * t;
+      v = Math.max(-1, Math.min(1, v));
+      view.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+    }
+    return new Blob([bytes], { type: "audio/wav" });
+  } catch {
+    return blob;
+  } finally {
+    try { ctx?.close(); } catch { /* already closed */ }
+  }
+}
+
 async function checkWakeClip(blob) {
   if (!wakeWord.enabled) return;
   let text = "";
   try {
+    const clip = await toWav(blob);
     const res = await api("/api/stt", {
       method: "POST",
       headers: {
-        "Content-Type": blob.type || "audio/webm",
+        "Content-Type": clip.type || "audio/webm",
         "X-Capri-Prompt": "Capri is the assistant's name. The user says Capri.",
       },
-      body: blob,
+      body: clip,
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -2148,10 +2201,11 @@ async function transcribe(blob) {
   setPhase("thinking");
 
   try {
+    const clip = await toWav(blob);
     const res = await api("/api/stt", {
       method: "POST",
-      headers: { "Content-Type": blob.type || "audio/webm" },
-      body: blob,
+      headers: { "Content-Type": clip.type || "audio/webm" },
+      body: clip,
     });
     const data = await res.json().catch(() => ({}));
 
