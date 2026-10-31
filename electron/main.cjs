@@ -917,6 +917,7 @@ function showEye() {
   startEyeTimers();
   sendEyeConfig();
   sendEyeLive(true);
+  sendEyeNnn();
   logLine("eye: shown");
 }
 
@@ -957,6 +958,26 @@ function sendEyeConfig() {
   if (!eyeWin || eyeWin.isDestroyed()) return;
   // The overlay is a local file, so it cannot rely on relative API paths.
   try { eyeWin.webContents.send("eye-config", { ...eyeApi, base: eyeApi.base || APP_URL }); } catch { /* closing */ }
+  sendEyeNnn();
+}
+
+// The countdown also lives under the eye: the eye is what is on screen while
+// Capri herself is out of the way.
+function nnnEyeLine() {
+  const now = Date.now();
+  const { start, end } = nnnSeason(new Date());
+  const mode = now >= end ? "after" : now < start ? "before" : "active";
+  if (mode === "after") return "";
+  const left = (mode === "before" ? start : end) - now;
+  const days = Math.floor(left / 86_400_000);
+  const hours = Math.floor((left % 86_400_000) / 3_600_000);
+  if (mode === "before") return nnn.active ? `NNN armed - starts in ${days}d ${hours}h` : `NNN starts in ${days}d ${hours}h`;
+  return `NNN ${days}d ${hours}h left - ${nnn.blocked} blocked`;
+}
+
+function sendEyeNnn() {
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  try { eyeWin.webContents.send("eye-nnn", nnnEyeLine()); } catch { /* closing */ }
 }
 
 function sayEye(text) {
@@ -1812,6 +1833,8 @@ function nnnStatus() {
     blocked: nnn.blocked,
     sites: nnn.sites,
     awaitingCode: nnn.awaitingCode,
+    dismissed: Number(nnn.dismissed) || 0,
+    completed: Number(nnn.completed) || 0,
     message: nnn.active && mode === "before"
       ? `NNN Mode is armed and starts by itself on November 1st - ${days} day${days === 1 ? "" : "s"} to go.`
       : nnn.active
@@ -2194,6 +2217,7 @@ app.whenReady().then(async () => {
   // The calendar is watched even while the lock is off, so the season can
   // switch itself on with the app already open.
   setInterval(() => { try { nnnCheckSchedule(); } catch { /* keep going */ } }, 60_000);
+  setInterval(sendEyeNnn, 30_000);
   // Waking from sleep is the moment the date moved without any timer firing.
   powerMonitor.on("resume", () => { try { nnnCheckSchedule(); } catch { /* keep going */ } });
   powerMonitor.on("unlock-screen", () => { try { nnnCheckSchedule(); } catch { /* keep going */ } });

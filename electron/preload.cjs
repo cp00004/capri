@@ -21,6 +21,11 @@ contextBridge.exposeInMainWorld("capriNative", {
     ms: Number(ms) || 0,
     reason: String(reason || ""),
   }),
+  // The loss report signs itself with the Google account she is talking to.
+  noNutId: (email, name) => ipcRenderer.invoke("capri-nnn-id", {
+    email: String(email || ""),
+    name: String(name || ""),
+  }),
   eyeReply: (text) => ipcRenderer.send("capri-eye-reply", String(text || "")),
   saveSession: (token) => ipcRenderer.invoke("capri-session-save", String(token || "")),
   loadSession: () => ipcRenderer.invoke("capri-session-load"),

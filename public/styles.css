@@ -1000,3 +1000,52 @@ body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 
 .update-card .pill { margin-top: 16px; }
 .update-screen.plain .update-track,
 .update-screen.plain .update-pct { display: none; }
+
+/* ── No Nut November dashboard ───────────────────────────────────────────── */
+.nnn-board {
+  display: grid;
+  gap: 2px;
+  margin: 10px 0 8px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 79, 216, 0.28);
+  border-left: 2px solid var(--pink);
+  background: linear-gradient(120deg, rgba(255, 79, 216, 0.07), rgba(77, 255, 157, 0.04));
+}
+.nnn-board strong {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: var(--pink);
+}
+.nnn-timer {
+  font-family: var(--mono);
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: 0.04em;
+  color: var(--mint);
+  font-variant-numeric: tabular-nums;
+}
+.nnn-detail {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--ink-dim);
+}
+.nnn-badge {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--pink);
+  background: rgba(14, 2, 20, 0.7);
+  border: 1px solid rgba(255, 79, 216, 0.45);
+  border-radius: 999px;
+  padding: 5px 9px;
+  margin-left: auto;
+  margin-right: 8px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.nnn-badge:hover { color: var(--white); border-color: var(--pink); }
+@media (max-width: 520px) {
+  .nnn-timer { font-size: 21px; }
+}
