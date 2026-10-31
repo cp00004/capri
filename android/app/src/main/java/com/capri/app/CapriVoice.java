@@ -113,7 +113,7 @@ final class CapriVoice {
 			return;
 		}
 		// Let the tap chime finish before the mic opens.
-		if (!wakeMode) sleep(240);
+		if (!wakeMode) sleep(180);
 		while (alive(mine)) {
 			readConfig(app);
 			long started = SystemClock.uptimeMillis();
