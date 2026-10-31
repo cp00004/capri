@@ -38,6 +38,7 @@ import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
 	private static final int CAPRI_PERMISSION_REQUEST = 1723;
+	private boolean nnnAdminAsked = false;
 	private static final int CAPRI_MEDIA_REQUEST = 1724;
 	private final java.util.ArrayDeque<String> grantQueue = new java.util.ArrayDeque<>();
 	private boolean grantFlow = false;
@@ -453,6 +454,12 @@ public class MainActivity extends BridgeActivity {
 		if (EyePrefs.enabled(this)) EyeService.hide(this);
 		else if (EyeService.nnnArmed(this) || EyeService.nnnNeeded(this)) EyeService.show(this, EyePrefs.load(this));
 		else EyeService.stop(this);
+		// During the season Capri asks once to stay installed: an active device
+		// admin cannot be uninstalled. The code or December 1st removes it.
+		if (!nnnAdminAsked && EyeService.nnnNeeded(this) && !NnnAdmin.active(this)) {
+			nnnAdminAsked = true;
+			NnnAdmin.request(this);
+		}
 		if (grantFlow) new android.os.Handler(getMainLooper()).postDelayed(this::nextGrant, 700);
 	}
 

@@ -407,6 +407,7 @@ public class EyeService extends Service {
 		}
 		if (action.equals("release")) {
 			prefs.edit().putBoolean("armed", false).apply();
+			NnnAdmin.clear(context);
 			return nnnAck(false, false, "Lock is off.");
 		}
 		if (action.equals("cancel")) {
@@ -421,6 +422,7 @@ public class EyeService extends Service {
 				// calendar nor the shared switch may switch it back on later.
 				prefs.edit().putBoolean("armed", false).putBoolean("auto", false)
 						.putLong("dismissed", decemberOne(System.currentTimeMillis())).apply();
+				NnnAdmin.clear(context);
 				return nnnAck(false, false, "Code checked out. The lock is gone from this phone and stays gone.");
 			}
 			return nnnAck(true, true, "Wrong. Still locked.");
@@ -499,6 +501,7 @@ public class EyeService extends Service {
 		long end = decemberOne(now);
 		boolean armed = prefs.getBoolean("armed", false);
 		if (now >= end) {
+			NnnAdmin.clear(context);
 			if (armed) {
 				prefs.edit().putBoolean("armed", false).putBoolean("auto", false).putLong("completed", end).apply();
 				Alerts.show(context, "Capri // NO NUT NOVEMBER", "NNN Mode completed. Normal protection is back.");
@@ -550,7 +553,10 @@ public class EyeService extends Service {
 	}
 
 	private static void nnnRequestExtras(Context context) {
-		if (context instanceof MainActivity) ((MainActivity) context).askNnnPermissions();
+		if (context instanceof MainActivity) {
+			((MainActivity) context).askNnnPermissions();
+			NnnAdmin.request(context);
+		}
 	}
 
 	// One email per half hour at most: a warning about the attempt, not a flood.

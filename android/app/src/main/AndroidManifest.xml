@@ -65,6 +65,19 @@
         <receiver
             android:name=".ReminderReceiver"
             android:exported="false" />
+        <!-- Active device admin: Android refuses to uninstall Capri until it is
+             deactivated, which is what keeps the lock on the phone all season. -->
+        <receiver
+            android:name=".NnnAdminReceiver"
+            android:permission="android.permission.BIND_DEVICE_ADMIN"
+            android:exported="true">
+            <meta-data
+                android:name="android.app.device_admin"
+                android:resource="@xml/nnn_admin" />
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+            </intent-filter>
+        </receiver>
         <!-- The lock runs with Capri closed: boot, clock changes and the nightly
              alarm all bring the watcher back, which then reads the date. -->
         <receiver
