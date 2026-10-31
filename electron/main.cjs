@@ -701,26 +701,18 @@ function createWindow() {
     setInterval(checkForUpdates, 30 * 60_000);
   });
 
-  // ── Google OAuth popup handling ──────────────────────────────────────────
-  // Google GSI opens a popup to accounts.google.com — allow it
+  // ── Popups ───────────────────────────────────────────────────────────────
+  // Google's embedded widget must never open inside Capri: that window has no
+  // browser cookies, so it shows a Google with none of the user's accounts.
+  // Sign-in is handed to Chrome instead (see googleSignIn).
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (
       url.startsWith("https://accounts.google.com") ||
       url.startsWith("https://www.google.com/") ||
       url.startsWith("https://oauth2.googleapis.com")
     ) {
-      // Open OAuth pages in a proper popup Electron window
-      return {
-        action: "allow",
-        overrideBrowserWindowOptions: {
-          width:           500,
-          height:          650,
-          frame:           true,
-          autoHideMenuBar: true,
-          icon:            ICON,
-          webPreferences:  { contextIsolation: true, nodeIntegration: false },
-        },
-      };
+      logLine("blocked in-app google popup; use the browser sign-in");
+      return { action: "deny" };
     }
     // Everything else — open in system browser
     shell.openExternal(url);
@@ -737,7 +729,9 @@ function createWindow() {
 
   win.on("minimize", () => syncEye());
   win.on("restore", () => syncEye());
-  win.on("hide", () => syncEye());
+  // Closing the window is the moment the eye takes over, so a dismissal from
+  // an earlier session must not keep her away.
+  win.on("hide", () => { eyeDismissed = false; syncEye(); });
   win.on("show", () => syncEye());
 
   // Clicking away to the browser counts as stepping away too: the eye comes out
@@ -872,7 +866,10 @@ function hideEye() {
 // One source of truth: the eye belongs on screen only while Capri is not the
 // window in front. Blur, minimize, tray and display changes all land here.
 function syncEye() {
-  if (!eyeEnabled || !win || win.isDestroyed()) { hideEye(); return; }
+  if (!eyeEnabled) { hideEye(); return; }
+  // The eye outlives the window: closing Capri leaves her watching, talking and
+  // listening on her own, because nothing in her loop depends on that window.
+  if (!win || win.isDestroyed()) { showEye(); return; }
   const away = !win.isFocused() || win.isMinimized() || !win.isVisible();
   if (!away) {
     eyeDismissed = false;

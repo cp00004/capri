@@ -40,6 +40,7 @@
     z-index: 2;
     margin-top: 1px;
     cursor: grab;
+    transform-origin: 50% 62%;
     filter: drop-shadow(0 0 14px rgba(77, 255, 157, .45)) drop-shadow(0 0 34px rgba(255, 79, 216, .22));
     transition: filter .25s ease;
     will-change: transform;
@@ -329,6 +330,7 @@
   const gaze = { x: 0, y: 0, rot: 0, tx: 0, ty: 0, trot: 0, next: 0 };
   const look = { x: 0, y: 0, tx: 0, ty: 0, next: 0 };
   const impulse = { x: 0, y: 0 };
+  let lastImpulse = { x: 0, y: 0 };
   let cursor = null;
   let lastCursorAt = 0;
   const ghosts = [];
@@ -401,9 +403,21 @@
     impulse.x *= 0.9;
     impulse.y *= 0.9;
 
-    const px = gaze.x + impulse.x;
-    const py = gaze.y + impulse.y;
-    stage.style.transform = `translate(${px.toFixed(2)}px, ${py.toFixed(2)}px) rotate(${gaze.rot.toFixed(2)}deg)`;
+    // A slow lissajous drift: she visibly floats up, down and around instead of
+    // sitting still between gaze targets. Dragging pins her to the cursor.
+    const drift = state.dragging ? 0.2 : 1;
+    const driftX = (Math.sin(now * 0.00092) * 8 + Math.sin(now * 0.00041 + 1.7) * 3.5) * drift;
+    const driftY = (Math.cos(now * 0.00113) * 10 + Math.cos(now * 0.00037 + 0.9) * 4) * drift;
+
+    const px = gaze.x + impulse.x + driftX;
+    const py = gaze.y + impulse.y + driftY;
+    // Speed stretches her along the motion and leans her into the turn.
+    const speed = Math.min(1, Math.hypot(impulse.x - lastImpulse.x, impulse.y - lastImpulse.y) * 0.12);
+    const sx = 1 + speed * 0.1;
+    const sy = 1 - speed * 0.09;
+    lastImpulse = { x: impulse.x, y: impulse.y };
+    stage.style.transform =
+      `translate(${px.toFixed(2)}px, ${py.toFixed(2)}px) rotate(${(gaze.rot + impulse.x * 0.06).toFixed(2)}deg) scale(${sx.toFixed(3)}, ${sy.toFixed(3)})`;
 
     /* ---- eyeball: follow the cursor, wander when it is far away ---- */
     const irisLeft = box.left + ball.left + px + ball.size / 2;

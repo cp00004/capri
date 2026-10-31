@@ -102,7 +102,7 @@ const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.2.4";
+const APP_VERSION = "4.2.5";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -2741,6 +2741,23 @@ async function renderGoogle() {
     syncGoogleUi();
     return;
   }
+  // Desktop and Android have their own Google window: the embedded widget opens
+  // inside Capri, where there are no browser cookies and therefore no accounts.
+  // The pill hands the job to Chrome, which has the real account list.
+  if (IS_DESKTOP_APP || IS_NATIVE) {
+    state.googleReady = false;
+    googleButtonClientId = "";
+    if (el.googleButton) {
+      el.googleButton.innerHTML = "";
+      el.googleButton.classList.add("hidden");
+    }
+    el.googleBtn?.classList.add("hidden");
+    if (el.accountHint && !state.profile?.google) {
+      el.accountHint.textContent = "Signing in opens Chrome with the Google accounts already on this device.";
+    }
+    syncGoogleUi();
+    return;
+  }
   const ok = await loadGoogleScript();
   if (!ok || !window.google?.accounts?.id) {
     state.googleReady = false;
@@ -2814,7 +2831,7 @@ function syncGoogleUi() {
   if (el.signOutBtn) el.signOutBtn.classList.toggle("hidden", !signedIn);
   if (googleFallbackBtn) googleFallbackBtn.classList.toggle("hidden", signedIn || rendered);
   if (el.signInPill) {
-    const offer = REMOTE_ONLY && !signedIn && Boolean(state.config?.google?.configured);
+    const offer = !signedIn && Boolean(state.config?.google?.configured) && (REMOTE_ONLY || IS_DESKTOP_APP);
     el.signInPill.classList.toggle("hidden", !offer);
   }
 }
