@@ -1,7 +1,12 @@
 package com.capri.app;
 
+import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -37,6 +42,14 @@ final class CapriVoice {
 	private static long lastCallbackAt;
 	private static String lastText = "";
 
+	// Idle listening is a silent level check on the mic. Google's recognizer
+	// only starts once a voice is actually there, so its start tone cannot
+	// flicker on and off while the room is quiet.
+	private static final int VAD_RATE = 16000;
+	private static final double VAD_RMS = 480;
+	private static volatile boolean vadOn;
+	private static AudioRecord vadRecord;
+
 	private CapriVoice() {}
 
 	static boolean available(Context context) {
@@ -54,7 +67,7 @@ final class CapriVoice {
 			// Same ear, new callbacks. Rebuilding the session here is what made
 			// the recognizer click every time the page re-armed the wake word.
 			sink = cb;
-			if (!sessionActive && !restartQueued) schedule(0);
+			if (!sessionActive && !restartQueued && !vadOn) schedule(0);
 			return;
 		}
 		if (!available(context)) {
@@ -80,13 +93,19 @@ final class CapriVoice {
 			restartQueued = true;
 			MAIN.postDelayed(() -> {
 				restartQueued = false;
-				if (running) listen();
+				if (!running) return;
+				if (wakeMode) startVad();
+				else listen();
 			}, 300);
 			return;
 		}
 		// A warm recognizer still has to finish its cancel before it can start
 		// again; giving it a beat avoids a busy error and an extra retry.
-		MAIN.postDelayed(CapriVoice::listen, recognizer == null ? 0 : 200);
+		MAIN.postDelayed(() -> {
+			if (!running) return;
+			if (wakeMode) startVad();
+			else listen();
+		}, recognizer == null ? 0 : 200);
 	}
 
 	// Ends the current take but keeps the recognizer warm for the next one.
@@ -97,6 +116,7 @@ final class CapriVoice {
 		finalSeen = false;
 		sink = null;
 		sessionToken += 1;
+		haltVad();
 		final SpeechRecognizer r = recognizer;
 		if (r != null) {
 			MAIN.post(() -> {
@@ -117,7 +137,95 @@ final class CapriVoice {
 		}
 	}
 
+	// ── Silent gate ──────────────────────────────────────────────────────────
+	// While climbing for the name the ear only watches the mic level. Google's
+	// recognizer (and its start tone) runs only once there is a voice.
+	private static void startVad() {
+		if (!running || !wakeMode || sessionActive || restartQueued) return;
+		synchronized (CapriVoice.class) {
+			if (vadOn) return;
+			vadOn = true;
+		}
+		if (app == null || app.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+				!= PackageManager.PERMISSION_GRANTED) {
+			vadOn = false;
+			schedule(5000);
+			return;
+		}
+		Thread t = new Thread(CapriVoice::vadLoop, "capri-vad");
+		t.start();
+	}
+
+	private static void vadLoop() {
+		AudioRecord r = null;
+		boolean handoff = false;
+		try {
+			int min = AudioRecord.getMinBufferSize(VAD_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+			if (min <= 0) min = VAD_RATE / 5;
+			r = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, VAD_RATE,
+					AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, 3200));
+			if (r.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("vad init");
+			synchronized (CapriVoice.class) {
+				if (!vadOn) { r.release(); return; }
+				vadRecord = r;
+			}
+			r.startRecording();
+			short[] buf = new short[1600];
+			int loud = 0;
+			while (vadOn && running) {
+				int n = r.read(buf, 0, buf.length);
+				if (n < 0) break;
+				if (n == 0) continue;
+				double sum = 0;
+				for (int i = 0; i < n; i += 1) {
+					double v = buf[i];
+					sum += v * v;
+				}
+				double rms = Math.sqrt(sum / n);
+				if (rms > VAD_RMS) {
+					loud += 1;
+					if (loud >= 2) {
+						handoff = true;
+						haltVad();
+						MAIN.postDelayed(() -> { if (running) listen(); }, 240);
+						return;
+					}
+				} else {
+					loud = 0;
+				}
+			}
+		} catch (Exception err) {
+			/* the recognizer loop covers a mic the gate cannot open */
+		} finally {
+			vadOn = false;
+			AudioRecord cur;
+			synchronized (CapriVoice.class) {
+				cur = vadRecord;
+				if (cur == r) vadRecord = null;
+			}
+			if (cur == r) releaseRecord(r);
+			if (!handoff && running && wakeMode && !sessionActive) schedule(5000);
+		}
+	}
+
+	private static void haltVad() {
+		vadOn = false;
+		AudioRecord r;
+		synchronized (CapriVoice.class) {
+			r = vadRecord;
+			vadRecord = null;
+		}
+		releaseRecord(r);
+	}
+
+	private static void releaseRecord(AudioRecord r) {
+		if (r == null) return;
+		try { r.stop(); } catch (Exception err) { /* idle */ }
+		try { r.release(); } catch (Exception err) { /* gone */ }
+	}
+
 	private static void listen() {
+		haltVad();
 		if (!running || app == null || sessionActive || restartQueued) return;
 		if (recognizer == null) {
 			try {
@@ -176,7 +284,9 @@ final class CapriVoice {
 		restartQueued = true;
 		MAIN.postDelayed(() -> {
 			restartQueued = false;
-			if (running) listen();
+			if (!running) return;
+			if (wakeMode) startVad();
+			else listen();
 		}, delay);
 	}
 
