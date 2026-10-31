@@ -2080,7 +2080,8 @@ async function geminiStt(buffer, type, hint = "") {
           .map((part) => part?.text || "")
           .join(" ")
           .trim();
-        if (text) return text;
+        // A 200 with empty text means it heard silence, not a rate limit.
+        return text;
       } catch {
         /* try the next model or key */
       }
@@ -2112,8 +2113,8 @@ async function mistralStt(buffer, type, hint = "") {
         });
         if (!upstream.ok) continue;
         const data = await upstream.json().catch(() => null);
-        const text = String(data?.text || "").trim();
-        if (text) return text;
+        // A 200 with empty text means it heard silence, not a rate limit.
+        return String(data?.text || "").trim();
       } catch {
         /* try the next model or key */
       }
