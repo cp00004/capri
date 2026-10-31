@@ -99,6 +99,11 @@ const GEMINI_KEYS = readKeys("GEMINI_API_KEY", "GEMINI_API_KEYS");
 const OPENROUTER_KEYS = readKeys("OPENROUTER_API_KEY", "OPENROUTER_API_KEYS");
 const FREETHEAI_KEYS = readKeys("FREETHEAI_API_KEY", "FREETHEAI_API_KEYS");
 const MISTRAL_KEYS = readKeys("MISTRAL_API_KEY", "MISTRAL_API_KEYS");
+const FISH_KEYS = readKeys("FISH_AUDIO_API_KEY", "FISH_API_KEY", "FISH_AUDIO_API_KEYS");
+const FISH_KEY = FISH_KEYS[0] || "";
+const FISH_BASE = "https://api.fish.audio/v1";
+const FISH_TTS_MODEL = process.env.CAPRI_FISH_MODEL || "speech-1.5";
+const FISH_MOMMY_ID = process.env.CAPRI_FISH_MOMMY_VOICE || "5233336f5f44460ea0902b0802375451";
 const GEMINI_KEY = GEMINI_KEYS[0] || "";
 const GEMINI_MODEL = process.env.CAPRI_GEMINI_MODEL || "gemini-3.5-flash";
 const GEMINI_TTS_MODEL = process.env.CAPRI_TTS_MODEL || "gemini-3.8-flash-tts";
@@ -129,6 +134,7 @@ function getAllowedOrigins() {
 
 const CAPRI_VOICES = [
   { id: "capri", name: "Leda", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous. The one and only." },
+  { id: "mommy", name: "Leda", label: "MOMMY // fish audio", note: "A warm, teasing, older voice. Fish Audio model 5233336f.", fish: FISH_MOMMY_ID, pitch: 0.9, grit: 0.1 },
 ];
 const VOICE_BY_ID = new Map(CAPRI_VOICES.map((v) => [v.id, v]));
 
@@ -1842,6 +1848,42 @@ async function geminiTts(text, voiceName) {
   return { buffer: pcmToWav(buffer, rate), type: "audio/wav" };
 }
 
+async function fishTts(text, referenceId) {
+  if (!FISH_KEY) {
+    const err = new Error("No Fish Audio key.");
+    err.status = 401;
+    throw err;
+  }
+  const upstream = await fetch(`${FISH_BASE}/tts`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${FISH_KEY}`,
+      "Content-Type": "application/json",
+      model: FISH_TTS_MODEL,
+      Accept: "audio/mpeg",
+    },
+    body: JSON.stringify({
+      text,
+      reference_id: referenceId,
+      format: "mp3",
+      mp3_bitrate: 128,
+      chunk_length: 200,
+      normalize: true,
+      latency: "normal",
+    }),
+    signal: AbortSignal.timeout(45_000),
+  });
+  if (!upstream.ok) {
+    const raw = await upstream.text().catch(() => "");
+    let message = raw;
+    try { message = JSON.parse(raw)?.message || JSON.parse(raw)?.error || raw; } catch { /* keep raw */ }
+    const err = new Error(String(message || `Fish Audio ${upstream.status}`));
+    err.status = upstream.status;
+    throw err;
+  }
+  return { buffer: Buffer.from(await upstream.arrayBuffer()), type: "audio/mpeg" };
+}
+
 async function groqTts(text, voice) {
   const key = GROQ_KEYS[0];
   if (!key) throw new Error("No Groq key for the fallback voice.");
@@ -1900,8 +1942,8 @@ async function handleTts(req, res) {
     return res.end(cached.buffer);
   }
 
-  const pitch = { capri: 0.96, "capri-velvet": 0.92, "capri-static": 1.0, "capri-warm": 0.95, "capri-mature": 0.9, "capri-bright": 1.04 }[setting] || 0.96;
-  const grit = { capri: 0.14, "capri-velvet": 0.22, "capri-static": 0.28, "capri-warm": 0.1, "capri-mature": 0.18, "capri-bright": 0.24 }[setting] || 0.14;
+  const pitch = preset?.pitch ?? ({ capri: 0.96, "capri-velvet": 0.92, "capri-static": 1.0, "capri-warm": 0.95, "capri-mature": 0.9, "capri-bright": 1.04 }[setting] || 0.96);
+  const grit = preset?.grit ?? ({ capri: 0.14, "capri-velvet": 0.22, "capri-static": 0.28, "capri-warm": 0.1, "capri-mature": 0.18, "capri-bright": 0.24 }[setting] || 0.14);
 
   const finish = (buffer, type, engine) => {
     const headers = {
@@ -1915,6 +1957,16 @@ async function handleTts(req, res) {
     res.writeHead(200, { ...headers, "Content-Length": buffer.length, "Cache-Control": "no-store" });
     res.end(buffer);
   };
+
+  // A cloned voice from Fish Audio: the model id is the voice.
+  if (preset?.fish) {
+    try {
+      const audio = await retryOnce(() => fishTts(text, preset.fish));
+      return finish(audio.buffer, audio.type, "fish");
+    } catch (err) {
+      console.warn(`  voice: Fish Audio failed (${err.status || "?"}) ${String(err.message).slice(0, 180)}`);
+    }
+  }
 
   // a real cloned voice, only when the user has supplied their own ElevenLabs key and voice id
   if (setting === "clone" && process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID) {
@@ -1943,7 +1995,7 @@ async function handleTts(req, res) {
 
   // Default to one voice. Gemini's free tier is a handful of lines a day, so
   // leading with it made her switch voices the moment the quota ran out.
-  const wanted = want || (GROQ_KEYS[0] ? "orpheus" : "auto");
+  const wanted = want === "fish" ? "auto" : (want || (GROQ_KEYS[0] ? "orpheus" : "auto"));
   const useGemini = (wanted === "auto" || wanted === "gemini") && Boolean(GEMINI_KEY);
 
   if (useGemini) {
@@ -2279,6 +2331,7 @@ const handler = async (req, res) => {
       sttModel: STT_MODEL,
       hasKey: GROQ_KEYS.length > 0,
       hasGemini: GEMINI_KEYS.length > 0,
+      hasFish: Boolean(FISH_KEY),
       relays: FREETHEAI_KEYS.length * FREETHEAI_MODEL_CHAIN.length + GROQ_KEYS.length * GROQ_MODEL_CHAIN.length + MISTRAL_KEYS.length * MISTRAL_MODEL_CHAIN.length + OPENROUTER_KEYS.length,
       portrait: fs.existsSync(pngPortrait)
         ? "assets/capri-portrait.png"

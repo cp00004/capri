@@ -22,8 +22,10 @@
     position: relative; z-index: 6;
     display: flex; gap: 5px; height: 22px; align-items: center;
     opacity: .55; transition: opacity .18s ease;
+    cursor: grab;
   }
   #controls:hover { opacity: 1; }
+  #controls.dragging { cursor: grabbing; }
   #controls button {
     height: 22px; padding: 0 8px;
     background: rgba(7, 0, 12, .88); color: var(--mint);
@@ -187,6 +189,7 @@
 
 <script>
   const wrap = document.getElementById("wrap");
+  const controls = document.getElementById("controls");
   const stage = document.getElementById("stage");
   const face = document.getElementById("face");
   const img = document.getElementById("eye");
@@ -617,6 +620,7 @@
     drag.on = false;
     state.dragging = false;
     stage.classList.remove("dragging");
+    controls.classList.remove("dragging");
     if (drag.id !== null) { try { stage.releasePointerCapture(drag.id); } catch { /* gone */ } }
     drag.id = null;
     window.capriEye?.dragEnd();
@@ -628,7 +632,9 @@
   function beginDrag(event) {
     if (event.button !== 0 && event.pointerType !== "touch") return;
     const hit = document.elementFromPoint(event.clientX, event.clientY);
-    if (hit && hit.closest && (hit.closest("button") || hit.closest("#controls"))) return;
+    // Buttons keep their click; the empty part of the bar is a grip, so the
+    // eye can be moved from the controls as well as from the artwork.
+    if (hit && hit.closest && hit.closest("button")) return;
     if (!interactiveAt(event.clientX, event.clientY)) return;
     if (drag.on) endDrag();
     drag.on = true;
@@ -639,6 +645,7 @@
     drag.at = performance.now();
     state.dragging = true;
     stage.classList.add("dragging");
+    controls.classList.add("dragging");
     setIgnore(false);
     setMode("hold");
     try { stage.setPointerCapture(event.pointerId); } catch { /* not capturable */ }

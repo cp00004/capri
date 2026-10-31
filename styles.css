@@ -741,7 +741,7 @@ input.text::placeholder { color: var(--ink-faint); }
 
 /* ---------------------------------------------------------------- small screens */
 @media (max-width: 700px), (max-height: 560px) {
-  :root { --hex-h: min(55dvh, calc(100dvh - 274px)); }
+  :root { --hex-h: clamp(180px, calc(100dvh - 274px), 55dvh); }
   body { min-height: 100dvh; }
   .stage {
     padding: calc(52px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px));
@@ -784,7 +784,7 @@ input.text::placeholder { color: var(--ink-faint); }
 }
 
 @media (max-height: 520px) and (orientation: landscape) {
-  :root { --hex-h: calc(100dvh - 130px); }
+  :root { --hex-h: max(140px, calc(100dvh - 130px)); }
   .stage { padding-top: 40px; }
   .dock-row { display: none; }
   .subtitle { font-size: 11px; }
