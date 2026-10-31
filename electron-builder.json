@@ -1,53 +1,50 @@
 {
-    "appId": "com.capricorn.capri",
-    "productName": "Capri",
-    "artifactName": "Capri-v4-Setup.${ext}",
-    "copyright": "Project Capricorn",
-    "asar": false,
-    "files": [
-        "electron/**/*",
-        "public/**/*",
-        "lib/**/*",
-        "server.js",
-        "agent.js",
-        "package.json",
-        "!public/assets/*.apk",
-        "!**/.git/**",
-        "!dist-electron/**"
+  "appId": "com.capricorn.capri",
+  "productName": "Capri",
+  "artifactName": "Capri-v4-Setup.${ext}",
+  "copyright": "Project Capricorn",
+  "asar": false,
+  "electronDist": "electron-dist-clean",
+  "files": [
+    "electron/**/*",
+    "public/**/*",
+    "lib/**/*",
+    "server.js",
+    "agent.js",
+    "package.json",
+    "!public/assets/*.apk",
+    "!**/.git/**",
+    "!dist-electron/**"
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": [
+          "x64"
+        ]
+      },
+      {
+        "target": "zip",
+        "arch": [
+          "x64"
+        ]
+      }
     ],
-    "win": {
-        "target": [
-            {
-                "target": "nsis",
-                "arch": [
-                    "x64"
-                ]
-            }
-        ],
-        "icon": "build/icon.ico",
-        "requestedExecutionLevel": "requireAdministrator"
-    },
-    "nsis": {
-        "oneClick": false,
-        "perMachine": true,
-        "allowElevation": true,
-        "allowToChangeInstallationDirectory": true,
-        "createDesktopShortcut": true,
-        "createStartMenuShortcut": true,
-        "shortcutName": "Capri",
-        "installerIcon": "build/icon.ico",
-        "uninstallerIcon": "build/icon.ico",
-        "include": "electron/installer.nsh"
-    },
-    "mac": {
-        "target": "dmg",
-        "icon": "public/assets/favicon.png",
-        "category": "public.app-category.productivity",
-        "entitlements": "electron/entitlements.mac.plist",
-        "entitlementsInherit": "electron/entitlements.mac.plist"
-    },
-    "linux": {
-        "target": "AppImage",
-        "icon": "public/assets/favicon.png"
-    }
+    "icon": "public/assets/icon-512.png",
+    "requestedExecutionLevel": "asInvoker"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": true,
+    "allowElevation": true,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "Capri",
+    "include": "electron/installer.nsh"
+  },
+  "directories": {
+    "output": "dist-electron"
+  }
 }
