@@ -2278,6 +2278,7 @@ async function nnnSync() {
   }
   if (!state) return null;
   nnnGlobal = state;
+  paintNnn();
   if (!nnnHasShell()) return state;
   const shouldArm = state.armed && Date.now() < Number(state.releaseAt || 0);
   const local = await nativeNoNut("status");
@@ -2293,6 +2294,43 @@ function nnnStartSync() {
   setTimeout(() => { void nnnSync(); }, 6000);
   setInterval(() => { void nnnSync(); }, NNN_POLL_MS);
 }
+
+// The same switch, by hand: two buttons and the code, for anyone who would
+// rather not say it out loud.
+const nnnStateEl = document.getElementById("nnnState");
+const nnnCodeEl = document.getElementById("nnnCode");
+
+function paintNnn() {
+  if (!nnnStateEl) return;
+  const armed = Boolean(nnnGlobal.armed) && Date.now() < Number(nnnGlobal.releaseAt || 0);
+  nnnStateEl.textContent = armed ? `locked - ${nnnGlobal.days || 0} day${nnnGlobal.days === 1 ? "" : "s"} left` : "off";
+  nnnStateEl.classList.toggle("bad", armed);
+}
+
+async function nnnOrder(order) {
+  const code = String(nnnCodeEl?.value || "").replace(/\D/g, "");
+  if (!code) {
+    showNotice("Type the code first - it is the one that cancels the mode.", null, null, 6000);
+    return;
+  }
+  const out = await nnnServerOrder(order, code);
+  if (!out) {
+    showNotice("No way to Capri's server just now, so the switch stays as it is.", null, null, 7000);
+    return;
+  }
+  if (!out.ok) {
+    showNotice(out.message || "Wrong code. Nothing changes.", null, null, 7000);
+    return;
+  }
+  nnnGlobal = out;
+  await nativeNoNut(order === "arm" ? "arm" : "release", "", order === "arm" ? "sealed by the switch" : "opened by the switch");
+  if (order === "arm") nnnAskOverlay();
+  paintNnn();
+  showNotice(out.message || (order === "arm" ? "Sealed on every device." : "Open again on every device."), null, null, 8000);
+}
+
+document.getElementById("nnnArmBtn")?.addEventListener("click", () => nnnOrder("arm"));
+document.getElementById("nnnReleaseBtn")?.addEventListener("click", () => nnnOrder("release"));
 
 // The phone's black screen is an overlay window, and Android only hands that
 // over on request. Returns true when she just sent you to the grant screen.
