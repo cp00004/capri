@@ -72,8 +72,8 @@ final class CapriVoice {
 				return;
 			}
 			running = false;
-			gen += 1;
-			MAIN.postDelayed(() -> begin(wake, cb), 200);
+			final long ticket = ++gen;
+			MAIN.postDelayed(() -> begin(wake, cb, ticket), 200);
 		}
 	}
 
@@ -89,9 +89,9 @@ final class CapriVoice {
 		stop();
 	}
 
-	private static void begin(boolean wake, Sink cb) {
+	private static void begin(boolean wake, Sink cb, long ticket) {
 		synchronized (CapriVoice.class) {
-			if (running || app == null) return;
+			if (running || app == null || ticket != gen) return;
 			running = true;
 			wakeMode = wake;
 			sink = cb;
