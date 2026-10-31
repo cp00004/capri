@@ -255,8 +255,7 @@ final class CapriVoice {
 				return;
 			}
 			boolean quiet = error == SpeechRecognizer.ERROR_NO_MATCH
-					|| error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-					|| error == SpeechRecognizer.ERROR_NO_SPEECH;
+					|| error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
 			quietStreak = quiet ? Math.min(5, quietStreak + 1) : 0;
 			schedule(error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ? 1500 : quietDelay());
 		}

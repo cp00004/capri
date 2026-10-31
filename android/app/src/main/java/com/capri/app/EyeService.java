@@ -224,6 +224,11 @@ public class EyeService extends Service {
 
 	// ── The ear with the app closed ─────────────────────────────────────────
 	private static boolean bgVoice = false;
+	private static boolean pageVisible = false;
+
+	static void pageVisible(boolean on) {
+		pageVisible = on;
+	}
 
 	// Google's recognizer runs in this foreground service, so "Capri" still
 	// works after the window is gone. When the name (and an order) lands, she
@@ -231,7 +236,7 @@ public class EyeService extends Service {
 	static void backgroundVoice(Context context, boolean on) {
 		// The foreground service is the only place Android lets the mic run with
 		// the window gone, so the ear never starts without it.
-		boolean wanted = on && running && EyePrefs.wake(context);
+		boolean wanted = on && running && !pageVisible && EyePrefs.wake(context);
 		if (!wanted) {
 			if (bgVoice) {
 				bgVoice = false;
@@ -251,6 +256,8 @@ public class EyeService extends Service {
 				app.getSharedPreferences("capri_voice", Context.MODE_PRIVATE)
 						.edit().putString("pending", order).apply();
 				openFromVoice(app, order);
+				// If the app could not come up, the ear takes itself back.
+				new Handler(Looper.getMainLooper()).postDelayed(() -> backgroundVoice(app, true), 20000);
 			}
 
 			@Override

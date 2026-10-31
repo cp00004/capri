@@ -523,6 +523,7 @@ public class MainActivity extends BridgeActivity {
 		super.onResume();
 		// The page owns the ear while it is visible; the service takes it back
 		// when the window goes away.
+		EyeService.pageVisible(true);
 		EyeService.backgroundVoice(this, false);
 		if (EyePrefs.enabled(this)) EyeService.hide(this);
 		else if (EyeService.nnnArmed(this) || EyeService.nnnNeeded(this)) EyeService.show(this, EyePrefs.load(this));
@@ -539,6 +540,7 @@ public class MainActivity extends BridgeActivity {
 	@Override
 	public void onPause() {
 		super.onPause();
+		EyeService.pageVisible(false);
 		// A pause can be a lock screen or a jump into another app, where
 		// onUserLeaveHint may not fire. The service is what keeps the ear alive.
 		if (EyePrefs.wake(this) || EyePrefs.enabled(this) || EyeService.nnnArmed(this) || EyeService.nnnNeeded(this)) {
