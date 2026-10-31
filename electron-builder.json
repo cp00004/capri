@@ -24,7 +24,7 @@
                 ]
             }
         ],
-        "icon": "public/assets/favicon.png",
+        "icon": "build/icon.ico",
         "requestedExecutionLevel": "requireAdministrator"
     },
     "nsis": {
@@ -35,8 +35,8 @@
         "createDesktopShortcut": true,
         "createStartMenuShortcut": true,
         "shortcutName": "Capri",
-        "installerIcon": "public/assets/favicon.png",
-        "uninstallerIcon": "public/assets/favicon.png",
+        "installerIcon": "build/icon.ico",
+        "uninstallerIcon": "build/icon.ico",
         "include": "electron/installer.nsh"
     },
     "mac": {
