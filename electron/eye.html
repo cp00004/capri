@@ -819,6 +819,7 @@
   async function startTalk() {
     if (talk.active) return stopTalk();
     if (typeof MediaRecorder === "undefined") { setMode("no mic"); return; }
+    const wakeWasOn = wakeRec.on;
     shutdownWake();
     try {
       talk.stream = await navigator.mediaDevices.getUserMedia({
@@ -826,6 +827,7 @@
       });
     } catch {
       setMode("mic blocked");
+      if (wakeWasOn) setTimeout(startWake, 600);
       return;
     }
     const mime = pickMime();
@@ -1030,7 +1032,7 @@
     wakeOn.on = !wakeOn.on;
     ear.classList.toggle("on", wakeOn.on);
     if (wakeOn.on) startWake();
-    else { stopWakeChunk(); ear.classList.remove("on"); setMode(""); }
+    else { shutdownWake(); setMode(""); }
   });
 
   function chime() {
