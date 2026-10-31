@@ -2089,8 +2089,41 @@ async function geminiStt(buffer, type, hint = "") {
   return null;
 }
 
+// Voxtral carries its own free quota, so it keeps the ear alive when both
+// Whisper buckets and Gemini are squeezed.
+async function mistralStt(buffer, type, hint = "") {
+  if (!MISTRAL_KEYS.length) return null;
+  const models = [
+    process.env.CAPRI_STT_MISTRAL_MODEL || "voxtral-mini-latest",
+    "voxtral-small-latest",
+  ].filter((m, i, all) => all.indexOf(m) === i);
+  for (const key of MISTRAL_KEYS) {
+    for (const model of models) {
+      try {
+        const form = new FormData();
+        form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
+        form.append("model", model);
+        if (hint) form.append("prompt", hint);
+        const upstream = await fetch(`${MISTRAL_BASE}/audio/transcriptions`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}` },
+          body: form,
+          signal: AbortSignal.timeout(25_000),
+        });
+        if (!upstream.ok) continue;
+        const data = await upstream.json().catch(() => null);
+        const text = String(data?.text || "").trim();
+        if (text) return text;
+      } catch {
+        /* try the next model or key */
+      }
+    }
+  }
+  return null;
+}
+
 async function handleStt(req, res) {
-  if (!GROQ_KEYS.length && !GEMINI_KEYS.length) {
+  if (!GROQ_KEYS.length && !GEMINI_KEYS.length && !MISTRAL_KEYS.length) {
     return json(res, 500, { error: "No GROQ_API_KEY set." });
   }
 
@@ -2170,6 +2203,9 @@ async function handleStt(req, res) {
   // One bucket can run dry while the account still has capacity elsewhere.
   const fallback = await geminiStt(buffer, type, hint);
   if (fallback !== null) return json(res, 200, { text: fallback, via: "gemini" });
+
+  const voxtral = await mistralStt(buffer, type, hint);
+  if (voxtral !== null) return json(res, 200, { text: voxtral, via: "mistral" });
 
   if (limited) {
     return json(res, 429, {
