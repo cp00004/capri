@@ -189,7 +189,7 @@ async function api(url, opts = {}) {
   // A fallback transcriber can take its time on a cold clip; cutting it at
   // eight seconds used to surface as "Failed to fetch" and looked like a dead
   // link even though the server was still working.
-  const timeoutId = controller ? setTimeout(() => controller.abort(), url.startsWith("/api/stt") ? 30000 : 8000) : null;
+  const timeoutId = controller ? setTimeout(() => controller.abort(), url.startsWith("/api/stt") ? 45000 : 8000) : null;
   let res;
   try {
     res = await fetch(apiUrl(withDevice(url)), { ...opts, headers, signal: opts.signal || controller.signal });
@@ -1805,13 +1805,9 @@ async function checkWakeClip(blob) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       if (res.status === 429) {
-        // Stop uploading clips until the bucket refills, or the whole ear turns
-        // into a rate-limit storm that also starves everything else.
-        micWake.cooldownUntil = performance.now() + 20000;
-        if (!micWake.busyWarned) {
-          micWake.busyWarned = true;
-          showNotice("Voice transcription is rate limited. Wake word is resting for a few seconds.", null, null, 7000);
-        }
+        // The server now spreads clips across every key, so a 429 is a brief
+        // upstream squeeze, not a reason to stop listening.
+        micWake.cooldownUntil = performance.now() + 3000;
         return;
       }
       if (!micWake.warned) {

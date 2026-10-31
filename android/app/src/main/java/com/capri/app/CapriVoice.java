@@ -140,14 +140,20 @@ final class CapriVoice {
 			}
 			String text = transcribe(clip);
 			if (!alive(mine)) return;
+			// Free transcription keys squeeze now and then; the server spreads a
+			// burst across every key, so one more try usually clears it.
+			for (int tries = 0; text == null && !wakeMode && lastStatus == 429 && tries < 3 && alive(mine); tries++) {
+				sleep(1200L * (tries + 1));
+				text = transcribe(clip);
+			}
+			if (!alive(mine)) return;
 			if (text == null) {
-				// A rate-limited or broken endpoint must not be hammered: the
-				// old retry loop is what starved the PC's wake word too.
+				// A broken endpoint must not be hammered.
 				if (!wakeMode) {
 					fail(mine, lastStatus == 429 ? "busy" : "network");
 					return;
 				}
-				sleep(lastStatus == 0 ? 2500 : 15000);
+				sleep(lastStatus == 0 ? 2500 : 4000);
 				continue;
 			}
 			text = text.trim();
@@ -281,7 +287,7 @@ final class CapriVoice {
 		try {
 			conn = (HttpURLConnection) new URL(base + "/api/stt").openConnection();
 			conn.setConnectTimeout(8000);
-			conn.setReadTimeout(25000);
+			conn.setReadTimeout(45000);
 			conn.setRequestMethod("POST");
 			conn.setDoOutput(true);
 			conn.setRequestProperty("Content-Type", "audio/wav");

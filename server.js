@@ -69,6 +69,7 @@ const GROQ_MODEL_CHAIN = [...new Set([
 ].map((m) => m.trim()).filter(Boolean))];
 const GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english";
 const STT_MODEL = process.env.CAPRI_STT_MODEL || "whisper-large-v3-turbo";
+let sttRotation = 0;
 const GROQ_BASE = "https://api.groq.com/openai/v1";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
@@ -296,7 +297,6 @@ function saveDevices() {
 
 const PAIR_CODE = process.env.CAPRI_PAIR_CODE || String(crypto.randomInt(100000, 999999));
 const pairFailures = new Map(); // ip -> { count, until }
-const sttHits = new Map(); // ip -> [timestamps]
 const pendingAccess = new Map(); // id -> request
 let pcLocked = process.env.CAPRI_PC === "off";
 const WINDOWS_LOCAL = process.platform === "win32";
@@ -2043,38 +2043,50 @@ function audioExtension(type) {
 }
 
 async function geminiStt(buffer, type, hint = "") {
-  const key = GEMINI_KEYS[0];
-  if (!key) return null;
-  const model = process.env.CAPRI_STT_GEMINI_MODEL || GEMINI_MODEL;
+  if (!GEMINI_KEYS.length) return null;
   const guide = hint ? `${hint} ` : "";
-  try {
-    const upstream = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-      {
-        method: "POST",
-        headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{
-            role: "user",
-            parts: [
-              { text: `${guide}Transcribe the speech in this audio exactly, keeping names as given. Reply with the spoken words only and nothing else.` },
-              { inline_data: { mime_type: type, data: buffer.toString("base64") } },
-            ],
-          }],
-          generationConfig: { temperature: 0 },
-        }),
+  const models = [
+    process.env.CAPRI_STT_GEMINI_MODEL || GEMINI_MODEL,
+    ...String(process.env.CAPRI_STT_GEMINI_FALLBACKS || "gemini-2.5-flash,gemini-2.0-flash,gemini-1.5-flash")
+      .split(",").map((m) => m.trim()).filter(Boolean),
+  ].filter((m, i, all) => m && all.indexOf(m) === i).slice(0, 4);
+  const body = JSON.stringify({
+    contents: [{
+      role: "user",
+      parts: [
+        { text: `${guide}Transcribe the speech in this audio exactly, keeping names as given. Reply with the spoken words only and nothing else.` },
+        { inline_data: { mime_type: type, data: buffer.toString("base64") } },
+      ],
+    }],
+    generationConfig: { temperature: 0 },
+  });
+  // Every key and every model carries its own free quota, so one 429 never
+  // means the voice is out of capacity.
+  for (const key of GEMINI_KEYS) {
+    for (const model of models) {
+      try {
+        const upstream = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+          {
+            method: "POST",
+            headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
+            body,
+            signal: AbortSignal.timeout(25_000),
+          }
+        );
+        if (!upstream.ok) continue;
+        const data = await upstream.json();
+        const text = (data?.candidates?.[0]?.content?.parts || [])
+          .map((part) => part?.text || "")
+          .join(" ")
+          .trim();
+        if (text) return text;
+      } catch {
+        /* try the next model or key */
       }
-    );
-    if (!upstream.ok) return null;
-    const data = await upstream.json();
-    const text = (data?.candidates?.[0]?.content?.parts || [])
-      .map((part) => part?.text || "")
-      .join(" ")
-      .trim();
-    return text;
-  } catch {
-    return null;
+    }
   }
+  return null;
 }
 
 async function handleStt(req, res) {
@@ -2098,22 +2110,9 @@ async function handleStt(req, res) {
   const buffer = Buffer.concat(chunks);
   if (!buffer.length) return json(res, 400, { error: "empty_audio" });
 
-  // A busy room must not turn the always-on ear into a transcription storm
-  // that burns the shared key and starves every other device.
-  const ip = req.socket.remoteAddress || "?";
-  const now = Date.now();
-  const hits = (sttHits.get(ip) || []).filter((at) => now - at < 60_000);
-  if (hits.length >= 18) {
-    return json(res, 429, { error: "rate_limited", message: "Too many voice clips from this device. Wait a moment." });
-  }
-  hits.push(now);
-  sttHits.set(ip, hits);
-  if (sttHits.size > 400) {
-    for (const [key, list] of sttHits) {
-      if (!list.some((at) => now - at < 60_000)) sttHits.delete(key);
-    }
-  }
-
+  // No local quota. Upstream free tiers still exist, so a burst is spread
+  // across every key and retried with a short backoff instead of being
+  // refused at the door.
   // A short hint keeps Whisper spelling the assistant's name the same way the
   // wake matcher expects ("Copy" instead of "Capri" broke hands-free use).
   // It arrives as a query param because a custom header makes every hosted
@@ -2124,37 +2123,48 @@ async function handleStt(req, res) {
 
   let limited = false;
   let failure = null;
-  for (const key of GROQ_KEYS) {
-    try {
-      const form = new FormData();
-      form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
-      form.append("model", STT_MODEL);
-      form.append("response_format", "json");
-      form.append("temperature", "0");
-      if (hint) form.append("prompt", hint);
+  const ordered = GROQ_KEYS.length
+    ? GROQ_KEYS.slice(sttRotation % GROQ_KEYS.length).concat(GROQ_KEYS.slice(0, sttRotation % GROQ_KEYS.length))
+    : [];
+  sttRotation += 1;
 
-      const upstream = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${key}` },
-        body: form,
-      });
+  outer:
+  for (let pass = 0; pass < 3; pass += 1) {
+    for (const key of ordered) {
+      try {
+        const form = new FormData();
+        form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
+        form.append("model", STT_MODEL);
+        form.append("response_format", "json");
+        form.append("temperature", "0");
+        if (hint) form.append("prompt", hint);
 
-      const raw = await upstream.text();
-      if (!upstream.ok) {
-        if (upstream.status === 429 || upstream.status === 401 || upstream.status >= 500) {
-          if (upstream.status === 429) limited = true;
+        const upstream = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}` },
+          body: form,
+          signal: AbortSignal.timeout(12_000),
+        });
+
+        const raw = await upstream.text();
+        if (!upstream.ok) {
+          if (upstream.status === 429 || upstream.status === 401 || upstream.status >= 500) {
+            if (upstream.status === 429) limited = true;
+            failure = friendlyError(upstream.status, raw);
+            continue;
+          }
           failure = friendlyError(upstream.status, raw);
-          continue;
+          break outer;
         }
-        failure = friendlyError(upstream.status, raw);
-        break;
+        let text = "";
+        try { text = String(JSON.parse(raw)?.text || ""); } catch { /* leave empty */ }
+        return json(res, 200, { text: text.trim() });
+      } catch (err) {
+        failure = err.message;
       }
-      let text = "";
-      try { text = String(JSON.parse(raw)?.text || ""); } catch { /* leave empty */ }
-      return json(res, 200, { text: text.trim() });
-    } catch (err) {
-      failure = err.message;
     }
+    // Keys refill on a rolling minute; a beat between passes finds capacity.
+    if (pass < 2) await new Promise((r) => setTimeout(r, 700 * (pass + 1)));
   }
 
   // One bucket can run dry while the account still has capacity elsewhere.
