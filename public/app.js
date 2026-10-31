@@ -1864,9 +1864,8 @@ function checkNativeCommand() {
 setTimeout(checkNativeCommand, 1500);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
-    if (nativeVoice()) {
-      try { window.CapriVoice.stop(); } catch { /* older build */ }
-    }
+    // The service takes the mic when the window goes away; stopping here would
+    // kill the ear it just started.
     wakeWord.active = false;
     wakeWord.starting = false;
     nativeOrder = false;
