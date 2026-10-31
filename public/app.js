@@ -1571,6 +1571,7 @@ const micWake = {
   quietAt: 0,
   cooldownUntil: 0,
   warned: false,
+  busyWarned: false,
 };
 
 const MIC_WAKE_RMS = 0.018;
@@ -1733,6 +1734,16 @@ async function checkWakeClip(blob) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      if (res.status === 429) {
+        // Stop uploading clips until the bucket refills, or the whole ear turns
+        // into a rate-limit storm that also starves everything else.
+        micWake.cooldownUntil = performance.now() + 20000;
+        if (!micWake.busyWarned) {
+          micWake.busyWarned = true;
+          showNotice("Voice transcription is rate limited. Wake word is resting for a few seconds.", null, null, 7000);
+        }
+        return;
+      }
       if (!micWake.warned) {
         micWake.warned = true;
         showNotice("I can hear you but cannot reach your PC to read it. Wake word needs the link up.", null, null, 9000);
@@ -1892,7 +1903,7 @@ window.capriVoiceHeard = (text, remainder) => {
 window.capriVoiceError = (code) => {
   clearTimeout(nativeOrderTimer);
   nativeOrderTimer = null;
-  if (nativeOrder && !nativeOrderRetried && code !== "unavailable") {
+  if (nativeOrder && !nativeOrderRetried && code !== "unavailable" && code !== "busy") {
     // A failed take gets one more try before the page admits defeat.
     nativeOrderRetried = true;
     pushNativeConfig();
@@ -1906,7 +1917,12 @@ window.capriVoiceError = (code) => {
   wakeWord.chimed = false;
   if (wasOrder) {
     setPhase("idle");
-    showNotice("Capri's ear did not answer. Tap the mic and try again.", null, null, 7000);
+    showNotice(
+      code === "busy"
+        ? "She is out of voice transcription for a moment. Give it a minute and tap again."
+        : "Capri's ear did not answer. Tap the mic and try again.",
+      null, null, 7000
+    );
     resumeWakeWord();
     return;
   }
