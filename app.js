@@ -103,7 +103,7 @@ const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.3.0";
+const APP_VERSION = "4.4.2";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -1140,14 +1140,25 @@ function resumeWakeWord() {
   if (wakeWord.enabled && !document.hidden) setTimeout(startWakeWord, 250);
 }
 
+// One audio context, resumed on sight. Chromium parks a context that nobody
+// started with a click, and a parked context feeds the analyser flat silence -
+// which is how "Capri" fell on a deaf ear and the listening ping came out mute.
+let capriAudioCtx = null;
+function audioCtx() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!capriAudioCtx || capriAudioCtx.state === "closed") capriAudioCtx = new Ctx();
+  if (capriAudioCtx.state === "suspended") capriAudioCtx.resume().catch(() => {});
+  return capriAudioCtx;
+}
+
 function playListeningChime() {
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
+    const ctx = audioCtx();
+    if (!ctx) return;
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
-    const start = ctx.currentTime;
+    const start = ctx.currentTime + 0.02;
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(740, start);
     oscillator.frequency.setValueAtTime(980, start + 0.075);
@@ -1155,7 +1166,7 @@ function playListeningChime() {
     gain.gain.exponentialRampToValueAtTime(0.08, start + 0.012);
     gain.gain.exponentialRampToValueAtTime(0.001, start + 0.18);
     oscillator.connect(gain).connect(ctx.destination);
-    oscillator.onended = () => ctx.close().catch(() => {});
+    oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
     oscillator.start(start);
     oscillator.stop(start + 0.19);
   } catch {
@@ -1260,11 +1271,13 @@ async function startListening(force = false) {
   rec.recorder.ondataavailable = (e) => { if (e.data && e.data.size) rec.chunks.push(e.data); };
   rec.recorder.start(120);
 
-  rec.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const source = rec.audioCtx.createMediaStreamSource(rec.stream);
-  rec.analyser = rec.audioCtx.createAnalyser();
-  rec.analyser.fftSize = 1024;
-  source.connect(rec.analyser);
+  rec.audioCtx = audioCtx();
+  const source = rec.audioCtx?.createMediaStreamSource(rec.stream);
+  rec.analyser = rec.audioCtx?.createAnalyser() || null;
+  if (rec.analyser) {
+    rec.analyser.fftSize = 1024;
+    source?.connect(rec.analyser);
+  }
 
   rec.active = true;
   rec.starting = false;
@@ -1580,11 +1593,13 @@ async function startMicWake() {
     return;
   }
 
-  micWake.ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const source = micWake.ctx.createMediaStreamSource(micWake.stream);
-  micWake.analyser = micWake.ctx.createAnalyser();
-  micWake.analyser.fftSize = 1024;
-  source.connect(micWake.analyser);
+  micWake.ctx = audioCtx();
+  const source = micWake.ctx?.createMediaStreamSource(micWake.stream);
+  micWake.analyser = micWake.ctx?.createAnalyser() || null;
+  if (micWake.analyser) {
+    micWake.analyser.fftSize = 1024;
+    source?.connect(micWake.analyser);
+  }
 
   wakeWord.starting = false;
   wakeWord.active = true;
@@ -1636,7 +1651,7 @@ function stopMicWake() {
   micWake.recorder = null;
   if (micWake.stream) micWake.stream.getTracks().forEach((track) => track.stop());
   micWake.stream = null;
-  if (micWake.ctx) { micWake.ctx.close().catch(() => {}); micWake.ctx = null; }
+  micWake.ctx = null;
   micWake.analyser = null;
   wakeWord.active = false;
   paintWakeWord();
@@ -1856,7 +1871,7 @@ function teardownRecorder() {
   rec.analyser = null;
   if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop());
   rec.stream = null;
-  if (rec.audioCtx) { rec.audioCtx.close().catch(() => {}); rec.audioCtx = null; }
+  rec.audioCtx = null;
   el.body.style.removeProperty("--lvl");
 }
 
@@ -2193,14 +2208,140 @@ const NNN_CANCEL = /cancel|stop|end|deactivate|disable|abort|release|unlock/i;
 const NNN_STATUS = /status|how\s*(long|much)|still|remaining|until\s*when/i;
 const BARE_CODE = /^[\s"'.,!?-]*(\d{3,8})[\s"'.,!?-]*$/i;
 
-async function nativeNoNut(action, code) {
-  const call = window.capriNative?.noNut;
-  if (typeof call !== "function") return null;
+// One switch, on the public backend, for every device running Capri. Each box
+// polls it and honours it locally, so arming it here seals PCs and phones alike
+// and nobody has to say the order twice.
+const NNN_SERVER = DEFAULT_TUNNEL;
+const NNN_POLL_MS = 180000;
+let nnnGlobal = { armed: false, releaseAt: 0, until: "", days: 0, message: "" };
+let nnnAwaitingArmCode = false;
+let nnnSyncing = false;
+
+function nnnHasShell() {
+  return typeof window.capriNative?.noNut === "function" || Boolean(window.CapriEyes?.noNut);
+}
+
+async function nativeNoNut(action, code, reason) {
+  if (typeof window.capriNative?.noNut === "function") {
+    try {
+      return await window.capriNative.noNut(action, code, 0, reason);
+    } catch {
+      return null;
+    }
+  }
+  if (window.CapriEyes?.noNut) {
+    try {
+      return JSON.parse(window.CapriEyes.noNut(JSON.stringify({ action, reason: String(reason || "") })));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function nnnServerState() {
   try {
-    return await call(action, code);
+    const res = await fetch(`${NNN_SERVER}/api/nnn`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && typeof data.armed === "boolean" ? data : null;
   } catch {
     return null;
   }
+}
+
+async function nnnServerOrder(order, code) {
+  try {
+    const res = await fetch(`${NNN_SERVER}/api/nnn/${order}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: String(code || "") }),
+      cache: "no-store",
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, ...data };
+  } catch {
+    return null;
+  }
+}
+
+// Bring this machine in line with the shared switch. Anything she cannot reach
+// leaves the local lock alone, so a dead link never unlocks a live seal.
+async function nnnSync() {
+  if (nnnSyncing) return null;
+  nnnSyncing = true;
+  let state = null;
+  try {
+    state = await nnnServerState();
+  } finally {
+    nnnSyncing = false;
+  }
+  if (!state) return null;
+  nnnGlobal = state;
+  paintNnn();
+  if (!nnnHasShell()) return state;
+  const shouldArm = state.armed && Date.now() < Number(state.releaseAt || 0);
+  const local = await nativeNoNut("status");
+  if (!local || typeof local.active !== "boolean") return state;
+  if (shouldArm && !local.active) await nativeNoNut("arm");
+  else if (!state.armed && local.active && !local.awaitingCode) {
+    await nativeNoNut("release", "", "the shared switch is off");
+  }
+  return state;
+}
+
+function nnnStartSync() {
+  setTimeout(() => { void nnnSync(); }, 6000);
+  setInterval(() => { void nnnSync(); }, NNN_POLL_MS);
+}
+
+// The same switch, by hand: two buttons and the code, for anyone who would
+// rather not say it out loud.
+const nnnStateEl = document.getElementById("nnnState");
+const nnnCodeEl = document.getElementById("nnnCode");
+
+function paintNnn() {
+  if (!nnnStateEl) return;
+  const armed = Boolean(nnnGlobal.armed) && Date.now() < Number(nnnGlobal.releaseAt || 0);
+  nnnStateEl.textContent = armed ? `locked - ${nnnGlobal.days || 0} day${nnnGlobal.days === 1 ? "" : "s"} left` : "off";
+  nnnStateEl.classList.toggle("bad", armed);
+}
+
+async function nnnOrder(order) {
+  const code = String(nnnCodeEl?.value || "").replace(/\D/g, "");
+  if (!code) {
+    showNotice("Type the code first - it is the one that cancels the mode.", null, null, 6000);
+    return;
+  }
+  const out = await nnnServerOrder(order, code);
+  if (!out) {
+    showNotice("No way to Capri's server just now, so the switch stays as it is.", null, null, 7000);
+    return;
+  }
+  if (!out.ok) {
+    showNotice(out.message || "Wrong code. Nothing changes.", null, null, 7000);
+    return;
+  }
+  nnnGlobal = out;
+  await nativeNoNut(order === "arm" ? "arm" : "release", "", order === "arm" ? "sealed by the switch" : "opened by the switch");
+  if (order === "arm") nnnAskOverlay();
+  paintNnn();
+  showNotice(out.message || (order === "arm" ? "Sealed on every device." : "Open again on every device."), null, null, 8000);
+}
+
+document.getElementById("nnnArmBtn")?.addEventListener("click", () => nnnOrder("arm"));
+document.getElementById("nnnReleaseBtn")?.addEventListener("click", () => nnnOrder("release"));
+
+// The phone's black screen is an overlay window, and Android only hands that
+// over on request. Returns true when she just sent you to the grant screen.
+function nnnAskOverlay() {
+  if (!IS_NATIVE) return false;
+  const grants = readPhoneGrants();
+  if (!grants || grants.overlay) return false;
+  try {
+    phoneBridge()?.request?.("overlay");
+  } catch { /* older build */ }
+  return true;
 }
 
 // Her own words for a local order: on screen, out loud, in the transcript, in
@@ -2225,49 +2366,97 @@ async function sayLocally(text, userText) {
 
 // True when the turn belonged to the lock and nothing else has to answer it.
 async function handleNoNut(userText) {
-  if (typeof window.capriNative?.noNut !== "function") {
-    if (NNN_PHRASE.test(String(userText || ""))) {
-      await sayLocally("That lock is PC work. Ask me from the Windows app and I will seal it there.", userText);
-      return true;
-    }
-    return false;
-  }
   const text = String(userText || "").trim();
   if (!text) return false;
   const code = text.match(BARE_CODE)?.[1] || "";
   const phrase = NNN_PHRASE.test(text);
   if (!phrase && !code) return false;
 
-  const status = await nativeNoNut("status");
-  if (!status || typeof status.active !== "boolean") return false;
-  // A number on its own is only the code while she holds the lock and has
-  // asked for it; anywhere else it stays an ordinary sentence.
-  if (code && !(status.active && status.awaitingCode)) return false;
-
-  if (code) {
-    const result = await nativeNoNut("code", code);
-    await sayLocally(result?.message || "That did not work. Still locked.", userText);
+  // Arming the shared switch takes the code, so nobody who merely knows the
+  // phrase can seal every machine on the account list.
+  if (code && nnnAwaitingArmCode) {
+    nnnAwaitingArmCode = false;
+    const out = await nnnServerOrder("arm", code);
+    if (!out) {
+      const local = await nativeNoNut("activate");
+      await sayLocally(
+        `No server to tell, so this machine alone is sealed: ${local?.message || "locked until December 1st."}`,
+        userText,
+      );
+      return true;
+    }
+    if (!out.ok) {
+      await sayLocally(out.message || "Wrong code. Nothing changes.", userText);
+      return true;
+    }
+    nnnGlobal = out;
+    await nativeNoNut("arm");
+    const cover = nnnAskOverlay();
+    await sayLocally(
+      `${out.message || `Armed on every device until ${out.until || "December 1st"}.`}${cover ? " Android will ask for the cover screen - allow it, or she can only push the app away." : ""}`,
+      userText,
+    );
     return true;
   }
+  if (code && !phrase) return false;
+
+  const status = nnnHasShell() ? await nativeNoNut("status") : null;
+  const state = nnnGlobal.armed ? nnnGlobal : ((await nnnSync()) || nnnGlobal);
+  const lockedHere = Boolean(status?.active);
+
+  if (code) {
+    // The number only means the code while she has asked for it.
+    if (!state.armed && !(status && status.awaitingCode)) return false;
+    const out = await nnnServerOrder("release", code);
+    if (out && out.ok) {
+      nnnGlobal = out;
+      await nativeNoNut("release", "", "released by the code you said");
+      await sayLocally(out.message || "Code checked out. Every device is open again.", userText);
+      return true;
+    }
+    if (out && out.status === 403) {
+      await sayLocally(out.message || "Wrong code. Nothing changes.", userText);
+      return true;
+    }
+    const local = await nativeNoNut("code", code);
+    await sayLocally(local?.message || "That did not work. Still locked.", userText);
+    return true;
+  }
+
   if (NNN_CANCEL.test(text)) {
-    if (!status.active) {
+    if (!state.armed && !lockedHere) {
       await sayLocally("There is nothing to cancel. The lock is not on.", userText);
       return true;
     }
-    const result = await nativeNoNut("cancel");
-    await sayLocally(result?.message || "Then give me the cancellation code.", userText);
+    if (lockedHere && !status.awaitingCode) {
+      const result = await nativeNoNut("cancel");
+      await sayLocally(result?.message || "Then give me the cancellation code.", userText);
+      return true;
+    }
+    nnnAwaitingArmCode = false;
+    await sayLocally("That opens every device, so say the code.", userText);
     return true;
   }
+
   if (NNN_STATUS.test(text)) {
-    await sayLocally(status.message, userText);
+    const line = state.armed
+      ? state.message
+      : (status?.message || (lockedHere ? "Locked on this machine." : "The lock is off."));
+    await sayLocally(line, userText);
     return true;
   }
-  if (status.active) {
-    await sayLocally(status.message || "Already armed, and it stays armed.", userText);
+
+  if (state.armed || lockedHere) {
+    const until = state.armed ? state.message : (status?.message || "Already armed, and it stays armed.");
+    await sayLocally(until, userText);
     return true;
   }
-  const result = await nativeNoNut("activate");
-  await sayLocally(result?.message || "Armed. Anything like that gets closed.", userText);
+
+  nnnAwaitingArmCode = true;
+  await sayLocally(
+    "That seals every device you use - PC and phone - until December 1st. Say the code and I arm it.",
+    userText,
+  );
   return true;
 }
 
@@ -2421,6 +2610,7 @@ function unlockAudio() {
   if (unlocked) return;
   unlocked = true;
   try {
+    audioCtx(); // the shared context, started under this gesture
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (Ctx) {
       const ctx = new Ctx();
@@ -3770,4 +3960,5 @@ function initUpdates() {
 
 window.addEventListener("online", () => { if (!state.config) boot(); });
 
+nnnStartSync();
 boot();

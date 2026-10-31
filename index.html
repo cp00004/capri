@@ -242,6 +242,19 @@
     </div>
 
     <div class="field">
+      <span class="label">no nut november</span>
+      <div class="row wrap">
+        <span class="value" id="nnnState">off</span>
+        <button id="nnnArmBtn" class="pill" type="button">SEAL EVERY DEVICE</button>
+        <button id="nnnReleaseBtn" class="pill" type="button">OPEN THEM ALL</button>
+      </div>
+      <div class="row wrap">
+        <input id="nnnCode" class="text" type="password" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="16" placeholder="the code" />
+      </div>
+      <p class="hint" id="nnnHint">One switch for the whole app: it locks every Windows install and every phone signed to Capri, closes anything like that the moment it opens and puts a black screen over it, and releases on its own on December 1st. Needs the code - the same one that cancels it by voice.</p>
+    </div>
+
+    <div class="field">
       <span class="label">auto-publish</span>
       <div class="row wrap">
         <span class="value" id="publishState">on</span>
@@ -363,6 +376,6 @@
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
-<script src="app.js?v=20261031-07"></script>
+<script src="app.js?v=20261031-08"></script>
 </body>
 </html>
