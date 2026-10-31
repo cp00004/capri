@@ -1679,6 +1679,7 @@ async function nnnSweep() {
 function nnnStart() {
   if (nnnTimer) return;
   let hostsTried = 0;
+  let filesTried = 0;
   nnnTimer = setInterval(() => {
     if (!nnn.active) { nnnStopTimer(); return; }
     // The machine's own clock decides, on every tick, so a sleep, a restart or
@@ -1690,6 +1691,11 @@ function nnnStart() {
       hostsTried = Date.now();
       nnnHosts(true);
       nnnPullList().then((count) => { if (nnn.active && count) nnnHosts(true); }).catch(() => {});
+    }
+    // A user who strips the delete protection gets it back within ten minutes.
+    if (Date.now() - filesTried > 600_000) {
+      filesTried = Date.now();
+      nnnLockFiles(true);
     }
     nnnSweep().catch(() => {});
   }, 2000);
@@ -1741,6 +1747,24 @@ function nnnTaskStart() {
   execFile("schtasks.exe", ["/Run", "/TN", NNN_TASK], { windowsHide: true, timeout: 10000 }, () => {});
 }
 
+// While the season runs the version folder refuses deletion for this user, so
+// dragging Capri to the bin or deleting it from Explorer fails. The running
+// guard already holds the exe open; this covers the rest of the files.
+function nnnLockFiles(on) {
+  if (process.platform !== "win32") return;
+  const root = path.dirname(process.execPath);
+  if (!root.toLowerCase().includes("capri")) return;
+  let user = "";
+  try { user = require("os").userInfo().username; } catch { /* no user */ }
+  if (!user) return;
+  const args = on
+    ? [root, "/deny", `${user}:(OI)(CI)(DE,DC)`]
+    : [root, "/remove:d", user];
+  execFile("icacls.exe", args, { windowsHide: true, timeout: 15000 }, (err) => {
+    if (err) logLine(`nnn: file lock ${on ? "on" : "off"} failed (${err.message.trim().split("\n").pop()})`);
+  });
+}
+
 function nnnRelease(reason, opts = {}) {
   const cycle = Number(nnn.releaseAt) || nnnSeason().end;
   nnn.active = false;
@@ -1752,6 +1776,7 @@ function nnnRelease(reason, opts = {}) {
   nnnStopTimer();
   nnnVeilHide();
   if (nnn.sites) nnnHosts(false);
+  nnnLockFiles(false);
   nnnSave();
   logLine(`nnn: released (${reason})`);
   if (!opts.quiet) notify("Capri // NO NUT NOVEMBER", opts.completed ? `${reason} NNN Mode completed.` : reason);
@@ -1780,6 +1805,7 @@ function nnnActivate(opts = {}) {
   // no site list is written until the clock says the season started.
   if (!beforeSeason) {
     nnnHosts(true);
+    nnnLockFiles(true);
     // The curated list goes into the hosts file at once; the downloaded one lands
     // a second later and rewrites it with the full weight behind it.
     nnnPullList().then((count) => { if (nnn.active && count) nnnHosts(true); }).catch(() => {});
@@ -1868,12 +1894,13 @@ function nnnStatus() {
 function nnnGuardBoot() {
   logLine(`nnn-guard: start v${app.getVersion()} pid=${process.pid}`);
   nnnLoad();
-  if (nnnCheckSchedule().mode === "active") { nnnStart(); return; }
+  if (nnnCheckSchedule().mode === "active") { nnnLockFiles(true); nnnStart(); return; }
+  nnnLockFiles(false);
   // Outside the season there is nothing to guard. Stay a minute in case the
   // clock turns while this starts, then leave instead of idling all year.
   nnnStopTimer();
   setTimeout(() => {
-    if (nnnCheckSchedule().mode === "active") nnnStart();
+    if (nnnCheckSchedule().mode === "active") { nnnLockFiles(true); nnnStart(); }
     else app.quit();
   }, 60_000);
 }
