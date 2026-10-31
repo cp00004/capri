@@ -116,15 +116,17 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.5.12";
+const APP_VERSION = "4.5.13";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
 const SAVED_TUNNEL = /\.(?:loca\.lt|trycloudflare\.com)(?:\/|$)/i.test(SAVED_BACKEND.replace(/^https?:\/\//i, ""));
 const DEFAULT_BACKEND = REMOTE_ONLY ? DEFAULT_TUNNEL : "";
 // The installed desktop runs its own server, and the hosted one will not accept
-// its origin, so a saved tunnel must never be used for its API calls.
-const OWN_SERVER = IS_DESKTOP_APP || LOCAL_HOST;
+// its origin, so a saved tunnel must never be used for its API calls. A hosted
+// page inside the shell must never fall back to relative calls either: GitHub
+// Pages answers POST with 405.
+const OWN_SERVER = (IS_DESKTOP_APP && !IS_HOSTED_WEB) || LOCAL_HOST;
 // Keep static/native builds pointed at the live tunnel.
 if (REMOTE_ONLY) {
   localStorage.setItem(API_KEY, DEFAULT_TUNNEL);
