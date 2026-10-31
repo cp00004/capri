@@ -430,6 +430,19 @@ async function installOverlay(feed, latest) {
   const exe = path.join(dir, "Capri.exe");
   if (!fs.existsSync(exe)) throw new Error("update package had no Capri.exe");
 
+  // Model keys only ever exist on this machine, never in the release. Carry the
+  // current .env across so an unpack does not leave her with no relays.
+  try {
+    const envSrc = path.join(app.getAppPath(), ".env");
+    if (fs.existsSync(envSrc)) {
+      const envDst = path.join(dir, "resources", "app", ".env");
+      fs.mkdirSync(path.dirname(envDst), { recursive: true });
+      fs.copyFileSync(envSrc, envDst);
+    }
+  } catch (err) {
+    logLine(`update: could not carry .env (${err.message})`);
+  }
+
   writeCurrent({ version: latest, dir });
   logLine(`update: ${latest} ready, relaunching`);
   relaunchTo(exe);

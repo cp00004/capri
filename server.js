@@ -937,9 +937,22 @@ function cleanBanter(raw) {
     .replace(/[*_#`>|]+/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  const sentence = text.match(/^[^.!?]{4,170}[.!?]/);
-  if (sentence) text = sentence[0];
-  return text.replace(/^[\s"'“”]+|[\s"'“”]+$/g, "").slice(0, 180);
+  // Split on real sentence ends only: "Mr. Brightside" is a title, not a stop.
+  const parts = text.split(/(?<=[.!?])\s+(?=["'“]?[A-Z0-9])/);
+  let out = "";
+  for (const part of parts) {
+    out = out ? `${out} ${part}` : part;
+    const tail = out.trim();
+    if (/\b(mr|mrs|ms|dr|st|vs|feat|ft|jr|sr|inc|ltd|no|vol|ep)\.$/i.test(tail)) continue;
+    if (/[.!?]["'”)]?$/.test(tail)) break;
+  }
+  out = out.trim();
+  if (!/[.!?]["'”)]?$/.test(out)) {
+    out = out.slice(0, 170);
+    const cut = out.lastIndexOf(" ");
+    if (cut > 40) out = out.slice(0, cut);
+  }
+  return out.replace(/^[\s"'“”]+|[\s"'“”]+$/g, "").slice(0, 180);
 }
 
 function fallbackBanter(appName) {
