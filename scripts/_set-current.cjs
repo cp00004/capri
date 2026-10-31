@@ -1,0 +1,1 @@
+const fs=require('fs'),path=require('path');const base=path.join(process.env.LOCALAPPDATA,'Capri','versions');const dir=path.join(base,'4.5.4');fs.writeFileSync(path.join(base,'current.json'),JSON.stringify({version:'4.5.4',dir}));console.log(fs.readFileSync(path.join(base,'current.json'),'utf8'));
