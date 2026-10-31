@@ -267,7 +267,7 @@ public class EyeService extends Service {
 		});
 	}
 
-	private static void ping(Context context) {
+	static void ping(Context context) {
 		try {
 			final ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 70);
 			tone.startTone(ToneGenerator.TONE_PROP_BEEP, 140);
@@ -298,7 +298,12 @@ public class EyeService extends Service {
 		try {
 			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
 				// Android 14 throws if a declared foreground type lacks its runtime
-				// grant, so try the declared type then fall back to the plain form.
+				// grant, so try the mic type, then the declared type, then plain.
+				try {
+					startForeground(7421, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+							| ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
+					return;
+				} catch (Exception err) { /* try without the mic type */ }
 				try {
 					startForeground(7421, note, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
 					return;

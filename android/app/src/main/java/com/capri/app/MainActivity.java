@@ -460,7 +460,14 @@ public class MainActivity extends BridgeActivity {
 
 		@JavascriptInterface
 		public void stop() {
-			runOnUiThread(CapriVoice::release);
+			runOnUiThread(CapriVoice::stop);
+		}
+
+		// Played by the shell so the ping is heard even before the page has
+		// unlocked audio.
+		@JavascriptInterface
+		public void ping() {
+			EyeService.ping(MainActivity.this);
 		}
 
 		// An order heard while Capri was closed, handed over at launch.

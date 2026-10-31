@@ -1761,6 +1761,13 @@ let nativeOrderTimer = null;
 function nativeChime() {
   if (wakeWord.chimed) return;
   wakeWord.chimed = true;
+  // The shell tone always plays, even before the page has unlocked audio.
+  try {
+    if (typeof window.CapriVoice?.ping === "function") {
+      window.CapriVoice.ping();
+      return;
+    }
+  } catch { /* fall through to the web chime */ }
   playListeningChime();
 }
 
@@ -1776,14 +1783,36 @@ function startNativeWake() {
   try { window.CapriVoice.startWake(); } catch { /* older build */ }
 }
 
+let nativeOrderRetried = false;
+
+function armNativeOrderWatchdog(ms) {
+  clearTimeout(nativeOrderTimer);
+  nativeOrderTimer = setTimeout(() => {
+    if (!nativeOrder) return;
+    if (!nativeOrderRetried) {
+      // One quiet retry before declaring the take lost.
+      nativeOrderRetried = true;
+      try { window.CapriVoice.listen(); } catch { /* older build */ }
+      armNativeOrderWatchdog(10000);
+      return;
+    }
+    nativeOrder = false;
+    nativeOrderRetried = false;
+    try { window.CapriVoice.stop(); } catch { /* already idle */ }
+    setPhase("idle");
+    showNotice("I did not catch that. Tap the mic and talk right away.", null, null, 6000);
+    resumeWakeWord();
+  }, ms);
+}
+
 function startNativeOrder(force = false) {
   if (!nativeVoice()) { startListening(force); return; }
   clearTimeout(nativeOrderTimer);
   nativeOrder = true;
+  nativeOrderRetried = false;
   wakeWord.active = false;
   wakeWord.starting = false;
   paintWakeWord();
-  try { window.CapriVoice.stop(); } catch { /* already idle */ }
   stopMicWake();
   state.streaming = false;
   setPhase("listening");
@@ -1798,14 +1827,7 @@ function startNativeOrder(force = false) {
     resumeWakeWord();
     return;
   }
-  nativeOrderTimer = setTimeout(() => {
-    if (!nativeOrder) return;
-    nativeOrder = false;
-    try { window.CapriVoice.stop(); } catch { /* already idle */ }
-    setPhase("idle");
-    showNotice("I did not catch that. Tap the mic and talk right away.", null, null, 6000);
-    resumeWakeWord();
-  }, 12000);
+  armNativeOrderWatchdog(12000);
 }
 
 window.capriVoiceHeard = (text, remainder) => {
@@ -1813,6 +1835,7 @@ window.capriVoiceHeard = (text, remainder) => {
   const rest = String(remainder || "").trim();
   const wasOrder = nativeOrder;
   nativeOrder = false;
+  nativeOrderRetried = false;
   clearTimeout(nativeOrderTimer);
   nativeOrderTimer = null;
   if (!heard) {
@@ -1841,8 +1864,16 @@ window.capriVoiceHeard = (text, remainder) => {
 window.capriVoiceError = (code) => {
   clearTimeout(nativeOrderTimer);
   nativeOrderTimer = null;
+  if (nativeOrder && !nativeOrderRetried) {
+    // A failed take gets one more try before the page admits defeat.
+    nativeOrderRetried = true;
+    try { window.CapriVoice.listen(); } catch { /* older build */ }
+    armNativeOrderWatchdog(10000);
+    return;
+  }
   const wasOrder = nativeOrder;
   nativeOrder = false;
+  nativeOrderRetried = false;
   wakeWord.chimed = false;
   if (wasOrder) {
     setPhase("idle");

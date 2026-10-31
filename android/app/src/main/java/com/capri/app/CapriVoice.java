@@ -31,6 +31,9 @@ final class CapriVoice {
 	private static boolean sessionActive;
 	private static boolean restartQueued;
 	private static int quietStreak;
+	private static int clientErrors;
+	private static long sessionToken;
+	private static long lastCallbackAt;
 	private static String lastText = "";
 
 	private CapriVoice() {}
@@ -50,6 +53,7 @@ final class CapriVoice {
 			// Same ear, new callbacks. Rebuilding the session here is what made
 			// the recognizer click every time the page re-armed the wake word.
 			sink = cb;
+			if (!sessionActive && !restartQueued) schedule(0);
 			return;
 		}
 		if (!available(context)) {
@@ -65,21 +69,23 @@ final class CapriVoice {
 		finalSeen = false;
 		lastText = "";
 		quietStreak = 0;
+		clientErrors = 0;
 		if (modeChanged) {
 			// Cancel only; the recognizer object is reused.
 			sessionActive = false;
+			sessionToken += 1;
 			final SpeechRecognizer r = recognizer;
 			if (r != null) { try { r.cancel(); } catch (Exception err) { /* idle */ } }
 			restartQueued = true;
 			MAIN.postDelayed(() -> {
 				restartQueued = false;
 				if (running) listen();
-			}, 250);
+			}, 300);
 			return;
 		}
 		// A warm recognizer still has to finish its cancel before it can start
 		// again; giving it a beat avoids a busy error and an extra retry.
-		MAIN.postDelayed(CapriVoice::listen, recognizer == null ? 0 : 180);
+		MAIN.postDelayed(CapriVoice::listen, recognizer == null ? 0 : 200);
 	}
 
 	// Ends the current take but keeps the recognizer warm for the next one.
@@ -89,6 +95,7 @@ final class CapriVoice {
 		restartQueued = false;
 		finalSeen = false;
 		sink = null;
+		sessionToken += 1;
 		final SpeechRecognizer r = recognizer;
 		if (r != null) {
 			MAIN.post(() -> {
@@ -110,7 +117,7 @@ final class CapriVoice {
 	}
 
 	private static void listen() {
-		if (!running || app == null || sessionActive) return;
+		if (!running || app == null || sessionActive || restartQueued) return;
 		if (recognizer == null) {
 			try {
 				recognizer = SpeechRecognizer.createSpeechRecognizer(app);
@@ -123,12 +130,42 @@ final class CapriVoice {
 			recognizer.setRecognitionListener(new Listener());
 		}
 		sessionActive = true;
+		final long token = ++sessionToken;
+		touch();
 		try {
 			recognizer.startListening(intent());
 		} catch (Exception err) {
 			sessionActive = false;
 			schedule(1000);
+			return;
 		}
+		// A session that never calls back would leave her deaf until the next
+		// rebuild. If nothing at all arrives, rebuild it.
+		MAIN.postDelayed(() -> {
+			if (running && token == sessionToken && sessionActive
+					&& android.os.SystemClock.uptimeMillis() - lastCallbackAt > 8000) {
+				hardRestart();
+			}
+		}, 8500);
+	}
+
+	private static void touch() {
+		lastCallbackAt = android.os.SystemClock.uptimeMillis();
+	}
+
+	// Drops a wedged session and builds a new recognizer in its place.
+	private static void hardRestart() {
+		sessionActive = false;
+		sessionToken += 1;
+		final SpeechRecognizer old = recognizer;
+		recognizer = null;
+		if (old != null) {
+			MAIN.post(() -> {
+				try { old.cancel(); } catch (Exception err) { /* idle */ }
+				try { old.destroy(); } catch (Exception err) { /* gone */ }
+			});
+		}
+		schedule(350);
 	}
 
 	private static void schedule(int delay) {
@@ -227,34 +264,52 @@ final class CapriVoice {
 
 	private static class Listener implements RecognitionListener {
 		@Override public void onReadyForSpeech(Bundle params) {
+			touch();
+			clientErrors = 0;
 			lastText = "";
 			quietStreak = 0;
 		}
 
 		@Override public void onBeginningOfSpeech() {
+			touch();
 			quietStreak = 0;
 		}
 
 		@Override public void onRmsChanged(float rmsdB) {}
 		@Override public void onBufferReceived(byte[] buffer) {}
-		@Override public void onEndOfSpeech() {}
+		@Override public void onEndOfSpeech() {
+			touch();
+		}
 
 		@Override public void onPartialResults(Bundle partial) {
+			touch();
 			handle(partial, false);
 		}
 
 		@Override public void onResults(Bundle results) {
+			touch();
 			sessionActive = false;
+			clientErrors = 0;
 			handle(results, true);
 		}
 
 		@Override
 		public void onError(int error) {
+			touch();
 			sessionActive = false;
 			if (!running) return;
 			if (!wakeMode && !lastText.isEmpty() && !finalSeen) {
 				deliver(lastText);
 				return;
+			}
+			if (error == SpeechRecognizer.ERROR_CLIENT) {
+				clientErrors += 1;
+				// A dead client is the recognizer itself wedged, not the room
+				// being quiet: rebuild it.
+				if (clientErrors >= 2) {
+					hardRestart();
+					return;
+				}
 			}
 			boolean quiet = error == SpeechRecognizer.ERROR_NO_MATCH
 					|| error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
