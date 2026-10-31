@@ -1271,11 +1271,13 @@ async function startListening(force = false) {
   rec.recorder.ondataavailable = (e) => { if (e.data && e.data.size) rec.chunks.push(e.data); };
   rec.recorder.start(120);
 
-  rec.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  const source = rec.audioCtx.createMediaStreamSource(rec.stream);
-  rec.analyser = rec.audioCtx.createAnalyser();
-  rec.analyser.fftSize = 1024;
-  source.connect(rec.analyser);
+  rec.audioCtx = audioCtx();
+  const source = rec.audioCtx?.createMediaStreamSource(rec.stream);
+  rec.analyser = rec.audioCtx?.createAnalyser() || null;
+  if (rec.analyser) {
+    rec.analyser.fftSize = 1024;
+    source?.connect(rec.analyser);
+  }
 
   rec.active = true;
   rec.starting = false;
@@ -1591,11 +1593,13 @@ async function startMicWake() {
     return;
   }
 
-  micWake.ctx = new (window.AudioContext || window.webkitAudioContext)();
-  const source = micWake.ctx.createMediaStreamSource(micWake.stream);
-  micWake.analyser = micWake.ctx.createAnalyser();
-  micWake.analyser.fftSize = 1024;
-  source.connect(micWake.analyser);
+  micWake.ctx = audioCtx();
+  const source = micWake.ctx?.createMediaStreamSource(micWake.stream);
+  micWake.analyser = micWake.ctx?.createAnalyser() || null;
+  if (micWake.analyser) {
+    micWake.analyser.fftSize = 1024;
+    source?.connect(micWake.analyser);
+  }
 
   wakeWord.starting = false;
   wakeWord.active = true;
@@ -1647,7 +1651,7 @@ function stopMicWake() {
   micWake.recorder = null;
   if (micWake.stream) micWake.stream.getTracks().forEach((track) => track.stop());
   micWake.stream = null;
-  if (micWake.ctx) { micWake.ctx.close().catch(() => {}); micWake.ctx = null; }
+  micWake.ctx = null;
   micWake.analyser = null;
   wakeWord.active = false;
   paintWakeWord();
@@ -1867,7 +1871,7 @@ function teardownRecorder() {
   rec.analyser = null;
   if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop());
   rec.stream = null;
-  if (rec.audioCtx) { rec.audioCtx.close().catch(() => {}); rec.audioCtx = null; }
+  rec.audioCtx = null;
   el.body.style.removeProperty("--lvl");
 }
 
@@ -2432,6 +2436,7 @@ function unlockAudio() {
   if (unlocked) return;
   unlocked = true;
   try {
+    audioCtx(); // the shared context, started under this gesture
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (Ctx) {
       const ctx = new Ctx();
