@@ -372,6 +372,12 @@ final class CapriVoice {
 				String next = words[i + 1].replaceAll("[^a-z]", "");
 				if (next.matches("ri|ree|ry|rie")) { hit = true; used = 2; }
 			}
+			// Whisper without a name hint often spells it "Copy". Accept that
+			// only when an actual command follows, so "copy that link" stays a
+			// normal sentence instead of waking her.
+			if (!hit && COPY.contains(word) && i + 1 < words.length && COMMANDS.contains(words[i + 1])) {
+				hit = true;
+			}
 			if (!hit) continue;
 			StringBuilder rest = new StringBuilder();
 			for (int j = i + used; j < words.length; j += 1) {
@@ -410,4 +416,14 @@ final class CapriVoice {
 	private static final java.util.Set<String> WAKE = new java.util.HashSet<>(java.util.Arrays.asList(
 			"capri", "capry", "capree", "caprie", "caprii", "kapri", "kapry", "kabri", "cabri",
 			"caprice", "cappy", "cappi", "capra", "caprio", "capris"));
+
+	private static final java.util.Set<String> COPY = new java.util.HashSet<>(java.util.Arrays.asList(
+			"copy", "copi", "kopy", "copy's"));
+
+	private static final java.util.Set<String> COMMANDS = new java.util.HashSet<>(java.util.Arrays.asList(
+			"open", "play", "pause", "stop", "start", "send", "text", "call", "message", "search",
+			"google", "find", "show", "tell", "what", "who", "when", "where", "how", "why",
+			"turn", "set", "remind", "take", "read", "translate", "summarize", "make", "write",
+			"add", "check", "lock", "unlock", "close", "go", "give", "get", "do", "can", "are",
+			"is", "will", "would", "could", "should", "help", "talk", "say", "sing", "joke"));
 }
