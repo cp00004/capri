@@ -101,17 +101,22 @@ const IS_HOSTED_WEB = !IS_NATIVE && !/^(localhost|127\.0\.0\.1)$/.test(location.
 const DEFAULT_TUNNEL = "https://capricorn.de.deplexo.com";
 const REMOTE_ONLY = IS_GITHUB_PAGES || IS_NATIVE;
 
-// Android ships Google's recognizer behind a native bridge. When it is there,
-// wake and orders go through it instead of recording a clip and waiting for the
-// PC to transcribe.
+// Android ships Capri's own ear behind a native bridge: raw mic, a silent
+// level gate and Whisper on the Capri server. Google's recognizer, and its
+// start tone, is never involved.
 function nativeVoice() {
   if (!IS_NATIVE) return false;
   try { return window.CapriVoice?.available?.() === "1"; } catch { return false; }
 }
 
+// Hand the ear the live backend and tokens right before it opens the mic.
+function pushNativeConfig() {
+  try { window.CapriVoice?.configure?.(JSON.stringify(eyeConfig())); } catch { /* older build */ }
+}
+
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.5.7";
+const APP_VERSION = "4.5.8";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -1130,6 +1135,7 @@ const wakeWord = {
   recognition: null,
   suppressedUntil: 0,
   micEngine: false,
+  permAsked: false,
 };
 if (IS_DESKTOP_APP) localStorage.setItem("capri.wakeWord.engine", "1");
 
@@ -1753,8 +1759,8 @@ async function checkWakeClip(blob) {
   startListening(true);
 }
 
-/* Native ear (Android). Google's recognizer hears the name and the order in one
-   pass, so there is no clip upload and no wait on the PC. */
+/* Native ear (Android). Capri's own mic gate hears the name and the order in one
+   pass, then the server transcribes the clip. No Google tone, no PC wait. */
 let nativeOrder = false;
 let nativeOrderTimer = null;
 
@@ -1774,12 +1780,27 @@ function nativeChime() {
 function startNativeWake() {
   if (!wakeWord.enabled || document.hidden || eyeLive || rec.active || rec.starting
       || state.streaming || state.phase === "thinking" || speech.busy) return;
-  if (!nativeVoice()) { wakeWord.micEngine = true; startMicWake(); return; }
+  if (!nativeVoice()) {
+    if (IS_NATIVE && window.CapriVoice) {
+      // The native ear only needs the mic grant. Never fall back to the web
+      // recognizer on Android: that is Google again, tone included.
+      if (!wakeWord.permAsked) {
+        wakeWord.permAsked = true;
+        try { window.CapriPerms?.request?.('mic'); } catch { /* older build */ }
+      }
+      setTimeout(() => { if (wakeWord.enabled && !document.hidden) startNativeWake(); }, 2500);
+      return;
+    }
+    wakeWord.micEngine = true;
+    startMicWake();
+    return;
+  }
   stopMicWake();
   wakeWord.micEngine = false;
   wakeWord.active = true;
   wakeWord.starting = false;
   paintWakeWord();
+  pushNativeConfig();
   try { window.CapriVoice.startWake(); } catch { /* older build */ }
 }
 
@@ -1792,6 +1813,7 @@ function armNativeOrderWatchdog(ms) {
     if (!nativeOrderRetried) {
       // One quiet retry before declaring the take lost.
       nativeOrderRetried = true;
+      pushNativeConfig();
       try { window.CapriVoice.listen(); } catch { /* older build */ }
       armNativeOrderWatchdog(10000);
       return;
@@ -1818,6 +1840,7 @@ function startNativeOrder(force = false) {
   setPhase("listening");
   clearHeard();
   nativeChime();
+  pushNativeConfig();
   try {
     window.CapriVoice.listen();
   } catch {
@@ -1864,9 +1887,10 @@ window.capriVoiceHeard = (text, remainder) => {
 window.capriVoiceError = (code) => {
   clearTimeout(nativeOrderTimer);
   nativeOrderTimer = null;
-  if (nativeOrder && !nativeOrderRetried) {
+  if (nativeOrder && !nativeOrderRetried && code !== "unavailable") {
     // A failed take gets one more try before the page admits defeat.
     nativeOrderRetried = true;
+    pushNativeConfig();
     try { window.CapriVoice.listen(); } catch { /* older build */ }
     armNativeOrderWatchdog(10000);
     return;
@@ -1877,11 +1901,19 @@ window.capriVoiceError = (code) => {
   wakeWord.chimed = false;
   if (wasOrder) {
     setPhase("idle");
-    showNotice("The phone's recognizer did not answer. Tap the mic and try again.", null, null, 7000);
+    showNotice("Capri's ear did not answer. Tap the mic and try again.", null, null, 7000);
     resumeWakeWord();
     return;
   }
   if (code === "unavailable") {
+    if (IS_NATIVE && window.CapriVoice) {
+      if (!wakeWord.permAsked) {
+        wakeWord.permAsked = true;
+        try { window.CapriPerms?.request?.('mic'); } catch { /* older build */ }
+      }
+      setTimeout(() => { if (wakeWord.enabled && !document.hidden) startNativeWake(); }, 3000);
+      return;
+    }
     wakeWord.micEngine = true;
     startMicWake();
     return;

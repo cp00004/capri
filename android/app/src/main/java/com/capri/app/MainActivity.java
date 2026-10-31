@@ -446,6 +446,13 @@ public class MainActivity extends BridgeActivity {
 			return CapriVoice.available(MainActivity.this) ? "1" : "0";
 		}
 
+		// The ear transcribes through the Capri server, so it needs the live
+		// backend address and pair/session tokens before it opens the mic.
+		@JavascriptInterface
+		public void configure(String config) {
+			EyePrefs.save(MainActivity.this, config);
+		}
+
 		@JavascriptInterface
 		public String startWake() {
 			runOnUiThread(() -> CapriVoice.start(MainActivity.this, true, voiceSink));

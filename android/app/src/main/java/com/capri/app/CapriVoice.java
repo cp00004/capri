@@ -2,24 +2,28 @@ package com.capri.app;
 
 import android.Manifest;
 import android.content.Context;
-import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
-import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.speech.RecognitionListener;
-import android.speech.RecognizerIntent;
-import android.speech.SpeechRecognizer;
+import android.os.SystemClock;
 
-import java.util.ArrayList;
+import org.json.JSONObject;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.ArrayDeque;
 import java.util.Locale;
 
-// Phone-side ear: Google's own recognizer instead of shipping audio to the PC.
-// It is a singleton because Android only allows one recognition session, and the
-// activity (app open) and the service (app closed) take turns using it.
+// Capri's own ear. Raw mic audio, a silent level gate, and Whisper on the Capri
+// server. Google's recognizer is never opened, so its start tone never plays.
 final class CapriVoice {
 	interface Sink {
 		void onHeard(String text, String remainder);
@@ -27,336 +31,327 @@ final class CapriVoice {
 	}
 
 	private static final Handler MAIN = new Handler(Looper.getMainLooper());
-	private static SpeechRecognizer recognizer;
+	private static final int RATE = 16000;
+	private static final int FRAME = RATE / 10;       // 100 ms
+	private static final double MIN_RMS = 380;
+	private static final double MAX_GATE = 3200;
+	private static final int ONSET = 2;               // 200 ms of voice opens a take
+	private static final int HANGOVER = 9;            // 900 ms of quiet closes it
+	private static final int PREROLL = 4;             // 400 ms kept before the first word
+	private static final int MAX_SECONDS = 12;
+	private static final int ORDER_WAIT_MS = 12000;   // no voice at all: give up
+
 	private static Context app;
 	private static Sink sink;
 	private static boolean running;
 	private static boolean wakeMode;
-	private static boolean finalSeen;
-	private static boolean sessionActive;
-	private static boolean restartQueued;
-	private static int quietStreak;
-	private static int clientErrors;
-	private static long sessionToken;
-	private static long sessionStartedAt;
-	private static long lastCallbackAt;
-	private static String lastText = "";
-
-	// Idle listening is a silent level check on the mic. Google's recognizer
-	// only starts once a voice is actually there, so its start tone cannot
-	// flicker on and off while the room is quiet.
-	private static final int VAD_RATE = 16000;
-	private static final double VAD_RMS = 480;
-	private static volatile boolean vadOn;
-	private static AudioRecord vadRecord;
+	private static long gen;
+	private static String base = "";
+	private static String device = "";
+	private static String session = "";
 
 	private CapriVoice() {}
 
 	static boolean available(Context context) {
-		try { return SpeechRecognizer.isRecognitionAvailable(context); } catch (Exception err) { return false; }
+		try {
+			return context.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+					== PackageManager.PERMISSION_GRANTED;
+		} catch (Exception err) { return false; }
 	}
 
-	static boolean running() {
-		return running;
-	}
+	static boolean running() { return running; }
 
 	// wake=true listens until the name is said; wake=false is a single order.
 	static void start(Context context, boolean wake, Sink cb) {
-		Context appCtx = context.getApplicationContext();
-		if (running && app != null && wakeMode == wake) {
-			// Same ear, new callbacks. Rebuilding the session here is what made
-			// the recognizer click every time the page re-armed the wake word.
-			sink = cb;
-			if (!sessionActive && !restartQueued && !vadOn) schedule(0);
-			return;
+		Context ctx = context.getApplicationContext();
+		app = ctx;
+		readConfig(ctx);
+		synchronized (CapriVoice.class) {
+			if (running && wakeMode == wake) {
+				sink = cb;
+				return;
+			}
+			running = false;
+			gen += 1;
+			MAIN.postDelayed(() -> begin(wake, cb), 200);
 		}
-		if (!available(context)) {
-			release();
-			if (cb != null) cb.onError("unavailable");
-			return;
-		}
-		boolean modeChanged = running && wakeMode != wake;
-		app = appCtx;
-		sink = cb;
-		wakeMode = wake;
-		running = true;
-		finalSeen = false;
-		lastText = "";
-		quietStreak = 0;
-		clientErrors = 0;
-		if (modeChanged) {
-			// Cancel only; the recognizer object is reused.
-			sessionActive = false;
-			sessionToken += 1;
-			final SpeechRecognizer r = recognizer;
-			if (r != null) { try { r.cancel(); } catch (Exception err) { /* idle */ } }
-			restartQueued = true;
-			MAIN.postDelayed(() -> {
-				restartQueued = false;
-				if (!running) return;
-				if (wakeMode) startVad();
-				else listen();
-			}, 300);
-			return;
-		}
-		// A warm recognizer still has to finish its cancel before it can start
-		// again; giving it a beat avoids a busy error and an extra retry.
-		MAIN.postDelayed(() -> {
-			if (!running) return;
-			if (wakeMode) startVad();
-			else listen();
-		}, recognizer == null ? 0 : 200);
 	}
 
-	// Ends the current take but keeps the recognizer warm for the next one.
 	static void stop() {
-		running = false;
-		sessionActive = false;
-		restartQueued = false;
-		finalSeen = false;
-		sink = null;
-		sessionToken += 1;
-		haltVad();
-		final SpeechRecognizer r = recognizer;
-		if (r != null) {
-			MAIN.post(() -> {
-				try { r.cancel(); } catch (Exception err) { /* already idle */ }
-			});
+		synchronized (CapriVoice.class) {
+			running = false;
+			gen += 1;
+			sink = null;
 		}
 	}
 
-	// Turns the ear off for good: the next start builds a fresh session.
 	static void release() {
 		stop();
-		final SpeechRecognizer r = recognizer;
-		recognizer = null;
-		if (r != null) {
-			MAIN.post(() -> {
-				try { r.destroy(); } catch (Exception err) { /* already gone */ }
-			});
+	}
+
+	private static void begin(boolean wake, Sink cb) {
+		synchronized (CapriVoice.class) {
+			if (running || app == null) return;
+			running = true;
+			wakeMode = wake;
+			sink = cb;
+			final long mine = ++gen;
+			Thread t = new Thread(() -> loop(mine), "capri-ear");
+			t.start();
 		}
 	}
 
-	// ── Silent gate ──────────────────────────────────────────────────────────
-	// While climbing for the name the ear only watches the mic level. Google's
-	// recognizer (and its start tone) runs only once there is a voice.
-	private static void startVad() {
-		if (!running || !wakeMode || sessionActive || restartQueued) return;
+	private static boolean alive(long mine) {
 		synchronized (CapriVoice.class) {
-			if (vadOn) return;
-			vadOn = true;
+			return running && mine == gen;
 		}
-		if (app == null || app.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-				!= PackageManager.PERMISSION_GRANTED) {
-			vadOn = false;
-			schedule(5000);
+	}
+
+	private static void loop(long mine) {
+		if (!available(app)) {
+			fail(mine, "unavailable");
 			return;
 		}
-		Thread t = new Thread(CapriVoice::vadLoop, "capri-vad");
-		t.start();
-	}
-
-	private static void vadLoop() {
-		AudioRecord r = null;
-		boolean handoff = false;
-		try {
-			int min = AudioRecord.getMinBufferSize(VAD_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-			if (min <= 0) min = VAD_RATE / 5;
-			r = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, VAD_RATE,
-					AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, 3200));
-			if (r.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("vad init");
-			synchronized (CapriVoice.class) {
-				if (!vadOn) { r.release(); return; }
-				vadRecord = r;
+		// Let the tap chime finish before the mic opens.
+		if (!wakeMode) sleep(240);
+		while (alive(mine)) {
+			readConfig(app);
+			long started = SystemClock.uptimeMillis();
+			AudioRecord r = openRecorder();
+			if (r == null) {
+				if (!alive(mine)) return;
+				fail(mine, "unavailable");
+				return;
 			}
-			r.startRecording();
-			short[] buf = new short[1600];
-			int loud = 0;
-			while (vadOn && running) {
-				int n = r.read(buf, 0, buf.length);
-				if (n < 0) break;
-				if (n == 0) continue;
-				double sum = 0;
-				for (int i = 0; i < n; i += 1) {
-					double v = buf[i];
-					sum += v * v;
-				}
-				double rms = Math.sqrt(sum / n);
-				if (rms > VAD_RMS) {
-					loud += 1;
-					if (loud >= 2) {
-						handoff = true;
-						haltVad();
-						MAIN.postDelayed(() -> { if (running) listen(); }, 240);
-						return;
-					}
-				} else {
-					loud = 0;
-				}
+			byte[] clip;
+			try {
+				r.startRecording();
+				clip = capture(r, mine, started);
+			} catch (Exception err) {
+				clip = null;
+			} finally {
+				releaseRecorder(r);
 			}
-		} catch (Exception err) {
-			/* the recognizer loop covers a mic the gate cannot open */
-		} finally {
-			vadOn = false;
-			AudioRecord cur;
-			synchronized (CapriVoice.class) {
-				cur = vadRecord;
-				if (cur == r) vadRecord = null;
+			if (!alive(mine)) return;
+			if (clip == null) {
+				if (!wakeMode) { fail(mine, "no_speech"); return; }
+				continue;
 			}
-			if (cur == r) releaseRecord(r);
-			if (!handoff && running && wakeMode && !sessionActive) schedule(5000);
+			String text = transcribe(clip);
+			if (!alive(mine)) return;
+			if (text == null) {
+				// No answer from the server: stay silent and try again later.
+				if (!wakeMode) { fail(mine, "network"); return; }
+				sleep(2500);
+				continue;
+			}
+			text = text.trim();
+			if (text.isEmpty()) {
+				if (!wakeMode) { fail(mine, "no_speech"); return; }
+				continue;
+			}
+			if (wakeMode) {
+				String rest = wakeRemainder(text);
+				if (rest == null) continue;
+				deliver(mine, text, rest);
+				return;
+			}
+			deliver(mine, text, "");
+			return;
 		}
 	}
 
-	private static void haltVad() {
-		vadOn = false;
-		AudioRecord r;
-		synchronized (CapriVoice.class) {
-			r = vadRecord;
-			vadRecord = null;
+	// ── Capture ─────────────────────────────────────────────────────────────
+	// One take: wait for a voice through a silent level gate, keep a short
+	// pre-roll, then close the take after a beat of quiet.
+	private static byte[] capture(AudioRecord r, long mine, long started) {
+		short[] buf = new short[FRAME];
+		ArrayDeque<short[]> pre = new ArrayDeque<>();
+		ByteArrayOutputStream pcm = new ByteArrayOutputStream();
+		double floor = 220;
+		int voiced = 0;
+		int quiet = 0;
+		boolean speech = false;
+		int maxBytes = RATE * 2 * MAX_SECONDS;
+		while (alive(mine)) {
+			int n = r.read(buf, 0, buf.length);
+			if (n < 0) return null;
+			if (n == 0) continue;
+			double rms = rms(buf, n);
+			double gate = Math.min(MAX_GATE, Math.max(MIN_RMS, floor * 2.4));
+			boolean loud = rms > gate;
+			if (!speech) {
+				floor = floor * 0.97 + rms * 0.03;
+				short[] keep = new short[n];
+				System.arraycopy(buf, 0, keep, 0, n);
+				pre.addLast(keep);
+				while (pre.size() > PREROLL + ONSET) pre.removeFirst();
+				voiced = loud ? voiced + 1 : 0;
+				if (voiced >= ONSET) {
+					speech = true;
+					for (short[] f : pre) write(pcm, f, f.length);
+					pre.clear();
+				} else if (!wakeMode && SystemClock.uptimeMillis() - started > ORDER_WAIT_MS) {
+					return null;
+				}
+				continue;
+			}
+			write(pcm, buf, n);
+			quiet = loud ? 0 : quiet + 1;
+			if (quiet >= HANGOVER || pcm.size() >= maxBytes) break;
 		}
-		releaseRecord(r);
+		if (!speech) return null;
+		return wav(pcm);
 	}
 
-	private static void releaseRecord(AudioRecord r) {
+	private static double rms(short[] buf, int n) {
+		double sum = 0;
+		for (int i = 0; i < n; i += 1) {
+			double v = buf[i];
+			sum += v * v;
+		}
+		return Math.sqrt(sum / n);
+	}
+
+	private static void write(ByteArrayOutputStream out, short[] buf, int n) {
+		for (int i = 0; i < n; i += 1) {
+			int v = buf[i];
+			out.write(v & 0xff);
+			out.write((v >> 8) & 0xff);
+		}
+	}
+
+	private static byte[] wav(ByteArrayOutputStream pcm) {
+		byte[] data = pcm.toByteArray();
+		ByteBuffer b = ByteBuffer.allocate(44 + data.length).order(ByteOrder.LITTLE_ENDIAN);
+		b.put("RIFF".getBytes());
+		b.putInt(36 + data.length);
+		b.put("WAVE".getBytes());
+		b.put("fmt ".getBytes());
+		b.putInt(16);
+		b.putShort((short) 1);
+		b.putShort((short) 1);
+		b.putInt(RATE);
+		b.putInt(RATE * 2);
+		b.putShort((short) 2);
+		b.putShort((short) 16);
+		b.put("data".getBytes());
+		b.putInt(data.length);
+		b.put(data);
+		return b.array();
+	}
+
+	private static AudioRecord openRecorder() {
+		for (int attempt = 0; attempt < 8; attempt += 1) {
+			AudioRecord r = null;
+			try {
+				int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO,
+						AudioFormat.ENCODING_PCM_16BIT);
+				if (min <= 0) min = RATE;
+				r = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE,
+						AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT,
+						Math.max(min, RATE * 2));
+				if (r.getState() == AudioRecord.STATE_INITIALIZED) return r;
+				releaseRecorder(r);
+			} catch (Exception err) {
+				releaseRecorder(r);
+			}
+			sleep(120);
+			if (!running) return null;
+		}
+		return null;
+	}
+
+	private static void releaseRecorder(AudioRecord r) {
 		if (r == null) return;
 		try { r.stop(); } catch (Exception err) { /* idle */ }
 		try { r.release(); } catch (Exception err) { /* gone */ }
 	}
 
-	private static void listen() {
-		haltVad();
-		if (!running || app == null || sessionActive || restartQueued) return;
-		if (recognizer == null) {
-			try {
-				recognizer = SpeechRecognizer.createSpeechRecognizer(app);
-			} catch (Exception err) {
-				release();
-				Sink cb = sink;
-				if (cb != null) cb.onError("unavailable");
-				return;
-			}
-			recognizer.setRecognitionListener(new Listener());
-		}
-		sessionActive = true;
-		final long token = ++sessionToken;
-		touch();
-		sessionStartedAt = lastCallbackAt;
+	// ── Server transcription ────────────────────────────────────────────────
+	private static String transcribe(byte[] clip) {
+		if (base.isEmpty() || clip == null || clip.length < 45) return null;
+		HttpURLConnection conn = null;
 		try {
-			recognizer.startListening(intent());
+			conn = (HttpURLConnection) new URL(base + "/api/stt").openConnection();
+			conn.setConnectTimeout(8000);
+			conn.setReadTimeout(25000);
+			conn.setRequestMethod("POST");
+			conn.setDoOutput(true);
+			conn.setRequestProperty("Content-Type", "audio/wav");
+			conn.setRequestProperty("Accept", "application/json");
+			conn.setRequestProperty("User-Agent", "Capri-Android");
+			if (!device.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + device);
+			if (!session.isEmpty()) conn.setRequestProperty("X-Capri-Profile", session);
+			conn.setFixedLengthStreamingMode(clip.length);
+			try (OutputStream out = conn.getOutputStream()) {
+				out.write(clip);
+			}
+			int code = conn.getResponseCode();
+			InputStream in = code >= 400 ? conn.getErrorStream() : conn.getInputStream();
+			if (in == null) return null;
+			ByteArrayOutputStream raw = new ByteArrayOutputStream();
+			byte[] chunk = new byte[4096];
+			int read;
+			while ((read = in.read(chunk)) > 0) raw.write(chunk, 0, read);
+			in.close();
+			if (code >= 400) return null;
+			JSONObject json = new JSONObject(raw.toString("UTF-8"));
+			return json.optString("text", "");
 		} catch (Exception err) {
-			sessionActive = false;
-			schedule(1000);
-			return;
-		}
-		// A session that never calls back would leave her deaf until the next
-		// rebuild. If nothing at all arrives, rebuild it.
-		MAIN.postDelayed(() -> {
-			if (running && token == sessionToken && sessionActive
-					&& lastCallbackAt == sessionStartedAt
-					&& android.os.SystemClock.uptimeMillis() - sessionStartedAt > 8000) {
-				hardRestart();
-			}
-		}, 8500);
-	}
-
-	private static void touch() {
-		lastCallbackAt = android.os.SystemClock.uptimeMillis();
-	}
-
-	// Drops a wedged session and builds a new recognizer in its place.
-	private static void hardRestart() {
-		sessionActive = false;
-		sessionToken += 1;
-		final SpeechRecognizer old = recognizer;
-		recognizer = null;
-		if (old != null) {
-			MAIN.post(() -> {
-				try { old.cancel(); } catch (Exception err) { /* idle */ }
-				try { old.destroy(); } catch (Exception err) { /* gone */ }
-			});
-		}
-		schedule(350);
-	}
-
-	private static void schedule(int delay) {
-		if (!running || restartQueued) return;
-		restartQueued = true;
-		MAIN.postDelayed(() -> {
-			restartQueued = false;
-			if (!running) return;
-			if (wakeMode) startVad();
-			else listen();
-		}, delay);
-	}
-
-	private static void cancelCurrent() {
-		sessionActive = false;
-		sessionToken += 1;
-		final SpeechRecognizer r = recognizer;
-		if (r != null) {
-			MAIN.post(() -> {
-				try { r.cancel(); } catch (Exception err) { /* idle */ }
-			});
+			return null;
+		} finally {
+			if (conn != null) conn.disconnect();
 		}
 	}
 
-	// While hunting for the name she is mostly hearing silence, so every
-	// restart is spread further apart. That is quieter on the speaker, easier on
-	// the battery, and still reacts the moment a voice lands.
-	private static int quietDelay() {
-		return Math.min(2600, 750 + 400 * quietStreak);
+	private static void readConfig(Context ctx) {
+		String b = "";
+		String d = "";
+		String s = "";
+		try {
+			JSONObject cfg = new JSONObject(EyePrefs.load(ctx));
+			b = cfg.optString("base", "").trim();
+			d = cfg.optString("token", "").trim();
+			s = cfg.optString("session", "").trim();
+		} catch (Exception err) { /* no config yet */ }
+		while (b.endsWith("/")) b = b.substring(0, b.length() - 1);
+		base = b;
+		device = d;
+		session = s;
 	}
 
-	private static Intent intent() {
-		Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-		intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-		intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US");
-		intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-		intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
-		intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, wakeMode ? 5000 : 1600);
-		intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, wakeMode ? 8000 : 2400);
-		intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 800);
-		return intent;
-	}
-
-	private static void handle(Bundle bundle, boolean isFinal) {
-		if (!running || bundle == null) return;
-		ArrayList<String> list = bundle.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-		if (list == null || list.isEmpty()) return;
-		String text = String.valueOf(list.get(0) == null ? "" : list.get(0)).trim();
-		if (text.isEmpty()) return;
-		lastText = text;
-		if (!isFinal) {
-			quietStreak = 0;
-			// The name plus an order in one breath: act on the partial instead
-			// of waiting for the recognizer to close the take.
-			if (wakeMode) {
-				String rest = wakeRemainder(text);
-				if (rest != null && !rest.isEmpty()) deliver(text);
-			}
-			return;
+	private static void sleep(long ms) {
+		long end = SystemClock.uptimeMillis() + ms;
+		while (SystemClock.uptimeMillis() < end) {
+			long left = end - SystemClock.uptimeMillis();
+			if (left <= 0) return;
+			try { Thread.sleep(Math.min(120, left)); } catch (InterruptedException err) { return; }
 		}
-		finalSeen = true;
-		deliver(text);
 	}
 
-	private static void deliver(String text) {
-		final String remainder = wakeRemainder(text);
-		if (wakeMode) {
-			if (remainder == null) {
-				// Not the name: keep the ear open, without hammering the mic.
-				schedule(550);
-				return;
-			}
-			Sink cb = sink;
-			stop();
-			if (cb != null) cb.onHeard(text, remainder);
-			return;
+	private static void deliver(long mine, String text, String rest) {
+		Sink cb;
+		synchronized (CapriVoice.class) {
+			if (!running || mine != gen) return;
+			running = false;
+			gen += 1;
+			cb = sink;
+			sink = null;
 		}
-		Sink cb = sink;
-		stop();
-		if (cb != null) cb.onHeard(text, "");
+		if (cb != null) cb.onHeard(text, rest);
+	}
+
+	private static void fail(long mine, String code) {
+		Sink cb;
+		synchronized (CapriVoice.class) {
+			if (!running || mine != gen) return;
+			running = false;
+			gen += 1;
+			cb = sink;
+			sink = null;
+		}
+		if (cb != null) cb.onError(code);
 	}
 
 	// null when the sentence does not contain the name; "" when only the name.
@@ -384,85 +379,6 @@ final class CapriVoice {
 			return rest.toString().trim();
 		}
 		return null;
-	}
-
-	private static class Listener implements RecognitionListener {
-		@Override public void onReadyForSpeech(Bundle params) {
-			touch();
-			clientErrors = 0;
-			lastText = "";
-			quietStreak = 0;
-		}
-
-		@Override public void onBeginningOfSpeech() {
-			touch();
-			quietStreak = 0;
-		}
-
-		@Override public void onRmsChanged(float rmsdB) {}
-		@Override public void onBufferReceived(byte[] buffer) {}
-		@Override public void onEndOfSpeech() {
-			touch();
-			// Some recognizers stop talking after end-of-speech and never send a
-			// final result. If nothing arrives, take the partial and move on.
-			final long token = sessionToken;
-			MAIN.postDelayed(() -> {
-				if (!running || token != sessionToken || !sessionActive || restartQueued) return;
-				sessionActive = false;
-				if (!lastText.isEmpty() && !finalSeen) {
-					if (wakeMode) {
-						String rest = wakeRemainder(lastText);
-						if (rest != null && !rest.isEmpty()) {
-							deliver(lastText);
-							return;
-						}
-					} else {
-						deliver(lastText);
-						return;
-					}
-				}
-				cancelCurrent();
-				schedule(quietDelay());
-			}, 1500);
-		}
-
-		@Override public void onPartialResults(Bundle partial) {
-			touch();
-			handle(partial, false);
-		}
-
-		@Override public void onResults(Bundle results) {
-			touch();
-			sessionActive = false;
-			clientErrors = 0;
-			handle(results, true);
-		}
-
-		@Override
-		public void onError(int error) {
-			touch();
-			sessionActive = false;
-			if (!running) return;
-			if (!wakeMode && !lastText.isEmpty() && !finalSeen) {
-				deliver(lastText);
-				return;
-			}
-			if (error == SpeechRecognizer.ERROR_CLIENT) {
-				clientErrors += 1;
-				// A dead client is the recognizer itself wedged, not the room
-				// being quiet: rebuild it.
-				if (clientErrors >= 2) {
-					hardRestart();
-					return;
-				}
-			}
-			boolean quiet = error == SpeechRecognizer.ERROR_NO_MATCH
-					|| error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
-			quietStreak = quiet ? Math.min(5, quietStreak + 1) : 0;
-			schedule(error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY ? 1500 : quietDelay());
-		}
-
-		@Override public void onEvent(int eventType, Bundle params) {}
 	}
 
 	private static final java.util.Set<String> WAKE = new java.util.HashSet<>(java.util.Arrays.asList(
