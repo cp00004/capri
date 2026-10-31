@@ -460,7 +460,7 @@ public class MainActivity extends BridgeActivity {
 
 		@JavascriptInterface
 		public void stop() {
-			runOnUiThread(CapriVoice::stop);
+			runOnUiThread(CapriVoice::release);
 		}
 
 		// An order heard while Capri was closed, handed over at launch.

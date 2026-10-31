@@ -1156,7 +1156,7 @@ public class EyeService extends Service {
 	public void onDestroy() {
 		running = false;
 		bgVoice = false;
-		CapriVoice.stop();
+		CapriVoice.release();
 		stopWatching();
 		stopNnn();
 		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE);

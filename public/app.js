@@ -111,7 +111,7 @@ function nativeVoice() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.5.4";
+const APP_VERSION = "4.5.5";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -1160,7 +1160,13 @@ function audioCtx() {
   return capriAudioCtx;
 }
 
+let lastChimeAt = 0;
+
 function playListeningChime() {
+  // One chime per turn: re-arming the ear must never turn into a click loop.
+  const now = Date.now();
+  if (now - lastChimeAt < 1200) return;
+  lastChimeAt = now;
   try {
     const ctx = audioCtx();
     if (!ctx) return;
