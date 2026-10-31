@@ -1140,14 +1140,25 @@ function resumeWakeWord() {
   if (wakeWord.enabled && !document.hidden) setTimeout(startWakeWord, 250);
 }
 
+// One audio context, resumed on sight. Chromium parks a context that nobody
+// started with a click, and a parked context feeds the analyser flat silence -
+// which is how "Capri" fell on a deaf ear and the listening ping came out mute.
+let capriAudioCtx = null;
+function audioCtx() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  if (!capriAudioCtx || capriAudioCtx.state === "closed") capriAudioCtx = new Ctx();
+  if (capriAudioCtx.state === "suspended") capriAudioCtx.resume().catch(() => {});
+  return capriAudioCtx;
+}
+
 function playListeningChime() {
   try {
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
+    const ctx = audioCtx();
+    if (!ctx) return;
     const oscillator = ctx.createOscillator();
     const gain = ctx.createGain();
-    const start = ctx.currentTime;
+    const start = ctx.currentTime + 0.02;
     oscillator.type = "sine";
     oscillator.frequency.setValueAtTime(740, start);
     oscillator.frequency.setValueAtTime(980, start + 0.075);
@@ -1155,7 +1166,7 @@ function playListeningChime() {
     gain.gain.exponentialRampToValueAtTime(0.08, start + 0.012);
     gain.gain.exponentialRampToValueAtTime(0.001, start + 0.18);
     oscillator.connect(gain).connect(ctx.destination);
-    oscillator.onended = () => ctx.close().catch(() => {});
+    oscillator.onended = () => { oscillator.disconnect(); gain.disconnect(); };
     oscillator.start(start);
     oscillator.stop(start + 0.19);
   } catch {

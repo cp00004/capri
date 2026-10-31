@@ -1160,14 +1160,106 @@ const NNN_DOMAINS = [
   "camsoda.com", "www.camsoda.com", "bongacams.com", "mydirtyhobby.com", "fetlife.com", "kink.com",
 ];
 
+const NNN_FILE_LIST = () => path.join(app.getPath("userData"), "no-nut-domains.json");
+const NNN_LIST_URL = "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts";
+// Windows reads the hosts file through the DNS cache, so a huge list is real
+// CPU. The full list still decides what is blocked on screen; only this many
+// go into the hosts file.
+const NNN_HOSTS_CAP = 20000;
+const NNN_VEIL_MS = 20_000;
+
+// The curated list is what she knows even with no network; the downloaded one
+// is what makes "every single porn website" actually mean it.
+let nnnExtraDomains = [];
+
+function nnnStoredDomains() {
+  try {
+    const raw = readJson(NNN_FILE_LIST());
+    const list = Array.isArray(raw?.domains) ? raw.domains : [];
+    nnnExtraDomains = list.map((d) => String(d || "").trim().toLowerCase()).filter(Boolean).slice(0, 60000);
+  } catch { /* first run, curated list only */ }
+}
+
+function nnnAllDomains() {
+  const seen = new Set();
+  const out = [];
+  for (const host of [...NNN_DOMAINS, ...nnnExtraDomains]) {
+    const clean = String(host || "").trim().toLowerCase().replace(/^www\./, "");
+    if (!clean || clean === "localhost" || seen.has(clean)) continue;
+    seen.add(clean);
+    out.push(clean);
+  }
+  return out;
+}
+
+// Pull the public blocklist once a day. Domains only - nothing is fetched from
+// the sites themselves.
+async function nnnPullList(force = false) {
+  const age = (() => { try { return Date.now() - Number(readJson(NNN_FILE_LIST())?.fetchedAt || 0); } catch { return Infinity; } })();
+  if (!force && age < 24 * 3600_000 && nnnExtraDomains.length) return nnnExtraDomains.length;
+  try {
+    const res = await fetch(NNN_LIST_URL, { signal: AbortSignal.timeout(45_000) });
+    if (!res.ok) throw new Error(`http ${res.status}`);
+    const text = await res.text();
+    const found = new Set();
+    for (const line of text.split(/\r?\n/)) {
+      const m = /^\s*0\.0\.0\.0\s+([a-z0-9][a-z0-9.-]*)\s*$/i.exec(line);
+      if (!m) continue;
+      const host = m[1].toLowerCase();
+      if (host === "localhost" || host === "local" || !host.includes(".")) continue;
+      found.add(host);
+    }
+    const domains = [...found];
+    if (!domains.length) throw new Error("no domains parsed");
+    writeJson(NNN_FILE_LIST(), { fetchedAt: Date.now(), domains });
+    nnnExtraDomains = domains;
+    logLine(`nnn: blocklist has ${domains.length} sites`);
+    return domains.length;
+  } catch (err) {
+    logLine(`nnn: blocklist fetch failed (${err.message}) - using the list on disk`);
+    return nnnExtraDomains.length;
+  }
+}
+
+// A page title or window title carrying a domain she has never heard of still
+// counts. Roots are indexed once per list, then a title is only as expensive as
+// the number of words in it.
+let nnnRoots = new Set();
+let nnnRootsFor = null;
+
+function nnnIndexRoots() {
+  if (nnnRootsFor === nnnExtraDomains) return;
+  nnnRootsFor = nnnExtraDomains;
+  nnnRoots = new Set();
+  for (const host of nnnExtraDomains) {
+    const labels = host.split(".").filter(Boolean);
+    const root = labels.length > 1 ? labels[labels.length - 2] : labels[0];
+    if (root && root.length > 3 && !NNN_PATTERN.test(root)) nnnRoots.add(root);
+  }
+}
+
+function nnnDomainHit(text) {
+  const clean = String(text || "").toLowerCase().replace(/[^a-z0-9.]+/g, " ").trim();
+  if (!clean) return "";
+  nnnIndexRoots();
+  for (const word of clean.split(" ")) {
+    if (word.length > 3 && nnnRoots.has(word)) return word;
+  }
+  return "";
+}
+
 const nnnFile = () => path.join(app.getPath("userData"), "no-nut-november.json");
 let nnn = { active: false, awaitingCode: false, since: 0, releaseAt: 0, kills: 0, wrongCodes: 0, sites: false, lastKill: "" };
 let nnnTimer = null;
 let nnnSweeping = false;
 
 function nnnLoad() {
+  nnnStoredDomains();
   nnn = { ...nnn, ...(readJson(nnnFile()) || {}) };
-  if (nnn.active) nnnStart();
+  if (nnn.active) {
+    nnnStart();
+    nnnPullList().then((count) => { if (nnn.active && count) nnnHosts(true); }).catch(() => {});
+  }
 }
 
 function nnnSave() {
@@ -1190,7 +1282,8 @@ function nnnHosts(on) {
     const raw = fs.readFileSync(file, "utf8");
     const stripped = raw.split(/\r?\n/).filter((line) => !line.includes(NNN_MARK)).join("\r\n");
     if (on) {
-      const block = NNN_DOMAINS.map((host) => `127.0.0.1 ${String(host).trim()} # ${NNN_MARK}`).join("\r\n");
+      const block = nnnAllDomains().slice(0, NNN_HOSTS_CAP)
+        .map((host) => `127.0.0.1 ${host} # ${NNN_MARK}`).join("\r\n");
       fs.writeFileSync(file, `${stripped}\r\n${block}\r\n`);
     } else {
       fs.writeFileSync(file, `${stripped}\r\n`);
@@ -1201,6 +1294,102 @@ function nnnHosts(on) {
   } catch {
     nnn.sites = false;
     return false;
+  }
+}
+
+/* The black screen. Nothing on it can be clicked and it sits above everything,
+   so the page she tried to open is simply gone from the monitor for a moment. */
+let nnnVeils = [];
+let nnnVeilUntil = 0;
+let nnnVeilTimer = null;
+
+function nnnVeilPage(seconds) {
+  const html = `<!doctype html><meta charset="utf-8"><title>Capri</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden;user-select:none;cursor:none}
+.wrap{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+font:600 15px/1.4 ui-monospace,Consolas,monospace;color:#ff4fa3;letter-spacing:.28em;text-transform:uppercase}
+.big{font-size:34px;text-shadow:0 0 18px rgba(255,79,163,.55)}
+.dim{color:#7d8898;letter-spacing:.2em;font-size:12px}
+.bar{width:200px;height:2px;background:#221018;position:relative;overflow:hidden}
+.bar i{position:absolute;inset:0;background:#ff4fa3;transform-origin:left;animation:drain ${seconds}s linear forwards}
+@keyframes drain{to{transform:scaleX(0)}}</style>
+<div class="wrap"><div class="big">no nut november</div><div>this screen is closed</div>
+<div class="dim" id="c">${seconds}s</div><div class="bar"><i></i></div></div>
+<script>const t=document.getElementById('c');let s=${seconds};
+const k=setInterval(()=>{s-=1;t.textContent=Math.max(0,s)+'s';if(s<=0)clearInterval(k)},1000);
+addEventListener('keydown',(e)=>e.preventDefault());addEventListener('contextmenu',(e)=>e.preventDefault());</script>`;
+  return "data:text/html;charset=utf-8," + encodeURIComponent(html);
+}
+
+function nnnVeilShow(holdMs = NNN_VEIL_MS) {
+  nnnVeilUntil = Math.max(nnnVeilUntil, Date.now() + holdMs);
+  const seconds = Math.max(1, Math.round(holdMs / 1000));
+  try {
+    const displays = screen.getAllDisplays();
+    // One veil per monitor, thrown away if a screen came and went since.
+    if (nnnVeils.length > displays.length) {
+      nnnVeils.slice(displays.length).forEach((win) => { try { win.destroy(); } catch { /* gone */ } });
+      nnnVeils = nnnVeils.slice(0, displays.length);
+    }
+    displays.forEach((display, index) => {
+      let win = nnnVeils[index];
+      if (!win || win.isDestroyed()) {
+        win = new BrowserWindow({
+          x: display.bounds.x,
+          y: display.bounds.y,
+          width: display.bounds.width,
+          height: display.bounds.height,
+          frame: false,
+          resizable: false,
+          movable: false,
+          minimizable: false,
+          maximizable: false,
+          closable: false,
+          skipTaskbar: true,
+          alwaysOnTop: true,
+          backgroundColor: "#000000",
+          show: false,
+          webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+        });
+        win.setMenuBarVisibility(false);
+        win.setAlwaysOnTop(true, "screen-saver", 1);
+        win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+        nnnVeils[index] = win;
+      }
+      win.setBounds(display.bounds);
+      if (!win.webContents.getURL().startsWith("data:")) win.loadURL(nnnVeilPage(seconds));
+      win.show();
+      win.focus();
+      win.moveTop();
+    });
+    clearTimeout(nnnVeilTimer);
+    nnnVeilTimer = setTimeout(nnnVeilCheck, 1000);
+    return true;
+  } catch (err) {
+    logLine(`nnn: veil failed (${err.message})`);
+    return false;
+  }
+}
+
+// Held down until the clock runs out, so a fresh tab cannot peek through.
+function nnnVeilCheck() {
+  nnnVeilTimer = null;
+  if (!nnn.active) { nnnVeilHide(); return; }
+  if (Date.now() >= nnnVeilUntil) { nnnVeilHide(); return; }
+  nnnVeils.forEach((win) => {
+    if (!win || win.isDestroyed()) return;
+    win.setAlwaysOnTop(true, "screen-saver", 1);
+    if (!win.isVisible()) win.show();
+  });
+  nnnVeilTimer = setTimeout(nnnVeilCheck, 700);
+}
+
+function nnnVeilHide() {
+  nnnVeilUntil = 0;
+  clearTimeout(nnnVeilTimer);
+  nnnVeilTimer = null;
+  for (const win of nnnVeils) {
+    try { if (win && !win.isDestroyed()) win.hide(); } catch { /* gone */ }
   }
 }
 
@@ -1229,11 +1418,13 @@ async function nnnSweep() {
   if (nnnSweeping) return;
   nnnSweeping = true;
   const killed = [];
+  let blocked = "";
   try {
     const rows = await nnnWindows();
     for (const row of rows) {
-      const hit = NNN_PATTERN.test(row.title) || NNN_PATTERN.test(row.proc);
+      const hit = NNN_PATTERN.test(row.title) || NNN_PATTERN.test(row.proc) || nnnDomainHit(row.title);
       if (!hit) continue;
+      blocked = blocked || String(hit);
       // Her own overlay carries the title "Capri" and the code word lives in
       // files, so nothing of hers is ever on this list.
       try { process.kill(row.pid, "SIGKILL"); } catch { /* already gone */ }
@@ -1242,6 +1433,7 @@ async function nnnSweep() {
     }
   } catch { /* a failed sweep only means she looks again in a second */ }
   nnnSweeping = false;
+  if (blocked) nnnVeilShow();
   if (!killed.length) return;
   nnn.kills += killed.length;
   nnn.lastKill = killed[0];
@@ -1269,6 +1461,7 @@ function nnnRelease(reason) {
   nnn.active = false;
   nnn.awaitingCode = false;
   nnnStopTimer();
+  nnnVeilHide();
   if (nnn.sites) nnnHosts(false);
   nnnSave();
   logLine(`nnn: released (${reason})`);
@@ -1291,6 +1484,9 @@ function nnnActivate() {
     kills: 0,
   };
   nnnHosts(true);
+  // The curated list goes into the hosts file at once; the downloaded one lands
+  // a second later and rewrites it with the full weight behind it.
+  nnnPullList().then((count) => { if (nnn.active && count) nnnHosts(true); }).catch(() => {});
   nnnSave();
   nnnStart();
   nnnSweep().catch(() => {});
@@ -1347,6 +1543,15 @@ ipcMain.handle("capri-nnn", async (_event, payload) => {
   if (action === "activate") return nnnActivate();
   if (action === "cancel") return nnnCancel();
   if (action === "code") return nnnCode(payload?.code);
+  // The shared brain holds the switch for every device: "arm" comes from the
+  // server saying the lock is on, "release" comes with the code already checked.
+  if (action === "arm") return nnn.active ? nnnStatus() : nnnActivate();
+  if (action === "release") {
+    nnnRelease(String(payload?.reason || "released by Capri's server"));
+    return { ok: true, active: false, message: "Lock is off." };
+  }
+  // Her own screen test: the veil, for a moment, with nothing armed.
+  if (action === "veil") return { ok: nnnVeilShow(Math.min(60000, Math.max(1000, Number(payload?.ms) || 5000))) };
   return nnnStatus();
 });
 
