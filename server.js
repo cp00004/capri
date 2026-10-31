@@ -1075,6 +1075,52 @@ function nnnPayload(state) {
   };
 }
 
+// The shared NNN switch lives on the hosted backend. A desktop page cannot
+// reach it directly (its localhost origin is not allowed there), so the local
+// server relays the call and mirrors an accepted arm/release into its own file.
+const SHARED_NNN = "https://capricorn.de.deplexo.com";
+
+async function handleSharedNnn(req, res, action) {
+  // Only this machine's own page may relay; a LAN caller gets the local copy.
+  if (!isLoopback(req.socket.remoteAddress)) return false;
+  let target;
+  try {
+    target = new URL(SHARED_NNN);
+  } catch {
+    return false;
+  }
+  if (target.host === String(req.headers.host || "")) return false;
+  let body = null;
+  if (req.method === "POST") {
+    try { body = (await readBody(req, 4000)) || {}; } catch (err) { return json(res, 400, { error: err.message }); }
+  }
+  let upstream;
+  try {
+    upstream = await fetch(`${SHARED_NNN}/api/nnn${action === "state" ? "" : `/${action}`}`, {
+      method: req.method,
+      headers: { "Content-Type": "application/json" },
+      body: body == null ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch {
+    return false;
+  }
+  const text = await upstream.text();
+  res.writeHead(upstream.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(text);
+  if (upstream.ok) {
+    try {
+      const shared = JSON.parse(text);
+      if (action === "arm" && shared.armed) {
+        nnnWrite({ armed: true, since: Number(shared.since) || Date.now(), releaseAt: Number(shared.releaseAt) || 0, wrong: 0 });
+      } else if (action === "release" && shared.armed === false) {
+        nnnWrite({ armed: false, since: 0, releaseAt: 0, wrong: 0 });
+      }
+    } catch { /* the answer still stands */ }
+  }
+  return true;
+}
+
 async function handleNoNutGlobal(req, res, action) {
   if (action === "state") return json(res, 200, nnnPayload(nnnRead()));
 
@@ -2310,9 +2356,18 @@ const handler = async (req, res) => {
 
   // No Nut November travels outside the paired-device gate: the state is public
   // so any device honours it, and both writes are guarded by the code itself.
-  if (req.method === "GET" && pathname === "/api/nnn") return handleNoNutGlobal(req, res, "state");
-  if (req.method === "POST" && pathname === "/api/nnn/arm") return handleNoNutGlobal(req, res, "arm");
-  if (req.method === "POST" && pathname === "/api/nnn/release") return handleNoNutGlobal(req, res, "release");
+  if (req.method === "GET" && pathname === "/api/nnn") {
+    if (await handleSharedNnn(req, res, "state")) return;
+    return handleNoNutGlobal(req, res, "state");
+  }
+  if (req.method === "POST" && pathname === "/api/nnn/arm") {
+    if (await handleSharedNnn(req, res, "arm")) return;
+    return handleNoNutGlobal(req, res, "arm");
+  }
+  if (req.method === "POST" && pathname === "/api/nnn/release") {
+    if (await handleSharedNnn(req, res, "release")) return;
+    return handleNoNutGlobal(req, res, "release");
+  }
 
   // every /api route below needs a local or paired caller
   if (pathname.startsWith("/api/")) {

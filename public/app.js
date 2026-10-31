@@ -2525,7 +2525,9 @@ const BARE_CODE = /^[\s"'.,!?-]*(\d{3,8})[\s"'.,!?-]*$/i;
 // One switch, on the public backend, for every device running Capri. Each box
 // polls it and honours it locally, so arming it here seals PCs and phones alike
 // and nobody has to say the order twice.
-const NNN_SERVER = DEFAULT_TUNNEL;
+// The desktop's page cannot call the hosted switch directly, so it asks its own
+// server, which relays the call and mirrors the answer.
+const NNN_SERVER = OWN_SERVER ? "" : DEFAULT_TUNNEL;
 const NNN_POLL_MS = 180000;
 let nnnGlobal = { armed: false, armedAt: 0, releaseAt: 0, until: "", days: 0, message: "" };
 let nnnLocal = null;       // last answer from this machine's shell
