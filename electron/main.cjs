@@ -105,11 +105,17 @@ function logLine(message) {
 // pinned capri keeps opening the build that is actually running.
 function syncShortcuts() {
   if (process.platform !== "win32") return;
+  const exe = process.execPath;
+  // Only a build living in the versioned install folder may claim the links. A
+  // throwaway build run straight out of a build directory used to rewrite them,
+  // and every shortcut was left pointing at a folder the next release deletes.
+  const roots = [UPD_ROOT, path.join(process.env.ProgramFiles || "", "Capri")];
+  if (!roots.some((root) => root && exe.toLowerCase().startsWith(root.toLowerCase()))) return;
   const links = [
     path.join(app.getPath("desktop"), "Capri.lnk"),
+    path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Capri.lnk"),
     path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Capri", "Capri.lnk"),
   ];
-  const exe = process.execPath;
   const quote = (value) => `'${String(value).replace(/'/g, "''")}'`;
   const script = links.map((link) =>
     `$l=${quote(link)}; if (Test-Path $l) { $s=(New-Object -ComObject WScript.Shell).CreateShortcut($l); ` +
