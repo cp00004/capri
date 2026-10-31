@@ -1136,6 +1136,7 @@ const wakeWord = {
   suppressedUntil: 0,
   micEngine: false,
   permAsked: false,
+  permTries: 0,
 };
 if (IS_DESKTOP_APP) localStorage.setItem("capri.wakeWord.engine", "1");
 
@@ -1788,7 +1789,10 @@ function startNativeWake() {
         wakeWord.permAsked = true;
         try { window.CapriPerms?.request?.('mic'); } catch { /* older build */ }
       }
-      setTimeout(() => { if (wakeWord.enabled && !document.hidden) startNativeWake(); }, 2500);
+      wakeWord.permTries += 1;
+      if (wakeWord.permTries <= 20) {
+        setTimeout(() => { if (wakeWord.enabled && !document.hidden) startNativeWake(); }, 2500);
+      }
       return;
     }
     wakeWord.micEngine = true;
@@ -1797,6 +1801,7 @@ function startNativeWake() {
   }
   stopMicWake();
   wakeWord.micEngine = false;
+  wakeWord.permTries = 0;
   wakeWord.active = true;
   wakeWord.starting = false;
   paintWakeWord();
