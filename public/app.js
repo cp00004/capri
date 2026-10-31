@@ -184,7 +184,10 @@ async function api(url, opts = {}) {
   if (ownKey && url.startsWith("/api/chat")) headers.set("X-Capri-Key", ownKey);
   if (state.apiBase.includes(".loca.lt")) headers.set("Bypass-Tunnel-Reminder", "1");
   const controller = opts.signal ? null : new AbortController();
-  const timeoutId = controller ? setTimeout(() => controller.abort(), 8000) : null;
+  // A fallback transcriber can take its time on a cold clip; cutting it at
+  // eight seconds used to surface as "Failed to fetch" and looked like a dead
+  // link even though the server was still working.
+  const timeoutId = controller ? setTimeout(() => controller.abort(), url.startsWith("/api/stt") ? 30000 : 8000) : null;
   let res;
   try {
     res = await fetch(apiUrl(withDevice(url)), { ...opts, headers, signal: opts.signal || controller.signal });
@@ -2230,7 +2233,12 @@ async function transcribe(blob) {
     await respond(text);
   } catch (err) {
     setPhase("idle");
-    if (err.message !== "unauthorized") showNotice(`No link: ${err.message}`, null, null, 8000);
+    if (err.message !== "unauthorized") {
+      const dropped = /failed to fetch|network|abort/i.test(String(err.message || ""));
+      showNotice(dropped
+        ? "No link: the server did not answer. Check the connection and tap again."
+        : `No link: ${err.message}`, null, null, 8000);
+    }
     resumeWakeWord();
   }
 }
