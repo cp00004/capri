@@ -2208,14 +2208,90 @@ const NNN_CANCEL = /cancel|stop|end|deactivate|disable|abort|release|unlock/i;
 const NNN_STATUS = /status|how\s*(long|much)|still|remaining|until\s*when/i;
 const BARE_CODE = /^[\s"'.,!?-]*(\d{3,8})[\s"'.,!?-]*$/i;
 
-async function nativeNoNut(action, code) {
-  const call = window.capriNative?.noNut;
-  if (typeof call !== "function") return null;
+// One switch, on the public backend, for every device running Capri. Each box
+// polls it and honours it locally, so arming it here seals PCs and phones alike
+// and nobody has to say the order twice.
+const NNN_SERVER = DEFAULT_TUNNEL;
+const NNN_POLL_MS = 180000;
+let nnnGlobal = { armed: false, releaseAt: 0, until: "", days: 0, message: "" };
+let nnnAwaitingArmCode = false;
+let nnnSyncing = false;
+
+function nnnHasShell() {
+  return typeof window.capriNative?.noNut === "function" || Boolean(window.CapriEyes?.noNut);
+}
+
+async function nativeNoNut(action, code, reason) {
+  if (typeof window.capriNative?.noNut === "function") {
+    try {
+      return await window.capriNative.noNut(action, code, 0, reason);
+    } catch {
+      return null;
+    }
+  }
+  if (window.CapriEyes?.noNut) {
+    try {
+      return JSON.parse(window.CapriEyes.noNut(JSON.stringify({ action, reason: String(reason || "") })));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function nnnServerState() {
   try {
-    return await call(action, code);
+    const res = await fetch(`${NNN_SERVER}/api/nnn`, { cache: "no-store" });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data && typeof data.armed === "boolean" ? data : null;
   } catch {
     return null;
   }
+}
+
+async function nnnServerOrder(order, code) {
+  try {
+    const res = await fetch(`${NNN_SERVER}/api/nnn/${order}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: String(code || "") }),
+      cache: "no-store",
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, ...data };
+  } catch {
+    return null;
+  }
+}
+
+// Bring this machine in line with the shared switch. Anything she cannot reach
+// leaves the local lock alone, so a dead link never unlocks a live seal.
+async function nnnSync() {
+  if (nnnSyncing) return null;
+  nnnSyncing = true;
+  let state = null;
+  try {
+    state = await nnnServerState();
+  } finally {
+    nnnSyncing = false;
+  }
+  if (!state) return null;
+  nnnGlobal = state;
+  if (!nnnHasShell()) return state;
+  const shouldArm = state.armed && Date.now() < Number(state.releaseAt || 0);
+  const local = await nativeNoNut("status");
+  if (!local || typeof local.active !== "boolean") return state;
+  if (shouldArm && !local.active) await nativeNoNut("arm");
+  else if (!state.armed && local.active && !local.awaitingCode) {
+    await nativeNoNut("release", "", "the shared switch is off");
+  }
+  return state;
+}
+
+function nnnStartSync() {
+  setTimeout(() => { void nnnSync(); }, 6000);
+  setInterval(() => { void nnnSync(); }, NNN_POLL_MS);
 }
 
 // Her own words for a local order: on screen, out loud, in the transcript, in
