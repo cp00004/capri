@@ -3909,4 +3909,5 @@ function initUpdates() {
 
 window.addEventListener("online", () => { if (!state.config) boot(); });
 
+nnnStartSync();
 boot();
