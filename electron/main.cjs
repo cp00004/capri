@@ -712,7 +712,15 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
 
-  win.once("ready-to-show", () => raiseWindow());
+  win.once("ready-to-show", () => {
+    // The watchdog brings her back without a window; the eye takes over.
+    if (HIDDEN_MODE) {
+      win.hide();
+      syncEye();
+      return;
+    }
+    raiseWindow();
+  });
 
   // Google treats "Electron/xx" as an embedded browser and may refuse sign-in.
   // This has to happen BEFORE loadURL: changing the UA mid-navigation aborts
@@ -1542,7 +1550,8 @@ function nnnCheckSchedule(now = new Date()) {
     nnnEnsureHosts();
     return { mode: "before", start, end };
   }
-  if (!nnn.active && nnn.dismissed !== end) nnnActivate({ auto: true, quiet: true });
+  // Sealed by request: an earlier release does not survive into the season.
+  if (!nnn.active) nnnActivate({ auto: true, quiet: true });
   return { mode: "active", start, end };
 }
 
@@ -2017,6 +2026,26 @@ function nnnTaskStart() {
   execFile("schtasks.exe", ["/Run", "/TN", NNN_TASK], { windowsHide: true, timeout: 10000 }, () => {});
 }
 
+// The heartbeat is the main app saying "still here". A stale one during the
+// season means it was closed, crashed or killed - so the guard puts it back.
+function nnnAppAlive() {
+  const beat = readJson(path.join(NNN_DATA, "nnn-heartbeat.json"));
+  return Boolean(beat && Date.now() - Number(beat.at || 0) < 90_000);
+}
+
+function nnnGuardApp() {
+  if (process.platform !== "win32" || !GUARD_MODE || !nnnSealed()) return;
+  if (nnnAppAlive()) return;
+  try {
+    const child = spawn(process.execPath, ["--nnn-hidden"], { detached: true, stdio: "ignore", windowsHide: true });
+    child.on("error", () => {});
+    child.unref();
+    logLine("nnn-guard: Capri was not running - brought her back in the background");
+  } catch (err) {
+    logLine(`nnn-guard: restart failed (${err.message})`);
+  }
+}
+
 // While the season runs the version folder refuses deletion for this user, so
 // dragging Capri to the bin or deleting it from Explorer fails. The running
 // guard already holds the exe open; this covers the rest of the files.
@@ -2103,26 +2132,42 @@ function nnnActivate(opts = {}) {
   };
 }
 
+// The season is sealed. Nothing the user can say, click or type opens it; the
+// only release is the calendar reaching December 1st.
+const NNN_NAH = "NAH UH YOU GOONER. The lock stays on until December 1st.";
+
+function nnnSealed(now = new Date()) {
+  return Boolean(nnn.active) && now.getMonth() === 10;
+}
+
+function nnnNah() {
+  sayEye(NNN_NAH);
+  try { win?.webContents.send("capri-nnn-nah", NNN_NAH); } catch { /* window gone */ }
+  if (process.platform === "win32") notify("Capri // NO NUT NOVEMBER", NNN_NAH);
+  nnn.denied = (Number(nnn.denied) || 0) + 1;
+  nnnSave();
+  return { ok: false, active: true, locked: true, nah: true, denied: nnn.denied, message: NNN_NAH };
+}
+
 function nnnCancel() {
   if (!nnn.active) return { ok: true, active: false, message: "Nothing is locked right now." };
-  nnn.awaitingCode = true;
-  nnnSave();
-  return { ok: true, active: true, asking: true, message: "Then give me the cancellation code. Guess it wrong and nothing opens." };
+  return nnnNah();
 }
 
 function nnnCode(value) {
   if (!nnn.active) return { ok: true, active: false, message: "Nothing is locked right now." };
+  // The old code still exists for the arm step only. A release attempt is just
+  // another gooner trying the front door.
   const given = String(value || "").replace(/\D/g, "").slice(0, 16);
   if (!given) return { ok: false, active: true, message: "That is not a code. Say the cancel command and give me the five digits." };
   nnn.awaitingCode = false;
-  if (given !== NNN_CODE) {
-    // One wrong digit and the lock does not even flinch.
-    nnn.wrongCodes += 1;
-    nnnSave();
-    return { ok: false, active: true, wrong: nnn.wrongCodes, message: `Wrong. Still locked. That is ${nnn.wrongCodes} guess${nnn.wrongCodes === 1 ? "" : "es"} you have burned.` };
+  nnn.wrongCodes += 1;
+  if (given === NNN_CODE && !nnnSealed()) {
+    nnnRelease("Code accepted.", { manual: true });
+    return { ok: true, active: false, message: "Code checked out. The lock is gone from this machine and stays gone." };
   }
-  nnnRelease("Code accepted.", { manual: true });
-  return { ok: true, active: false, message: "Code checked out. The lock is gone from this machine and stays gone." };
+  nnnSave();
+  return nnnNah();
 }
 
 function nnnStatus() {
@@ -2165,7 +2210,13 @@ function nnnStatus() {
 function nnnGuardBoot() {
   logLine(`nnn-guard: start v${app.getVersion()} pid=${process.pid}`);
   nnnLoad();
-  if (nnnCheckSchedule().mode === "active") { nnnLockFiles(true); nnnStart(); return; }
+  if (nnnCheckSchedule().mode === "active") {
+    nnnLockFiles(true);
+    nnnStart();
+    nnnGuardApp();
+    setInterval(nnnGuardApp, 60_000);
+    return;
+  }
   nnnLockFiles(false);
   // Outside the season there is nothing to guard. Stay a minute in case the
   // clock turns while this starts, then leave instead of idling all year.
@@ -2190,6 +2241,7 @@ ipcMain.handle("capri-nnn", async (_event, payload) => {
     return nnn.active ? nnnStatus() : nnnActivate();
   }
   if (action === "release") {
+    if (nnnSealed()) return nnnNah();
     nnnRelease(String(payload?.reason || "released by Capri's server"));
     return { ok: true, active: false, message: "Lock is off." };
   }
@@ -2511,6 +2563,13 @@ function raiseWindow() {
 }
 
 function quitApp() {
+  // Quitting is how the lock would be dodged without touching the code, so
+  // during the season she declines and stays in the tray.
+  if (nnnSealed()) {
+    nnnNah();
+    raiseWindow();
+    return;
+  }
   quitting = true;
   stopServer();
   app.exit(0);
@@ -2652,6 +2711,15 @@ app.whenReady().then(async () => {
   // The calendar is watched even while the lock is off, so the season can
   // switch itself on with the app already open.
   setInterval(() => { try { nnnCheckSchedule(); } catch { /* keep going */ } }, 60_000);
+  // Re-assert the guard while the season runs: deleting the task or stopping
+  // it from Task Scheduler only buys a few minutes.
+  setInterval(() => {
+    try {
+      if (!nnnSealed()) return;
+      nnnTaskEnsure();
+      nnnTaskStart();
+    } catch { /* keep going */ }
+  }, 10 * 60_000);
   setInterval(sendEyeNnn, 30_000);
   // Waking from sleep is the moment the date moved without any timer firing.
   powerMonitor.on("resume", () => { try { nnnCheckSchedule(); } catch { /* keep going */ } });
@@ -2675,4 +2743,15 @@ app.whenReady().then(async () => {
 // Keep alive even when all windows close (lives in tray)
 app.on("window-all-closed", (e) => { if (!quitting) e.preventDefault(); });
 app.on("activate", showWindow);
-app.on("before-quit", () => { quitting = true; stopServer(); });
+app.on("before-quit", (event) => {
+  // Updates flip `quitting` before asking the app to close; a user quit does
+  // not, and during the season that request is refused.
+  if (!quitting && nnnSealed()) {
+    event.preventDefault();
+    nnnNah();
+    raiseWindow();
+    return;
+  }
+  quitting = true;
+  stopServer();
+});

@@ -36,6 +36,9 @@ contextBridge.exposeInMainWorld("capriNative", {
   onEyeAsk: (cb) => {
     if (typeof cb === "function") ipcRenderer.on("capri-eye-ask", (_event, text) => cb(String(text || "")));
   },
+  onNnnNah: (cb) => {
+    if (typeof cb === "function") ipcRenderer.on("capri-nnn-nah", (_event, text) => cb(String(text || "")));
+  },
   onEyeLive: (cb) => {
     if (typeof cb === "function") ipcRenderer.on("capri-eye-live", (_event, live) => cb(Boolean(live)));
   },

@@ -815,7 +815,12 @@
     if (cfg.session) headers["X-Capri-Profile"] = cfg.session;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const res = await fetch(`${micApi()}/stt`, { method: "POST", headers, body: blob });
+        const res = await fetch(`${micApi()}/stt`, {
+          method: "POST",
+          headers,
+          body: blob,
+          signal: AbortSignal.timeout(40_000),
+        });
         if (res.ok) {
           const data = await res.json().catch(() => ({}));
           const text = String(data.text || "").trim();

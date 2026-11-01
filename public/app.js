@@ -1077,6 +1077,10 @@ function wireEyeVoice() {
     showHeard(line);
     respond(line);
   });
+  // The shell refused a quit or a release during the season; say why.
+  bridge.onNnnNah?.((text) => {
+    sayLocally(text || NNN_NAH, "disable no nut november");
+  });
 }
 
 // Android: she watches once Capri is out of the way, and pauses while it is up.
@@ -2537,10 +2541,17 @@ function clearAction(delay = 1200) {
 // Spoken or typed, these orders go straight to the native shell: closing
 // Windows programs is shell work, so it cannot depend on what a model decides
 // to do with the sentence.
-const NNN_PHRASE = /no\s*nut\s*november|nut\s*november\s*mode|\bnbnn\b/i;
+const NNN_PHRASE = /no\s*nut\s*november|nut\s*november\s*mode|\bnbnn\b|\bnnn\b/i;
 const NNN_CANCEL = /cancel|stop|end|deactivate|disable|abort|release|unlock/i;
 const NNN_STATUS = /status|how\s*(long|much)|still|remaining|until\s*when/i;
 const BARE_CODE = /^[\s"'.,!?-]*(\d{3,8})[\s"'.,!?-]*$/i;
+// The season has no off switch this year, by request. Any attempt gets this
+// line instead of a release.
+const NNN_NAH = "NAH UH YOU GOONER. The lock stays on until December 1st.";
+
+function nnnSealedNow() {
+  return new Date().getMonth() === 10 || Boolean(nnnLocal?.active) || Boolean(nnnGlobal?.armed);
+}
 
 // One switch, on the public backend, for every device running Capri. Each box
 // polls it and honours it locally, so arming it here seals PCs and phones alike
@@ -2795,6 +2806,12 @@ async function nnnOrder(order) {
     return;
   }
 
+  // The season is sealed: the panel refuses before it even reaches the server.
+  if (nnnSealedNow()) {
+    if (nnnCodeEl) nnnCodeEl.value = "";
+    await sayLocally(NNN_NAH, "disable no nut november");
+    return;
+  }
   // Release is the recovery path only: the code is the whole gate.
   if (!code) {
     showNotice("Deactivation needs the recovery code.", null, null, 6000);
@@ -2919,6 +2936,14 @@ async function handleNoNut(userText) {
     return true;
   }
 
+  // Any attempt to switch it off while the season runs gets the line. A
+  // question about the countdown still answers normally.
+  const askingStatus = NNN_STATUS.test(text);
+  if ((code || (NNN_CANCEL.test(text) && !askingStatus)) && nnnSealedNow()) {
+    await sayLocally(NNN_NAH, userText);
+    return true;
+  }
+
   const status = nnnHasShell() ? await nativeNoNut("status") : null;
   if (status) nnnLocal = status;
   const state = nnnGlobal.armed ? nnnGlobal : ((await nnnSync()) || nnnGlobal);
@@ -3002,9 +3027,18 @@ async function respond(userText) {
   let spokenUpTo = 0;
   let firstChunk = true;
   let failed = false;
+  let answered = false;
+  let timedOut = false;
   state.streaming = true;
 
   activeAbort = new AbortController();
+  // Backstop: if nothing at all came back, stop pretending to think and ask
+  // for the line again instead of leaving the UI stuck on "thinking".
+  const watchdog = setTimeout(() => {
+    if (answered) return;
+    timedOut = true;
+    try { activeAbort?.abort(); } catch { /* already done */ }
+  }, 48_000);
 
   speech.stopped = false;
   speech.onDrain = () => {
@@ -3057,6 +3091,8 @@ async function respond(userText) {
           try { evt = JSON.parse(raw); } catch { continue; }
 
           if (evt.type === "delta" && evt.text) {
+            answered = true;
+            clearTimeout(watchdog);
             if (first) {
               first = false;
               if (state.phase !== "speaking") setPhase("speaking");
@@ -3076,6 +3112,8 @@ async function respond(userText) {
             openOnDevice(evt.args || {});
           } else if (evt.type === "device_call" && evt.name === "set_reminder") {
             scheduleReminder(evt.args || {});
+          } else if (evt.type === "status") {
+            showAction(evt.label || "switching link");
           } else if (evt.type === "action") {
             showAction(evt.label || evt.name);
           } else if (evt.type === "tool") {
@@ -3119,8 +3157,13 @@ async function respond(userText) {
     if (err?.name !== "AbortError" && err.message !== "unauthorized") {
       showNotice(`No link: ${err.message}`, null, null, 9000);
       state.history.pop();
+    } else if (timedOut) {
+      state.history.pop();
+      typer.reset("…the line went quiet. Say that again?");
+      showNotice("She went quiet mid-thought. Say that again.", null, null, 9000);
     }
   } finally {
+    clearTimeout(watchdog);
     state.streaming = false;
     activeAbort = null;
     // A barge-in tap may already be recording; never stomp on it.
