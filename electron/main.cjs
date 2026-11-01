@@ -2544,6 +2544,13 @@ ipcMain.on("capri-eye-config", (_event, cfg) => {
 // and device calls behave exactly as when the window is in front.
 ipcMain.on("capri-addressed", () => { eyeLastAddressed = Date.now(); });
 
+// Orders and their outcomes belong in capri.log: a voice turn that vanishes
+// leaves nothing else behind to look at.
+ipcMain.on("capri-log", (_event, message) => {
+  const line = String(message || "").replace(/\s+/g, " ").trim().slice(0, 300);
+  if (line) logLine(line);
+});
+
 ipcMain.on("eye-ask", (_event, text) => {
   const line = String(text || "").replace(/\s+/g, " ").trim().slice(0, 600);
   if (!line) return;

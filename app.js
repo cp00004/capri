@@ -2327,6 +2327,7 @@ function openOnDevice(args = {}) {
   recentOpens.push({ key, at: now });
   activity.lastOpen = target;
   activity.lastOpenAt = now;
+  try { window.capriNative?.log?.(`open: ${target}`); } catch { /* browser build */ }
 
   if (window.capriNative && typeof window.capriNative.openTarget === "function") {
     try { window.capriNative.openTarget(target); return true; } catch { /* fall through */ }
@@ -3029,11 +3030,102 @@ async function handleNoNut(userText) {
   return true;
 }
 
+/* ---------------------------------------------------------------- quick orders
+   "open youtube" is the order she hears most, and it used to depend on a relay
+   being up, a model that believes it is allowed to open a browser, and the
+   conversation window being awake. None of that belongs in the way of a site
+   she already knows by name: open it here, then say one line with her own
+   voice. Anything she does not recognise still goes to the model. */
+
+const QUICK_OPEN = new Map([
+  ["youtube", { name: "YouTube", url: "https://www.youtube.com" }],
+  ["you tube", { name: "YouTube", url: "https://www.youtube.com" }],
+  ["yt", { name: "YouTube", url: "https://www.youtube.com" }],
+  ["tiktok", { name: "TikTok", url: "https://www.tiktok.com" }],
+  ["tik tok", { name: "TikTok", url: "https://www.tiktok.com" }],
+  ["whatsapp", { name: "WhatsApp", url: "https://web.whatsapp.com" }],
+  ["whatsapp web", { name: "WhatsApp", url: "https://web.whatsapp.com" }],
+  ["discord", { name: "Discord", url: "https://discord.com/app" }],
+  ["spotify", { name: "Spotify", url: "https://open.spotify.com" }],
+  ["instagram", { name: "Instagram", url: "https://www.instagram.com" }],
+  ["insta", { name: "Instagram", url: "https://www.instagram.com" }],
+  ["facebook", { name: "Facebook", url: "https://www.facebook.com" }],
+  ["twitter", { name: "Twitter", url: "https://x.com" }],
+  ["x", { name: "X", url: "https://x.com" }],
+  ["reddit", { name: "Reddit", url: "https://www.reddit.com" }],
+  ["twitch", { name: "Twitch", url: "https://www.twitch.tv" }],
+  ["netflix", { name: "Netflix", url: "https://www.netflix.com" }],
+  ["roblox", { name: "Roblox", url: "https://www.roblox.com" }],
+  ["minecraft", { name: "Minecraft", url: "https://www.minecraft.net" }],
+  ["steam", { name: "Steam", url: "https://store.steampowered.com" }],
+  ["gmail", { name: "Gmail", url: "https://mail.google.com" }],
+  ["google", { name: "Google", url: "https://www.google.com" }],
+  ["google maps", { name: "Maps", url: "https://maps.google.com" }],
+  ["maps", { name: "Maps", url: "https://maps.google.com" }],
+  ["github", { name: "GitHub", url: "https://github.com" }],
+  ["chatgpt", { name: "ChatGPT", url: "https://chatgpt.com" }],
+  ["chat gpt", { name: "ChatGPT", url: "https://chatgpt.com" }],
+  ["gemini", { name: "Gemini", url: "https://gemini.google.com" }],
+  ["character ai", { name: "Character.AI", url: "https://character.ai" }],
+  ["ichigo", { name: "ichigo.tv", url: "https://ichigotv.bond" }],
+  ["ichigo tv", { name: "ichigo.tv", url: "https://ichigotv.bond" }],
+  ["ichigotv", { name: "ichigo.tv", url: "https://ichigotv.bond" }],
+  ["amazon", { name: "Amazon", url: "https://www.amazon.com" }],
+  ["snapchat", { name: "Snapchat", url: "https://web.snapchat.com" }],
+  ["telegram", { name: "Telegram", url: "https://web.telegram.org" }],
+  ["pinterest", { name: "Pinterest", url: "https://www.pinterest.com" }],
+  ["play store", { name: "Play Store", url: "https://play.google.com/store" }],
+  ["store", { name: "Play Store", url: "https://play.google.com/store" }],
+]);
+
+// What she hears as an order to open something, and what to leave to the model.
+function quickOpenTarget(text) {
+  const raw = String(text || "").trim();
+  const hit = raw.match(
+    /^(?:hey\s+)?(?:capri[,\s]+)?(?:please\s+)?(?:can\s+you\s+|could\s+you\s+)?(?:open|launch|start|run|go\s+to|pull\s+up|bring\s+up|fire\s+up|take\s+me\s+to)\s+(.+)$/i
+  );
+  if (!hit) return null;
+  const spoken = hit[1]
+    .replace(/\b(?:on|for|in)\s+(?:my|the)\s+(?:pc|computer|laptop|phone|device)\b/gi, " ")
+    .replace(/[.?!,]+$/, "")
+    .replace(/^(?:the|my)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+  if (!spoken || spoken.length > 40) return null;
+  const known = QUICK_OPEN.get(spoken);
+  if (known) return known;
+  // A real domain is a site, not a guess.
+  if (/^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/\S*)?$/i.test(spoken)) {
+    return { name: spoken, url: `https://${spoken}` };
+  }
+  return null;
+}
+
+async function quickOpenTurn(userText) {
+  const hit = quickOpenTarget(userText);
+  if (!hit) return false;
+  const app = IS_PHONE ? phoneAppFor(hit.name) : null;
+  // The phone has real apps for these names; the PC wants the address.
+  openOnDevice({ target: app ? hit.name.toLowerCase() : hit.url });
+  try { window.capriNative?.log?.(`open: ${hit.name}`); } catch { /* browser build */ }
+  const jabs = [
+    `${hit.name}. Opened. Try not to make it your whole personality.`,
+    `${hit.name} is up, choom. Don't make me regret it.`,
+    `Already on ${hit.name}. You're welcome.`,
+    `${hit.name}. Fine. I'll be judging.`,
+  ];
+  await sayLocally(jabs[Math.floor(Math.random() * jabs.length)], userText);
+  return true;
+}
+
 async function respond(userText) {
   // She was spoken to. The eye may comment on the screen for a couple of
   // minutes after this, never on its own.
   try { window.capriNative?.addressed?.(); } catch { /* browser build */ }
+  try { window.capriNative?.log?.(`heard: ${String(userText || "").slice(0, 200)}`); } catch { /* browser build */ }
   if (await handleNoNut(userText)) return;
+  if (await quickOpenTurn(userText)) return;
   state.history.push({ role: "user", content: userText });
   state.history = state.history.slice(-16);
 
@@ -3168,16 +3260,31 @@ async function respond(userText) {
       try { window.capriNative?.eyeReply?.(finalText); } catch { /* older shell */ }
     }
 
-    if (!finalText && !failed) {
-      typer.reset("…signal dropped. Say that again?");
+    if (!finalText) {
+      // Silence is the one answer she must never give. A relay that dies before
+      // its first token used to leave the room quiet with only a small notice.
+      const line = failed
+        ? "…the relays are fried. Give me a minute and say it again."
+        : "…signal dropped. Say that again?";
+      typer.reset(line);
+      if (state.voiceOn) speech.enqueue(line);
+      else typer.release();
     }
   } catch (err) {
     if (err?.name !== "AbortError" && err.message !== "unauthorized") {
       showNotice(`No link: ${err.message}`, null, null, 9000);
+      try { window.capriNative?.log?.(`chat failed: ${err.message}`); } catch { /* browser build */ }
       state.history.pop();
+      const line = "…I can't reach my relay. Give me a minute and say it again.";
+      typer.reset(line);
+      if (state.voiceOn) speech.enqueue(line);
+      else typer.release();
     } else if (timedOut) {
       state.history.pop();
-      typer.reset("…the line went quiet. Say that again?");
+      const line = "…the line went quiet. Say that again?";
+      typer.reset(line);
+      if (state.voiceOn) speech.enqueue(line);
+      else typer.release();
       showNotice("She went quiet mid-thought. Say that again.", null, null, 9000);
     }
   } finally {

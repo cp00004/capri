@@ -28,6 +28,8 @@ contextBridge.exposeInMainWorld("capriNative", {
   }),
   eyeReply: (text) => ipcRenderer.send("capri-eye-reply", String(text || "")),
   addressed: () => ipcRenderer.send("capri-addressed"),
+  // What she heard, what she opened, why a turn died. One line each in capri.log.
+  log: (message) => ipcRenderer.send("capri-log", String(message || "")),
   saveSession: (token) => ipcRenderer.invoke("capri-session-save", String(token || "")),
   loadSession: () => ipcRenderer.invoke("capri-session-load"),
   clearSession: () => ipcRenderer.invoke("capri-session-clear"),
