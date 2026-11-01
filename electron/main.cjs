@@ -838,6 +838,7 @@ let eyeTopTimer = null;
 let eyeTrack = { key: "", since: 0, said: "" };
 let eyeLastSay = 0;
 let eyeBusy = false;
+let eyeDrag = null;
 
 const eyeStateFile = () => path.join(app.getPath("userData"), "eye-spy.json");
 const readEyeState = () => readJson(eyeStateFile()) || {};
@@ -850,7 +851,18 @@ function eyeBounds() {
   const area = screen.getPrimaryDisplay().workArea;
   const x = Number.isFinite(saved.x) ? saved.x : area.x + area.width - EYE_W - 24;
   const y = Number.isFinite(saved.y) ? saved.y : Math.round(area.y + area.height / 2 - EYE_H / 2);
-  return { x, y, width: EYE_W, height: EYE_H };
+  // A saved spot can belong to a monitor that is no longer plugged in, which
+  // left her running with no visible window at all.
+  return eyeClamp({ x, y });
+}
+
+// Entirely on one screen, whichever screen the point falls on.
+function eyeClamp(bounds, point) {
+  const at = point || { x: Math.round(bounds.x), y: Math.round(bounds.y) };
+  const area = screen.getDisplayNearestPoint({ x: Math.round(at.x), y: Math.round(at.y) }).workArea;
+  const x = Math.min(Math.max(bounds.x, area.x), Math.max(area.x, area.x + area.width - EYE_W));
+  const y = Math.min(Math.max(bounds.y, area.y), Math.max(area.y, area.y + area.height - EYE_H));
+  return { x: Math.round(x), y: Math.round(y), width: EYE_W, height: EYE_H };
 }
 
 function createEye() {
@@ -899,13 +911,14 @@ function createEye() {
   eyeWin.on("moved", () => {
     if (!eyeWin || eyeWin.isDestroyed()) return;
     const [x, y] = eyeWin.getPosition();
-    writeEyeState({ x, y });
+    // A drag moves her every frame; stopEyeDrag writes the spot once it ends.
+    if (!eyeDrag) writeEyeState({ x, y });
     if (lastPos) {
       try { eyeWin.webContents.send("eye-move", { dx: x - lastPos[0], dy: y - lastPos[1] }); } catch { /* closing */ }
     }
     lastPos = [x, y];
   });
-  eyeWin.on("closed", () => { eyeWin = null; });
+  eyeWin.on("closed", () => { stopEyeDrag(false); eyeWin = null; });
   return eyeWin;
 }
 
@@ -935,6 +948,8 @@ function showEye() {
 function hideEye() {
   if (!eyeWin || eyeWin.isDestroyed()) return;
   if (!eyeWin.isVisible()) { stopEyeTimers(); return; }
+  // A hide mid-drag used to leave the drag loop running against a gone window.
+  stopEyeDrag(false);
   sendEyeLive(false);
   eyeWin.hide();
   try { eyeWin.setIgnoreMouseEvents(true, { forward: true }); } catch { /* older electron */ }
@@ -1004,7 +1019,13 @@ function startEyeTimers() {
     try {
       const point = screen.getCursorScreenPoint();
       const box = eyeWin.getBounds();
-      eyeWin.webContents.send("eye-cursor", { x: point.x - box.x, y: point.y - box.y });
+      // The window tracks the cursor during a drag, so the page sees almost no
+      // pointer travel of its own; main counts it and hands it over here.
+      eyeWin.webContents.send("eye-cursor", {
+        x: point.x - box.x,
+        y: point.y - box.y,
+        moved: eyeDrag ? eyeDrag.moved : 0,
+      });
     } catch { /* display swap */ }
   }, 32);
   eyeWatchTimer = setInterval(watchScreen, 5000);
@@ -2332,30 +2353,62 @@ ipcMain.on("capri-eye-reply", (_event, text) => {
 
 ipcMain.on("eye-hide", () => { eyeDismissed = true; hideEye(); });
 
-// The overlay moves itself: the renderer reports screen-space pointer deltas,
-// because a native drag region cannot coexist with the eye's own transforms.
-ipcMain.on("eye-drag", (_event, { dx, dy } = {}) => {
-  if (!eyeWin || eyeWin.isDestroyed()) return;
+// The overlay moves itself from here: the page reports the grab, and the main
+// process walks the window to the cursor every frame. Moving it from the page
+// meant the window had to keep the pointer inside while it clamped at the edges;
+// past the edge the pointer left, no release arrived, and the drag never ended.
+function startEyeDrag() {
+  if (!eyeWin || eyeWin.isDestroyed() || eyeDrag) return;
+  const point = screen.getCursorScreenPoint();
   const [x, y] = eyeWin.getPosition();
-  const nextX = Math.round(x + (Number(dx) || 0));
-  const nextY = Math.round(y + (Number(dy) || 0));
-  const area = screen.getDisplayNearestPoint({ x: nextX, y: nextY }).workArea;
-  // Keep a sliver of the eye reachable on whatever display it is heading for.
-  // setBounds, not setPosition: moving alone lets the DPI rounding inflate the
-  // window a pixel per move until the overlay covers the whole screen.
-  eyeWin.setBounds({
-    x: Math.max(area.x - EYE_W + 60, Math.min(area.x + area.width - 60, nextX)),
-    y: Math.max(area.y - EYE_H + 60, Math.min(area.y + area.height - 60, nextY)),
-    width: EYE_W,
-    height: EYE_H,
-  });
-});
+  eyeDrag = {
+    timer: null,
+    moved: 0,
+    x: point.x,
+    y: point.y,
+    // The offset she was grabbed with, kept for the whole drag so she stays
+    // glued to the cursor instead of drifting a pixel per frame.
+    offX: point.x - x,
+    offY: point.y - y,
+    until: Date.now() + 90_000,
+  };
+  eyeDrag.timer = setInterval(() => {
+    if (!eyeDrag) return;
+    if (!eyeWin || eyeWin.isDestroyed()) { stopEyeDrag(false); return; }
+    if (Date.now() > eyeDrag.until) { stopEyeDrag(true); return; }
+    const now = screen.getCursorScreenPoint();
+    const dx = now.x - eyeDrag.x;
+    const dy = now.y - eyeDrag.y;
+    eyeDrag.x = now.x;
+    eyeDrag.y = now.y;
+    if (dx || dy) eyeDrag.moved += Math.abs(dx) + Math.abs(dy);
+    const nx = Math.round(now.x - eyeDrag.offX);
+    const ny = Math.round(now.y - eyeDrag.offY);
+    const [cx, cy] = eyeWin.getPosition();
+    if (nx === cx && ny === cy) return;
+    eyeWin.setBounds({ x: nx, y: ny, width: EYE_W, height: EYE_H });
+  }, 16);
+}
 
-ipcMain.on("eye-drag-end", () => {
-  if (!eyeWin || eyeWin.isDestroyed()) return;
-  const [x, y] = eyeWin.getPosition();
-  writeEyeState({ x, y });
-});
+function stopEyeDrag(notify) {
+  if (!eyeDrag) return;
+  clearInterval(eyeDrag.timer);
+  eyeDrag = null;
+  if (eyeWin && !eyeWin.isDestroyed()) {
+    const [x, y] = eyeWin.getPosition();
+    // She followed the cursor without clamping; settle her fully onto whichever
+    // screen the cursor ended up on so no part of her is stranded off-screen.
+    const next = eyeClamp({ x, y }, screen.getCursorScreenPoint());
+    eyeWin.setBounds(next);
+    writeEyeState({ x: next.x, y: next.y });
+  }
+  if (notify) {
+    try { eyeWin?.webContents.send("eye-drag-stop"); } catch { /* closing */ }
+  }
+}
+
+ipcMain.on("eye-drag-start", () => startEyeDrag());
+ipcMain.on("eye-drag-end", () => stopEyeDrag(false));
 
 ipcMain.on("eye-set-pinned", (_event, pinned) => {
   writeEyeState({ pinned: Boolean(pinned) });

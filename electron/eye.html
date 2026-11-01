@@ -595,6 +595,9 @@
   window.capriEye?.onCursor((point) => {
     cursor = point;
     lastCursorAt = performance.now();
+    // Main counts the travel while it walks the window to the cursor; without
+    // that count a drag looks like a tap and she teleports on release.
+    if (drag.on && Number.isFinite(point.moved)) drag.moved = Math.max(drag.moved, point.moved);
     refreshHit(point.x, point.y);
   });
 
@@ -613,10 +616,11 @@
   // The window is moved from here in screen coordinates. Native drag regions
   // were swallowing the mouse: they cannot coexist with the per-frame transforms
   // on the stage, and they made the controls unclickable.
-  const drag = { on: false, lx: 0, ly: 0, moved: 0, id: null, at: 0 };
+  const drag = { on: false, moved: 0, id: null, at: 0 };
 
-  function endDrag() {
+  function endDrag(cancel) {
     if (!drag.on) return;
+    const distance = drag.moved;
     drag.on = false;
     state.dragging = false;
     stage.classList.remove("dragging");
@@ -624,8 +628,9 @@
     if (drag.id !== null) { try { stage.releasePointerCapture(drag.id); } catch { /* gone */ } }
     drag.id = null;
     window.capriEye?.dragEnd();
-    const tapped = drag.moved < 7 && performance.now() - drag.at < 340;
-    if (drag.moved < 6) setMode("");
+    if (distance < 6) setMode("");
+    if (cancel === true) return;
+    const tapped = distance < 7 && performance.now() - drag.at < 340;
     if (tapped) teleport();
   }
 
@@ -638,8 +643,6 @@
     if (!interactiveAt(event.clientX, event.clientY)) return;
     if (drag.on) endDrag();
     drag.on = true;
-    drag.lx = event.screenX;
-    drag.ly = event.screenY;
     drag.moved = 0;
     drag.id = event.pointerId;
     drag.at = performance.now();
@@ -649,21 +652,15 @@
     setIgnore(false);
     setMode("hold");
     try { stage.setPointerCapture(event.pointerId); } catch { /* not capturable */ }
+    window.capriEye?.dragStart();
     event.preventDefault();
   }
 
   function moveDrag(event) {
     if (!drag.on) return;
-    // A released button with capture lost still lands here: end instead of
-    // letting the eye follow the cursor forever.
-    if (event.pointerType === "mouse" && event.buttons === 0) { endDrag(); return; }
-    const dx = event.screenX - drag.lx;
-    const dy = event.screenY - drag.ly;
-    if (!dx && !dy) return;
-    drag.lx = event.screenX;
-    drag.ly = event.screenY;
-    drag.moved += Math.abs(dx) + Math.abs(dy);
-    window.capriEye?.drag(dx, dy);
+    // The window follows the cursor from main, so there are no deltas to send
+    // here. This only catches a release whose pointerup never arrived.
+    if (event.pointerType === "mouse" && event.buttons === 0) endDrag();
   }
 
   window.addEventListener("pointerdown", beginDrag, true);
@@ -672,6 +669,8 @@
   window.addEventListener("pointercancel", endDrag, true);
   window.addEventListener("lostpointercapture", endDrag, true);
   window.addEventListener("mouseup", endDrag, true);
+  // Main drops a drag that ran past its safety limit; let go on this side too.
+  window.capriEye?.onDragStop(() => endDrag(true));
 
   /* --------------------------------------------------------- teleport */
 
@@ -743,7 +742,13 @@
   // Hidden eye means no mic: stop listening the moment the overlay goes away.
   window.capriEye?.onLive((live) => {
     state.live = Boolean(live);
+    // Main forces click-through on whenever the eye goes away, without telling
+    // this side. Trusting the cached flag here left her deaf to the mouse after
+    // a hide/show: the page thought it was already clickable and never asked.
+    ignoring = true;
     if (!state.live) {
+      endDrag(true);
+      bubble.classList.remove("show");
       shutdownWake();
       if (talk.active) stopTalk();
     } else {
