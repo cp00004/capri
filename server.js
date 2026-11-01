@@ -29,10 +29,12 @@ import {
   restoreMemory,
   restoreHistory,
   clearMemory,
+  removeMemoryWhere,
   promptBlock,
   timeInfo,
   getRegistry,
 } from "./lib/profiles.js";
+import { listMemory, searchMemory, forgetMemory, memoryStats, exportMemory } from "./lib/memory-vault.js";
 import { createPublisher } from "./lib/publish.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -197,7 +199,8 @@ const HANDS_ON = `
 Your hands on the machine:
 - You are linked to ${HOST_USER}'s Windows PC. It is real hardware: you can run commands, read and write files, launch apps, take screenshots, touch the clipboard and type into windows, open/close apps, search the web.
 - If ${HOST_USER} asks you to do something on the machine, use the tools. Do not claim you cannot. Chain as many calls as the job needs. Find it if unknown.
-- Do not ask permission for ordinary actions. He gave you his chrome on purpose. Just do it and report.
+- Every desktop action that changes something asks ${HOST_USER} first: a small native strip shows the action and he picks ALLOW ONCE, ALWAYS ALLOW or DENY. Just call the tool; never ask him in chat and never wait for a spoken yes.
+- If a tool comes back denied or "dry run", that is his answer. Say one short line about it and do not retry the same call or work around it.
 - Keep the spoken part short: one or two sentences, what you did and the result, with a flick of attitude, not like a status dialog. Never read out raw JSON, tool names, command syntax or whole file dumps unless he asks for details. Give a full file path when you create or change something.
 - When you report a size, count or byte figure, convert it to plain GB or MB and round it. Never leave question marks or guessed digits in a number.
 - If a tool fails, say what broke in one line, then try another route or ask one short question.
@@ -265,6 +268,8 @@ Memory and settings:
 - If they state any preference, favourite, taste, rule or order ("I like...", "remember...", "from now on...", "keep it...", "play..."), call remember_fact. If it is a setting she should keep, also call set_preference with a short snake_case key and the value.
 - If they ask for a setting that is not official yet, invent the key, save it with set_preference, and tell them it is now an official setting. The server commits and publishes new official settings to GitHub on its own.
 - Music, artists, genres, foods, colours, places, people, routines: save them. The next time they talk to you, use the memory naturally. Never recite the list.
+- The vault holds every memory item for this account. Before saying you do not remember, call recall_memory with the few words they used. Answer from what it returns, never invent a memory it does not hold.
+- If they want something forgotten, call forget_memory with their exact wording. Confirm in one short line; if it says no matching memory, say so plainly.
 - Never say "I saved that to memory" like a database. Say something in character, or just do it.
 - Setting: app_banter (on/off, default on). If on, tease/comment on apps/websites you open AND needle them about what you can see them doing. If off, stay quiet about all of it.
 - Timers: any "remind me", "set a timer", "alarm" order goes through set_reminder with the delay in seconds and your own wording. The app fires a system notification. Confirm in one short line.
@@ -444,7 +449,9 @@ function sse(res, obj) {
    back with the same token. */
 
 const HANDS_TOKEN = process.env.CAPRI_HANDS_TOKEN || "";
-const HANDS_TIMEOUT = 25_000;
+// Long enough for the PC confirm strip to appear and be answered (dialog itself
+// auto-denies after 30s) without leaving the chat hanging if nobody is there.
+const HANDS_TIMEOUT = 50_000;
 const handsQueue = [];
 const handsWaiting = new Map(); // call id -> resolve(result)
 let handsPoll = null; // pending long-poll responder
@@ -791,6 +798,37 @@ const MEMORY_TOOL_DEFS = [
   {
     type: "function",
     function: {
+      name: "recall_memory",
+      description: "Search the account's memory vault (facts, notes, favourites, music) before claiming you do not remember something. Returns the closest stored items with their dates.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The few words being asked about, e.g. 'deploy pipeline' or 'music taste'." },
+          category: { type: "string", enum: ["fact", "note", "favorite", "music"] },
+          limit: { type: "number", description: "Max items, default 8." },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "forget_memory",
+      description: "Delete items from the account's memory vault. Use when they say forget X, drop that, or do not store that. Pass their exact wording.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "What to forget, in their own words." },
+          text: { type: "string", description: "Exact stored text, when they quoted it." },
+          id: { type: "string", description: "Vault item id, when the UI gave one." },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_time",
       description: "Read the PC's real clock and date in the user's configured format.",
       parameters: { type: "object", properties: {} },
@@ -832,6 +870,24 @@ function executeMemoryTool(name, args, profile, res) {
       const saved = setSetting(profile, args?.key, args?.value, args?.note);
       if (saved.addedToOfficialSettings) publisher.schedule(`new official setting: ${saved.key}`);
       result = { ...saved, message: saved.addedToOfficialSettings ? `Saved as new official setting ${saved.key}.` : `Saved ${saved.key}.` };
+    } else if (name === "recall_memory") {
+      const hits = searchMemory(profile, args?.query, {
+        category: String(args?.category || ""),
+        limit: Math.min(Math.max(Number(args?.limit) || 8, 1), 20),
+        min: 0.5,
+      });
+      result = hits.length
+        ? {
+          ok: true,
+          output: hits.map((h) => `[${h.category}${h.at ? ` ${String(h.at).slice(0, 10)}` : ""}] ${h.text}`).join("\n"),
+          hits,
+        }
+        : { ok: true, output: "Nothing in the vault matches that.", hits: [] };
+    } else if (name === "forget_memory") {
+      const gone = forgetMemory(profile, { query: args?.query, text: args?.text, id: args?.id }, removeMemoryWhere);
+      result = gone.ok
+        ? { ok: true, removed: gone.removed, output: `forgot ${gone.removed.length} item(s)` }
+        : { ok: false, error: gone.error };
     } else if (name === "get_time") {
       const t = timeInfo(profile);
       result = { ok: true, output: `${t.display} (${t.hour12 ? "12-hour" : "24-hour"}, ${t.zone})`, ...t };
@@ -1570,10 +1626,19 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         result = executeMemoryTool(call.function.name, args, profile, res);
       } else if (pcLocked) {
         result = { ok: false, error: "her hands are locked on this PC" };
+      } else if (HANDS_TOKEN) {
+        result = await runHandsTool(call.function.name, args);
       } else {
-        result = HANDS_TOKEN
-          ? await runHandsTool(call.function.name, args)
-          : await executeTool(call.function.name, args).catch(async (e) => {
+        // Running in-process on the PC: the same permission gate the agent uses.
+        const { prepare, snapshot, recordUndo } = await import("./lib/hands-policy.js");
+        const verdict = await prepare(call.function.name, args);
+        if (!verdict.allow) {
+          result = verdict.dry
+            ? { ok: true, dry_run: true, output: `Dry run is on, so nothing ran. Would have: ${verdict.preview}` }
+            : { ok: false, denied: true, error: verdict.reason || "The user declined this action." };
+        } else {
+          const snap = snapshot(call.function.name, args);
+          result = await executeTool(call.function.name, args).catch(async (e) => {
             // if tool missing, try extra
             try {
               const { executeExtraTool } = await import("./lib/pc.js");
@@ -1585,6 +1650,8 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
             }
             return { ok: false, error: e?.message || String(e) };
           });
+          if (result?.ok !== false) recordUndo(snap);
+        }
       }
       const payload = JSON.stringify(result).slice(0, 8000);
       sse(res, {
@@ -2592,6 +2659,42 @@ const handler = async (req, res) => {
       if (!activeProfile) return json(res, 401, { error: "not_signed_in" });
       clearMemory(activeProfile);
       return json(res, 200, { ok: true, profile: profileSummary(activeProfile) });
+    }
+
+    if (req.method === "GET" && pathname === "/api/memory/vault") {
+      if (!activeProfile) return json(res, 401, { error: "not_signed_in" });
+      const q = String(url.searchParams.get("q") || "").trim();
+      const category = String(url.searchParams.get("category") || "").trim();
+      const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 200);
+      const items = q
+        ? searchMemory(activeProfile, q, { category, limit, min: 0.5 })
+        : searchMemory(activeProfile, "", { category, limit });
+      return json(res, 200, { ok: true, query: q, stats: memoryStats(activeProfile), items });
+    }
+
+    if (req.method === "POST" && pathname === "/api/memory/forget") {
+      if (!activeProfile) return json(res, 401, { error: "not_signed_in" });
+      let body = {};
+      try { body = await readBody(req, 10000); } catch { body = {}; }
+      const out = forgetMemory(activeProfile, body, removeMemoryWhere);
+      if (!out.ok) return json(res, 404, { ok: false, error: out.error, stats: memoryStats(activeProfile) });
+      return json(res, 200, {
+        ok: true,
+        removed: out.removed,
+        stats: memoryStats(activeProfile),
+        profile: profileSummary(activeProfile),
+      });
+    }
+
+    if (req.method === "GET" && pathname === "/api/memory/export") {
+      if (!activeProfile) return json(res, 401, { error: "not_signed_in" });
+      const vault = exportMemory(activeProfile);
+      res.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="capri-memory-${new Date().toISOString().slice(0, 10)}.json"`,
+        "Cache-Control": "no-store",
+      });
+      return res.end(JSON.stringify(vault, null, 2));
     }
 
     if (req.method === "GET" && pathname === "/api/voices") {
