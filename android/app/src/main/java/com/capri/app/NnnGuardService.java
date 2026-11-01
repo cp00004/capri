@@ -36,6 +36,7 @@ public class NnnGuardService extends AccessibilityService {
 
 	private final Handler handler = new Handler(Looper.getMainLooper());
 	private long lastScanAt = 0;
+	private long lastScheduleAt = 0;
 	private String lastHitKey = "";
 	private long lastHitAt = 0;
 	private View veil;
@@ -85,6 +86,13 @@ public class NnnGuardService extends AccessibilityService {
 		if (pkg.isEmpty() || ignored(pkg)) return;
 		if (!EyeService.nnnLive(this)) {
 			hideVeil();
+			// The season can turn over while this service stays connected, and
+			// nothing else may be running to notice it.
+			long now0 = System.currentTimeMillis();
+			if (now0 - lastScheduleAt > 60_000L) {
+				lastScheduleAt = now0;
+				EyeService.nnnCheckSchedule(this);
+			}
 			return;
 		}
 		long now = System.currentTimeMillis();
