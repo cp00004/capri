@@ -28,7 +28,7 @@ final class NnnDomains {
 	private static final String SOURCE = "https://raw.githubusercontent.com/StevenBlack/hosts/master/alternates/porn-only/hosts";
 	private static final String CACHE = "porn-domains.txt";
 	private static final long REFRESH_MS = 7L * 24 * 60 * 60 * 1000L;
-	private static final Pattern HOST = Pattern.compile("[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9-]+)+\\.[a-z]{2,24}", Pattern.CASE_INSENSITIVE);
+	private static final Pattern HOST = Pattern.compile("[a-z0-9][a-z0-9-]*(?:\\.[a-z0-9-]+)*\\.[a-z]{2,24}", Pattern.CASE_INSENSITIVE);
 	private static final Pattern VALID = Pattern.compile("^[a-z0-9][a-z0-9.-]*\\.[a-z]{2,24}$");
 
 	private static volatile Set<String> domains = null;

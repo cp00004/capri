@@ -97,7 +97,7 @@ public class NnnGuardService extends AccessibilityService {
 		sb.append(pkg).append(' ');
 		CharSequence cls = event.getClassName();
 		if (cls != null) sb.append(cls).append(' ');
-		CharSequence[] texts = event.getText();
+		java.util.List<CharSequence> texts = event.getText();
 		if (texts != null) {
 			for (CharSequence text : texts) {
 				if (text != null && text.length() > 0) sb.append(text).append(' ');

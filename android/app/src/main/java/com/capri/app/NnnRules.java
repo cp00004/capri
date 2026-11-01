@@ -82,7 +82,7 @@ final class NnnRules {
 			if (i > 0) sb.append('|');
 			sb.append(Pattern.quote(words[i]));
 		}
-		return Pattern.compile(sb.append(")\\b"), Pattern.CASE_INSENSITIVE);
+		return Pattern.compile(sb.append(")\\b").toString(), Pattern.CASE_INSENSITIVE);
 	}
 
 	static String firstHit(String haystack) {
