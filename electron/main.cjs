@@ -2830,7 +2830,8 @@ app.whenReady().then(async () => {
   if (GUARD_MODE) { nnnGuardBoot(); return; }
   if (!HIDDEN_MODE && dedupeTakeover()) return;
   if (handoffToNewer()) return;
-  pruneOldVersions(readCurrent()?.dir || "");
+  // Deleting old builds can take a while and must never hold the window shut.
+  setTimeout(() => pruneOldVersions(readCurrent()?.dir || ""), 8000);
   // Pick a bindable port first; the bundled server is only a fallback, so a
   // failure here must never stop the window from opening.
   try { PORT = await findFreePort(PORT); } catch { /* keep the default */ }
