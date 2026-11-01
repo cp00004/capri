@@ -285,7 +285,7 @@ final class CapriVoice {
 		lastStatus = 0;
 		HttpURLConnection conn = null;
 		try {
-			conn = (HttpURLConnection) new URL(base + "/api/stt").openConnection();
+			conn = (HttpURLConnection) new URL(base + "/api/stt?lang=en").openConnection();
 			conn.setConnectTimeout(8000);
 			conn.setReadTimeout(45000);
 			conn.setRequestMethod("POST");
@@ -430,10 +430,15 @@ final class CapriVoice {
 		return prev[b.length()];
 	}
 
+	// Whisper's spellings of the name. Common foreign words that differ by a
+	// letter ("capra", "copri", "gabri") are absent: with a video playing they
+	// woke her several times an hour in the language of the video.
 	private static final java.util.Set<String> WAKE = new java.util.HashSet<>(java.util.Arrays.asList(
 			"capri", "capry", "capree", "caprie", "caprii", "kapri", "kapry", "kabri", "cabri",
-			"caprice", "cappy", "cappi", "capra", "caprio", "capris", "capre", "caprey",
-			"cappree", "kappri", "kappry", "kopri", "copri", "copree", "cabree", "caprie's"));
+			"caprice", "cappy", "cappi", "kappri", "kappry", "cappree"));
+
+	private static final java.util.Set<String> LEAD = new java.util.HashSet<>(java.util.Arrays.asList(
+			"hey", "ok", "okay", "yo", "hi", "hello", "oh", "um", "uh", "so"));
 
 	private static final java.util.Set<String> COPY = new java.util.HashSet<>(java.util.Arrays.asList(
 			"copy", "copi", "kopy", "copy's"));

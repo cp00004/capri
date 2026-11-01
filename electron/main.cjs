@@ -1487,22 +1487,15 @@ async function nnnPullList(force = false) {
 }
 
 // A page title or window title carrying a domain she has never heard of still
-// counts. Roots are indexed once per list, then a title is only as expensive as
-// the number of words in it.
-let nnnRoots = new Set();
+// counts. The hosts are indexed once per list, then a title is only as
+// expensive as the number of words in it.
 let nnnDomainSet = new Set();
 let nnnRootsFor = null;
 
 function nnnIndexRoots() {
   if (nnnRootsFor === nnnExtraDomains) return;
   nnnRootsFor = nnnExtraDomains;
-  nnnRoots = new Set();
   nnnDomainSet = new Set(nnnExtraDomains);
-  for (const host of nnnExtraDomains) {
-    const labels = host.split(".").filter(Boolean);
-    const root = labels.length > 1 ? labels[labels.length - 2] : labels[0];
-    if (root && root.length > 3 && !NNN_PATTERN.test(root)) nnnRoots.add(root);
-  }
 }
 
 // Words first, then the brand fragments, then an adult TLD. Everything the
@@ -1530,11 +1523,14 @@ function nnnDomainHit(text) {
   for (const raw of clean.split(/[^a-z0-9.-]+/)) {
     const token = raw.replace(/^[.\-]+|[.\-]+$/g, "");
     if (!token.includes(".") || token.length < 5) continue;
-    const labels = token.split(".").filter(Boolean);
-    if (labels.length < 2) continue;
-    const root = labels[labels.length - 2];
-    if (nnnDomainSet.has(token)) return token;
-    if (root && root.length > 3 && nnnRoots.has(root)) return token;
+    // The host itself, then each parent: "static.pornhub.com" is pornhub.com.
+    // A listed subdomain ("nsfw.github.io") never makes its whole root a hit,
+    // which used to close innocent github.com tabs.
+    let host = token;
+    for (let guard = 0; guard < 8 && host.includes("."); guard += 1) {
+      if (nnnDomainSet.has(host)) return host;
+      host = host.slice(host.indexOf(".") + 1);
+    }
   }
   return "";
 }
