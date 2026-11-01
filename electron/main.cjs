@@ -2166,6 +2166,94 @@ ipcMain.handle("capri-session-clear", () => {
   return true;
 });
 
+// ── Hands permission gate ────────────────────────────────────────────────────
+// Same file lib/hands-policy.js reads, so the settings panel edits exactly the
+// list the gate enforces. Actions in HANDS_NEVER_TRUST can never appear here.
+const HANDS_DIR = path.resolve(process.env.CAPRI_HANDS_DIR || path.join(process.env.APPDATA || app.getPath("appData"), "capri"));
+const handsPolicyFile = () => path.join(HANDS_DIR, "hands-policy.json");
+const handsUndoFile = () => path.join(HANDS_DIR, "hands-undo.json");
+
+function readHandsPolicy() {
+  const raw = readJson(handsPolicyFile());
+  const policy = raw && typeof raw === "object" ? raw : {};
+  return {
+    version: 1,
+    strict: Boolean(policy.strict),
+    dryRun: Boolean(policy.dryRun),
+    trusted: policy.trusted && typeof policy.trusted === "object" ? policy.trusted : {},
+  };
+}
+
+function handsRecent() {
+  try {
+    return fs.readFileSync(path.join(HANDS_DIR, "hands.log"), "utf8")
+      .trim().split(/\r?\n/).filter(Boolean).slice(-6).reverse()
+      .map((line) => { try { return JSON.parse(line); } catch { return null; } })
+      .filter(Boolean);
+  } catch { return []; }
+}
+
+function handsSummary() {
+  const policy = readHandsPolicy();
+  return {
+    ok: true,
+    strict: policy.strict,
+    dryRun: policy.dryRun,
+    trusted: Object.entries(policy.trusted).map(([key, row]) => ({
+      key,
+      tool: row?.tool || String(key).split("::")[0],
+      target: row?.target || "",
+      at: row?.at || "",
+      lastAt: row?.lastAt || row?.at || "",
+      hits: Number(row?.hits) || 0,
+    })).sort((a, b) => String(b.lastAt).localeCompare(String(a.lastAt))),
+    undo: readJson(handsUndoFile()),
+    recent: handsRecent(),
+  };
+}
+
+function undoHands() {
+  const row = readJson(handsUndoFile());
+  if (!row || !row.kind) return { ok: false, error: "nothing to undo" };
+  try {
+    if (row.kind === "restore") {
+      if (!row.backup || !fs.existsSync(row.backup)) return { ok: false, error: "the backup is gone" };
+      fs.mkdirSync(path.dirname(row.path), { recursive: true });
+      fs.copyFileSync(row.backup, row.path);
+    } else if (row.kind === "remove") {
+      if (fs.existsSync(row.path)) fs.rmSync(row.path, { force: true });
+    } else if (row.kind === "truncate") {
+      fs.truncateSync(row.path, Number(row.size) || 0);
+    } else if (row.kind === "rmdir") {
+      if (fs.existsSync(row.path)) fs.rmdirSync(row.path);
+    } else if (row.kind === "move") {
+      if (!fs.existsSync(row.from)) return { ok: false, error: "the moved item is gone" };
+      if (fs.existsSync(row.to)) return { ok: false, error: "something already sits at the old path" };
+      fs.mkdirSync(path.dirname(row.to), { recursive: true });
+      fs.renameSync(row.from, row.to);
+    } else {
+      return { ok: false, error: "that action cannot be undone" };
+    }
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+  try { fs.unlinkSync(handsUndoFile()); } catch { /* already gone */ }
+  return { ok: true, output: row.label || "undone" };
+}
+
+ipcMain.handle("capri-hands-policy", () => handsSummary());
+ipcMain.handle("capri-hands-policy-set", (_event, patch) => {
+  const policy = readHandsPolicy();
+  const body = patch && typeof patch === "object" ? patch : {};
+  if (typeof body.strict === "boolean") policy.strict = body.strict;
+  if (typeof body.dryRun === "boolean") policy.dryRun = body.dryRun;
+  if (body.clear === true) policy.trusted = {};
+  if (body.remove && policy.trusted[body.remove]) delete policy.trusted[body.remove];
+  try { writeJson(handsPolicyFile(), policy); } catch { /* the gate keeps its last copy */ }
+  return handsSummary();
+});
+ipcMain.handle("capri-hands-undo", () => undoHands());
+
 ipcMain.on("capri-eye-config", (_event, cfg) => {
   eyeEnabled = cfg?.enabled !== false;
   eyeBanter = cfg?.banter !== false;

@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld("capriNative", {
   saveSession: (token) => ipcRenderer.invoke("capri-session-save", String(token || "")),
   loadSession: () => ipcRenderer.invoke("capri-session-load"),
   clearSession: () => ipcRenderer.invoke("capri-session-clear"),
+  handsPolicy: () => ipcRenderer.invoke("capri-hands-policy"),
+  handsPolicySet: (patch) => ipcRenderer.invoke("capri-hands-policy-set", patch || {}),
+  handsUndo: () => ipcRenderer.invoke("capri-hands-undo"),
   onEyeAsk: (cb) => {
     if (typeof cb === "function") ipcRenderer.on("capri-eye-ask", (_event, text) => cb(String(text || "")));
   },
