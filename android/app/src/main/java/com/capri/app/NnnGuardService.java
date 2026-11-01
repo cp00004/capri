@@ -135,6 +135,7 @@ public class NnnGuardService extends AccessibilityService {
 		return h.contains("http://") || h.contains("https://");
 	}
 
+	private static boolean isBrowser(String pkg) {
 		String p = pkg.toLowerCase(Locale.US);
 		return p.contains("browser") || p.contains("chrome") || p.contains("firefox")
 				|| p.contains("opera") || p.contains("brave") || p.contains("duckduckgo")
