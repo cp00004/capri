@@ -1300,7 +1300,7 @@ const NNN_ALLOWED = [
 // Desktop apps of the same services: the process name settles it even when the
 // window title is just the song or the chat.
 const NNN_ALLOWED_APPS = /^(youtube|tiktok|whatsapp|whatsapp ?beta|ichigo)/i;
-const NNN_ALLOWED_TITLE = /\b(?:youtube|youtu\.be|tiktok|whatsapp|ichigo\.tv)\b/i;
+const NNN_ALLOWED_TITLE = /\b(?:youtube|youtu\.be|tiktok|whatsapp|ichigo\.?tv)\b/i;
 
 const NNN_FILE_LIST = () => path.join(app.getPath("userData"), "no-nut-domains.json");
 // Several independent porn/NSFW lists, merged. One list is never the whole

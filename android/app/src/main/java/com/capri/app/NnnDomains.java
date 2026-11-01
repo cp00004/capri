@@ -111,10 +111,13 @@ final class NnnDomains {
 
 	// Whether the screen is one of those sites. The first host in the readable
 	// text is the address bar in every browser that exposes one; hosts further
-	// down are page content.
+	// down are page content. The tab title ("... - IchigoTV") counts too, for
+	// browsers whose address bar never reaches accessibility.
 	private static boolean allowedPage(String haystack) {
 		if (haystack == null || haystack.isEmpty()) return false;
-		Matcher m = HOST.matcher(haystack.toLowerCase(Locale.US));
+		String low = haystack.toLowerCase(Locale.US);
+		if (low.contains("ichigotv")) return true;
+		Matcher m = HOST.matcher(low);
 		return m.find() && isAllowedHost(m.group());
 	}
 
