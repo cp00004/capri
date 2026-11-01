@@ -2898,6 +2898,15 @@ async function sayLocally(text, userText) {
   setPhase("speaking");
   typer.push(line);
   typer.finish();
+  // A local answer must hand the mic back the same way a relayed one does, or
+  // the ear stays shut after the first "open youtube".
+  speech.onDrain = () => {
+    if (!state.streaming && !rec.active && !rec.starting && !cmdRec.active) {
+      if (state.phase !== "listening") setPhase("idle");
+      if (rec.listenQueued) startListening();
+      else if (wakeWord.enabled) startWakeWord();
+    }
+  };
   if (state.voiceOn) speech.enqueue(line);
   else typer.release();
   state.history.push({ role: "user", content: String(userText || "").slice(0, 400) });

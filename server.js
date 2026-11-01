@@ -1756,7 +1756,12 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       } else if (pcLocked) {
         result = { ok: false, error: "her hands are locked on this PC" };
       } else if (HANDS_TOKEN) {
-        result = await runHandsTool(call.function.name, args);
+        // A PC link that is down must not hold the turn for the agent's whole
+        // 50 second budget: the user is sitting in silence waiting for a line.
+        result = await Promise.race([
+          runHandsTool(call.function.name, args),
+          new Promise((resolve) => setTimeout(() => resolve({ ok: false, error: "The PC did not answer in time." }), 15_000)),
+        ]);
       } else {
         // Running in-process on the PC: the same permission gate the agent uses.
         const { prepare, snapshot, recordUndo } = await import("./lib/hands-policy.js");
