@@ -2281,6 +2281,17 @@ function nnnStatus() {
 }
 
 // ── The hidden guard ─────────────────────────────────────────────────────────
+// The seal exists to keep the app's own close button from calling it quits. It
+// was also refusing the guard's exit, so the first watchdog run while the app
+// was open sat in Task Manager forever - the second Capri he could not close -
+// and Task Scheduler ignored every later run because the task never finished.
+// A guard leaving is not the owner escaping, so it uses app.exit directly.
+function guardLeave(why) {
+  logLine(`nnn-guard: ${why} - standing down`);
+  quitting = true;
+  setTimeout(() => app.exit(0), 500);
+}
+
 function nnnGuardBoot() {
   logLine(`nnn-guard: start v${app.getVersion()} pid=${process.pid}`);
   nnnLoad();
@@ -2291,20 +2302,18 @@ function nnnGuardBoot() {
     // second Capri in Task Manager only confuses the owner. The repeating task
     // starts this process again the moment the heartbeat stops.
     if (nnnAppAlive()) {
-      logLine("nnn-guard: app is running - standing down");
-      setTimeout(() => app.quit(), 800);
+      guardLeave("app is running");
       return;
     }
     nnnStart();
     nnnGuardApp();
     // This process is a fallback, not a twin: the moment the hidden app has a
     // fresh heartbeat it steps aside and leaves exactly one Capri running.
-    setInterval(() => {
+    const stepAside = setInterval(() => {
       nnnGuardApp();
-      if (nnnAppAlive()) {
-        logLine("nnn-guard: app is back - standing down");
-        app.quit();
-      }
+      if (!nnnAppAlive()) return;
+      clearInterval(stepAside);
+      guardLeave("app is back");
     }, 15_000);
     return;
   }
@@ -2314,7 +2323,7 @@ function nnnGuardBoot() {
   nnnStopTimer();
   setTimeout(() => {
     if (nnnCheckSchedule().mode === "active") { nnnLockFiles(true); nnnStart(); }
-    else app.quit();
+    else guardLeave("season is off");
   }, 60_000);
 }
 
