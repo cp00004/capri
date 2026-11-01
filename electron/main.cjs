@@ -467,9 +467,11 @@ const sameExe = (a, b) => {
 };
 
 function newestInstalledExe() {
+  // current.json names the copy the installer put down, so that is what comes
+  // back even when the duplicate is a different build or a loose copy of exe.
   const current = readCurrent();
   const exe = current?.dir ? path.join(current.dir, "Capri.exe") : "";
-  if (exe && fs.existsSync(exe) && cmpVersion(current.version, app.getVersion()) > 0) return exe;
+  if (exe && fs.existsSync(exe)) return exe;
   return process.execPath;
 }
 
