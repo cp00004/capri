@@ -724,7 +724,7 @@ async function chatCompletion({ provider, messages, tools, signal }) {
   // A free relay that accepts the socket and then goes silent used to hold the
   // whole turn open with no answer. Cap each attempt so the next link in the
   // chain gets a shot while the user is still waiting.
-  const budget = AbortSignal.timeout(30_000);
+  const budget = AbortSignal.timeout(20_000);
   const guard = signal ? AbortSignal.any([signal, budget]) : budget;
   const upstream = await fetch(`${provider.base}/chat/completions`, {
     method: "POST",
@@ -1404,7 +1404,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   // Four links is enough to cover a capped bucket or two; walking every free
   // relay in the chain is what made a single turn feel like a dead app.
   const maxAttempts = Math.max(1, Math.min(candidates.length, 4));
-  const turnUntil = Date.now() + 40_000;
+  const turnUntil = Date.now() + 32_000;
   let waitSlept = false;
   let lastProvider = candidates[0] || { name: CHAT_PROVIDER };
 
@@ -1588,7 +1588,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
     let wentQuiet = false;
     try {
       while (true) {
-        const { value, done } = await readChunk(reader, 14_000);
+        const { value, done } = await readChunk(reader, 10_000);
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         let idx;
@@ -2274,7 +2274,7 @@ async function geminiStt(buffer, type, hint = "", deadline = Date.now() + 25_000
             method: "POST",
             headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
             body,
-            signal: AbortSignal.timeout(Math.max(2500, Math.min(12_000, deadline - Date.now()))),
+            signal: AbortSignal.timeout(Math.max(2500, Math.min(8000, deadline - Date.now()))),
           }
         );
         if (!upstream.ok) continue;
@@ -2313,7 +2313,7 @@ async function mistralStt(buffer, type, hint = "", deadline = Date.now() + 25_00
           method: "POST",
           headers: { Authorization: `Bearer ${key}` },
           body: form,
-          signal: AbortSignal.timeout(Math.max(2500, Math.min(10_000, deadline - Date.now()))),
+          signal: AbortSignal.timeout(Math.max(2500, Math.min(8000, deadline - Date.now()))),
         });
         if (!upstream.ok) continue;
         const data = await upstream.json().catch(() => null);
@@ -2364,8 +2364,8 @@ async function handleStt(req, res) {
   // The mic request has a hard budget. Three Whisper passes plus a Gemini sweep
   // could run for over a minute, which read as "she heard me and froze".
   const started = Date.now();
-  const deadline = started + 36_000;
-  const groqUntil = started + 22_000;
+  const deadline = started + 26_000;
+  const groqUntil = started + 16_000;
   const ordered = GROQ_KEYS.length
     ? GROQ_KEYS.slice(sttRotation % GROQ_KEYS.length).concat(GROQ_KEYS.slice(0, sttRotation % GROQ_KEYS.length))
     : [];
@@ -2387,7 +2387,7 @@ async function handleStt(req, res) {
           method: "POST",
           headers: { Authorization: `Bearer ${key}` },
           body: form,
-          signal: AbortSignal.timeout(Math.max(3000, Math.min(10_000, groqUntil - Date.now()))),
+          signal: AbortSignal.timeout(Math.max(2500, Math.min(8000, groqUntil - Date.now()))),
         });
 
         const raw = await upstream.text();

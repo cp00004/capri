@@ -3038,7 +3038,7 @@ async function respond(userText) {
     if (answered) return;
     timedOut = true;
     try { activeAbort?.abort(); } catch { /* already done */ }
-  }, 48_000);
+  }, 40_000);
 
   speech.stopped = false;
   speech.onDrain = () => {
