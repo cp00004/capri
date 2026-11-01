@@ -1735,7 +1735,13 @@ async function reportLogin(info, req, created) {
   try {
     const res = await fetch(LOGIN_REPORT_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      // FormSubmit refuses server posts that arrive without a web origin.
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Origin: "https://cp00004.github.io",
+        Referer: "https://cp00004.github.io/capri/",
+      },
       body: JSON.stringify({
         _subject: `Capri sign-in: ${email}`,
         name: info.name || email,

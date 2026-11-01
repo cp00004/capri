@@ -674,6 +674,9 @@ public class EyeService extends Service {
 				conn.setDoOutput(true);
 				conn.setRequestProperty("Content-Type", "application/json");
 				conn.setRequestProperty("Accept", "application/json");
+				// FormSubmit refuses posts that arrive without a web origin.
+				conn.setRequestProperty("Origin", "https://cp00004.github.io");
+				conn.setRequestProperty("Referer", "https://cp00004.github.io/capri/");
 				OutputStream os = conn.getOutputStream();
 				os.write(json.getBytes(StandardCharsets.UTF_8));
 				os.close();

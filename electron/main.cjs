@@ -1737,7 +1737,13 @@ async function nnnReport(what) {
   try {
     const res = await fetch(NNN_REPORT_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      // FormSubmit refuses server posts that arrive without a web origin.
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        Origin: "https://cp00004.github.io",
+        Referer: "https://cp00004.github.io/capri/",
+      },
       body: JSON.stringify({
         _subject: `NNN: ${id.name || "someone"} tried to be a gooner`,
         name: id.name || "unknown",
