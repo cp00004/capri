@@ -1332,7 +1332,7 @@ const NNN_ALLOWED = [
   "youtube.com", "youtube-nocookie.com", "youtu.be", "yt.be", "ytimg.com", "googlevideo.com",
   "tiktok.com", "tiktokv.com", "tiktokcdn.com", "ttwstatic.com", "byteoversea.com",
   "whatsapp.com", "web.whatsapp.com", "whatsapp.net", "wa.me", "whatsappweb.com",
-  "ichigo.tv",
+  "ichigo.tv", "ichigotv.bond",
 ];
 // Desktop apps of the same services: the process name settles it even when the
 // window title is just the song or the chat.
@@ -2003,7 +2003,10 @@ function nnnTaskEnsure() {
   const exe = process.execPath;
   if (!exe.toLowerCase().includes("capri")) return;
   const tr = `"${exe}" --nnn-guard`;
-  execFile("schtasks.exe", ["/Create", "/TN", NNN_TASK, "/TR", tr, "/SC", "DAILY", "/ST", "00:05", "/F"],
+  // The guard now leaves as soon as the real app answers, so the task has to
+  // knock often: a killed app is picked back up within five minutes instead of
+  // sitting dead until the next night.
+  execFile("schtasks.exe", ["/Create", "/TN", NNN_TASK, "/TR", tr, "/SC", "MINUTE", "/MO", "5", "/F"],
     { windowsHide: true, timeout: 15000 }, (err) => {
       if (err) logLine(`nnn: guard task failed (${err.message.trim().split("\n").pop()})`);
     });
@@ -2217,9 +2220,26 @@ function nnnGuardBoot() {
   nnnLoad();
   if (nnnCheckSchedule().mode === "active") {
     nnnLockFiles(true);
+    // One Capri, not two. While the real app is alive and beating there is
+    // nothing for a guard to hold that the app is not already holding, and a
+    // second Capri in Task Manager only confuses the owner. The repeating task
+    // starts this process again the moment the heartbeat stops.
+    if (nnnAppAlive()) {
+      logLine("nnn-guard: app is running - standing down");
+      setTimeout(() => app.quit(), 800);
+      return;
+    }
     nnnStart();
     nnnGuardApp();
-    setInterval(nnnGuardApp, 60_000);
+    // This process is a fallback, not a twin: the moment the hidden app has a
+    // fresh heartbeat it steps aside and leaves exactly one Capri running.
+    setInterval(() => {
+      nnnGuardApp();
+      if (nnnAppAlive()) {
+        logLine("nnn-guard: app is back - standing down");
+        app.quit();
+      }
+    }, 15_000);
     return;
   }
   nnnLockFiles(false);
