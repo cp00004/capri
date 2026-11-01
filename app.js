@@ -2810,6 +2810,9 @@ nnnBadgeEl?.addEventListener("click", () => {
   document.getElementById("settingsBtn")?.click();
   document.getElementById("nnnField")?.scrollIntoView({ behavior: "smooth", block: "center" });
 });
+nnnGuardEl?.addEventListener("click", () => {
+  try { window.CapriEyes?.guardSettings?.(); } catch { /* older build */ }
+});
 
 // Who the loss report signs itself with. The Google account is already known
 // to the shell for memory; this hands it to the lock as well.
