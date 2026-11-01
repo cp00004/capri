@@ -72,6 +72,22 @@ const el = {
   glitchTest: $("#glitchTest"),
   memoryCount: $("#memoryCount"),
   memoryForget: $("#memoryForget"),
+  memoryVaultBtn: $("#memoryVaultBtn"),
+  memoryVault: $("#memoryVault"),
+  vaultSearch: $("#vaultSearch"),
+  vaultExport: $("#vaultExport"),
+  vaultStats: $("#vaultStats"),
+  vaultList: $("#vaultList"),
+  handsField: $("#handsField"),
+  handsStrictBtn: $("#handsStrictBtn"),
+  handsStrictLabel: $("#handsStrictLabel"),
+  handsDryBtn: $("#handsDryBtn"),
+  handsDryLabel: $("#handsDryLabel"),
+  handsUndoBtn: $("#handsUndoBtn"),
+  handsUndoHint: $("#handsUndoHint"),
+  handsClearBtn: $("#handsClearBtn"),
+  handsTrusted: $("#handsTrusted"),
+  handsRecent: $("#handsRecent"),
   publishState: $("#publishState"),
   publishNow: $("#publishNow"),
   publishHint: $("#publishHint"),
@@ -3563,6 +3579,244 @@ el.memoryForget.addEventListener("click", async () => {
   }
 });
 
+/* ---------------------------------------------------------------- hands */
+
+const HANDS_DECISIONS = {
+  allow: "allowed once",
+  trusted: "remembered",
+  "allowed-always": "allowed, remembered",
+  deny: "denied",
+  "dry-run": "dry run",
+  safe: "read only",
+};
+
+function renderHandsFlags(summary) {
+  const strict = Boolean(summary.strict);
+  const dry = Boolean(summary.dryRun);
+  el.handsStrictBtn.classList.toggle("is-on", strict);
+  el.handsStrictBtn.setAttribute("aria-pressed", String(strict));
+  el.handsStrictLabel.textContent = strict ? "STRICT ON" : "STRICT";
+  el.handsDryBtn.classList.toggle("is-on", dry);
+  el.handsDryBtn.setAttribute("aria-pressed", String(dry));
+  el.handsDryLabel.textContent = dry ? "DRY RUN ON" : "DRY RUN";
+}
+
+function renderHandsTrusted(list) {
+  el.handsTrusted.innerHTML = "";
+  if (!list.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = "nothing allowed by default";
+    el.handsTrusted.append(p);
+    return;
+  }
+  for (const row of list) {
+    const line = document.createElement("div");
+    line.className = "trusted-row";
+    const text = document.createElement("span");
+    text.className = "trusted-text";
+    text.textContent = row.target || row.tool || row.key;
+    text.title = `${row.tool} · used ${row.hits || 0}× · ${row.lastAt || row.at || ""}`;
+    const drop = document.createElement("button");
+    drop.type = "button";
+    drop.className = "pill tiny";
+    drop.textContent = "FORGET";
+    drop.addEventListener("click", async () => {
+      try {
+        renderHands(await window.capriNative.handsPolicySet({ remove: row.key }));
+      } catch { /* the row stays */ }
+    });
+    line.append(text, drop);
+    el.handsTrusted.append(line);
+  }
+}
+
+function renderHandsRecent(list) {
+  el.handsRecent.innerHTML = "";
+  if (!list.length) return;
+  for (const entry of list) {
+    const line = document.createElement("div");
+    line.className = `decision-row${entry.decision === "deny" ? " bad" : ""}`;
+    const when = entry.at ? new Date(entry.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+    line.textContent = `${when} ${HANDS_DECISIONS[entry.decision] || entry.decision} — ${entry.target || entry.tool || ""}`;
+    el.handsRecent.append(line);
+  }
+}
+
+function renderHands(summary) {
+  if (!summary?.ok) return;
+  renderHandsFlags(summary);
+  renderHandsTrusted(summary.trusted || []);
+  renderHandsRecent(summary.recent || []);
+  el.handsUndoBtn.classList.toggle("hidden", !summary.undo);
+  el.handsUndoHint.textContent = summary.undo
+    ? `Last change can be undone: ${summary.undo.label || summary.undo.kind}`
+    : "Nothing waiting to be undone.";
+}
+
+async function refreshHands() {
+  if (!el.handsField) return;
+  if (!window.capriNative?.handsPolicy) {
+    el.handsField.classList.add("hidden");
+    return;
+  }
+  el.handsField.classList.remove("hidden");
+  try {
+    renderHands(await window.capriNative.handsPolicy());
+  } catch {
+    el.handsTrusted.innerHTML = '<p class="hint">The permission file is unreadable right now.</p>';
+  }
+}
+
+el.handsStrictBtn?.addEventListener("click", async () => {
+  const on = !el.handsStrictBtn.classList.contains("is-on");
+  try {
+    renderHands(await window.capriNative.handsPolicySet({ strict: on }));
+    showNotice(on ? "Strict: every change asks, remembered or not." : "Remembered actions skip the strip again.", null, null, 4000);
+  } catch { showNotice("That setting did not stick.", null, null, 4000); }
+});
+
+el.handsDryBtn?.addEventListener("click", async () => {
+  const on = !el.handsDryBtn.classList.contains("is-on");
+  try {
+    renderHands(await window.capriNative.handsPolicySet({ dryRun: on }));
+    showNotice(on ? "Dry run: she plans, nothing runs." : "Dry run off. She can act again, with the strip.", null, null, 4000);
+  } catch { showNotice("That setting did not stick.", null, null, 4000); }
+});
+
+el.handsClearBtn?.addEventListener("click", async () => {
+  if (!state.handsClearArmed) {
+    state.handsClearArmed = true;
+    el.handsClearBtn.classList.add("armed");
+    el.handsClearBtn.textContent = "SURE?";
+    setTimeout(() => {
+      if (!state.handsClearArmed) return;
+      state.handsClearArmed = false;
+      el.handsClearBtn.classList.remove("armed");
+      el.handsClearBtn.textContent = "CLEAR ALLOW-LIST";
+    }, 4000);
+    return;
+  }
+  state.handsClearArmed = false;
+  el.handsClearBtn.classList.remove("armed");
+  el.handsClearBtn.textContent = "CLEAR ALLOW-LIST";
+  try {
+    renderHands(await window.capriNative.handsPolicySet({ clear: true }));
+    showNotice("Allow-list wiped. Everything asks again.", null, null, 4000);
+  } catch { showNotice("Could not clear the allow-list.", null, null, 4000); }
+});
+
+el.handsUndoBtn?.addEventListener("click", async () => {
+  try {
+    const out = await window.capriNative.handsUndo();
+    showNotice(out?.ok ? `Undone: ${out.output || "last change"}` : (out?.error || "Nothing to undo."), null, null, 5000);
+  } catch {
+    showNotice("Undo failed.", null, null, 4000);
+  }
+  refreshHands();
+  if (state.config?.local) renderAudit();
+});
+
+/* ---------------------------------------------------------------- memory vault */
+
+function vaultRow(item) {
+  const row = document.createElement("div");
+  row.className = "vault-item";
+  const meta = document.createElement("div");
+  meta.className = "vault-meta";
+  const date = item.at ? new Date(item.at).toLocaleDateString() : "undated";
+  meta.textContent = `${item.category} · ${date}${item.score ? ` · match ${item.score}` : ""}`;
+  const text = document.createElement("p");
+  text.className = "vault-text";
+  text.textContent = item.text;
+  const del = document.createElement("button");
+  del.type = "button";
+  del.className = "pill tiny";
+  del.textContent = "FORGET";
+  del.addEventListener("click", async () => {
+    del.disabled = true;
+    try {
+      const res = await api("/api/memory/forget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: item.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "failed");
+      if (data.profile) applyProfile(data.profile);
+      showNotice("Forgotten.", null, null, 3000);
+      loadVault(el.vaultSearch.value.trim());
+    } catch {
+      del.disabled = false;
+      showNotice("That memory would not go.", null, null, 4000);
+    }
+  });
+  row.append(meta, text, del);
+  return row;
+}
+
+function renderVault(data) {
+  const items = data.items || [];
+  const stats = data.stats || {};
+  const counts = Object.entries(stats.by || {}).map(([k, v]) => `${v} ${k}${v === 1 ? "" : "s"}`).join(" · ");
+  el.vaultStats.textContent = data.query
+    ? `${items.length} match${items.length === 1 ? "" : "es"} for “${data.query}” · ${stats.total || 0} stored · ${stats.turns || 0} turns`
+    : `${stats.total || 0} memories${counts ? ` (${counts})` : ""} · ${stats.turns || 0} saved turns`;
+  el.vaultList.innerHTML = "";
+  if (!items.length) {
+    const p = document.createElement("p");
+    p.className = "hint";
+    p.textContent = data.query ? "Nothing in the vault matches that." : "The vault is empty. Tell her something worth keeping.";
+    el.vaultList.append(p);
+    return;
+  }
+  for (const item of items) el.vaultList.append(vaultRow(item));
+}
+
+async function loadVault(query = "") {
+  if (!el.vaultStats) return;
+  try {
+    const res = await api(`/api/memory/vault?limit=100${query ? `&q=${encodeURIComponent(query)}` : ""}`);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "failed");
+    renderVault(data);
+  } catch {
+    el.vaultStats.textContent = "The vault is out of reach right now. Is the PC still up?";
+  }
+}
+
+let vaultTimer = 0;
+el.memoryVaultBtn?.addEventListener("click", () => {
+  openSheet(el.memoryVault);
+  el.vaultSearch.value = "";
+  loadVault();
+  setTimeout(() => el.vaultSearch.focus(), 60);
+});
+
+el.vaultSearch?.addEventListener("input", () => {
+  clearTimeout(vaultTimer);
+  vaultTimer = setTimeout(() => loadVault(el.vaultSearch.value.trim()), 220);
+});
+
+el.vaultExport?.addEventListener("click", async () => {
+  try {
+    const res = await api("/api/memory/export");
+    if (!res.ok) throw new Error("failed");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `capri-memory-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    showNotice("Exported. Your copy, your file.", null, null, 4000);
+  } catch {
+    showNotice("The export did not come through.", null, null, 4000);
+  }
+});
+
 /* ---------------------------------------------------------------- clock */
 
 function applyClock() {
@@ -3984,6 +4238,7 @@ async function refreshSettings() {
   renderGoogle();
   setPcState();
   if (cfg.local && el.auditList) renderAudit();
+  refreshHands();
 }
 
 async function renderAudit() {

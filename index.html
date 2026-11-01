@@ -201,9 +201,10 @@
       <span class="label">memory</span>
       <div class="row wrap">
         <span class="value" id="memoryCount">0 saved</span>
+        <button id="memoryVaultBtn" class="pill accent" type="button">OPEN VAULT</button>
         <button id="memoryForget" class="pill" type="button">FORGET IT ALL</button>
       </div>
-      <p class="hint">Everything you tell her - facts, notes, favourites and every conversation turn - stays in your profile on your Google account, not in the repo. Sign in on the PC or the phone and she remembers the same you.</p>
+      <p class="hint">Everything you tell her - facts, notes, favourites and every conversation turn - stays in your profile on your Google account, not in the repo. The vault searches all of it, forgets single items, and exports a copy. Sign in on the PC or the phone and she remembers the same you.</p>
     </div>
 
     <div class="field">
@@ -283,6 +284,22 @@
       <p class="hint" id="pcHint">PC control is off for this device.</p>
     </div>
 
+    <div class="field hidden" id="handsField">
+      <span class="label">hands permissions</span>
+      <div class="row wrap">
+        <button id="handsStrictBtn" class="pill" type="button" aria-pressed="false"><span class="led"></span><span id="handsStrictLabel">STRICT</span></button>
+        <button id="handsDryBtn" class="pill" type="button" aria-pressed="false"><span class="led"></span><span id="handsDryLabel">DRY RUN</span></button>
+      </div>
+      <div class="row wrap">
+        <button id="handsUndoBtn" class="pill accent hidden" type="button">UNDO LAST</button>
+        <button id="handsClearBtn" class="pill" type="button">CLEAR ALLOW-LIST</button>
+      </div>
+      <p class="hint" id="handsHint">Anything that changes this PC asks first in a native strip with ALLOW ONCE, ALWAYS ALLOW or DENY. Always-allow is remembered per action and target, and never for shell commands, deletes, force-kills or typed keys. Strict ignores the remembered list. Dry run lets her plan but runs nothing.</p>
+      <p class="hint mono" id="handsUndoHint"></p>
+      <div id="handsTrusted" class="trusted-list"><p class="hint">nothing allowed by default</p></div>
+      <div id="handsRecent" class="decision-list"></div>
+    </div>
+
     <div class="field">
       <span class="label">link</span>
       <div class="row wrap">
@@ -304,6 +321,25 @@
       <span class="label">last actions</span>
       <div id="auditList" class="audit"><p class="hint">nothing yet</p></div>
     </div>
+  </div>
+</section>
+
+<!-- ================================================= memory vault -->
+<section id="memoryVault" class="sheet hidden" aria-label="Memory vault">
+  <div class="sheet-head">
+    <h2>MEMORY VAULT</h2>
+    <button class="icon" type="button" data-close="memoryVault" aria-label="Close">&times;</button>
+  </div>
+  <div class="sheet-body">
+    <div class="field">
+      <span class="label">everything she keeps about this account</span>
+      <div class="row">
+        <input id="vaultSearch" class="text" type="search" placeholder="deploy pipeline, music, name…" autocomplete="off" spellcheck="false" />
+        <button id="vaultExport" class="pill" type="button">EXPORT</button>
+      </div>
+      <p class="hint" id="vaultStats">reading the vault…</p>
+    </div>
+    <div id="vaultList" class="vault-list"></div>
   </div>
 </section>
 
