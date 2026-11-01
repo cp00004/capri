@@ -84,6 +84,9 @@ public class NnnGuardService extends AccessibilityService {
 			return;
 		}
 		if (pkg.isEmpty() || ignored(pkg)) return;
+		// YouTube, TikTok, WhatsApp and ichigo.tv are his call: their own feeds,
+		// songs and chats keep whatever words they carry.
+		if (NnnDomains.isAllowedApp(pkg)) return;
 		if (!EyeService.nnnLive(this)) {
 			hideVeil();
 			// The season can turn over while this service stays connected, and

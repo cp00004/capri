@@ -123,12 +123,17 @@ function syncShortcuts() {
     path.join(app.getPath("desktop"), "Capri.lnk"),
     path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Capri.lnk"),
     path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Capri", "Capri.lnk"),
+    path.join(process.env.APPDATA || "", "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar", "Capri.lnk"),
   ];
   const quote = (value) => `'${String(value).replace(/'/g, "''")}'`;
+  // The icon follows the build too: a link whose icon points at a version
+  // folder the update already deleted shows a blank square. A custom icon the
+  // user chose and that still exists is left exactly as it is.
   const script = links.map((link) =>
-    `$l=${quote(link)}; if (Test-Path $l) { $s=(New-Object -ComObject WScript.Shell).CreateShortcut($l); ` +
-    `if ($s.TargetPath -ne ${quote(exe)}) { $s.TargetPath=${quote(exe)}; ` +
-    `$s.WorkingDirectory=${quote(path.dirname(exe))}; $s.IconLocation=${quote(exe + ",0")}; $s.Save() } }`
+    `$l=${quote(link)}; if (Test-Path $l) { $s=(New-Object -ComObject WScript.Shell).CreateShortcut($l); $w=$false; ` +
+    `if ($s.TargetPath -ne ${quote(exe)}) { $s.TargetPath=${quote(exe)}; $s.WorkingDirectory=${quote(path.dirname(exe))}; $w=$true } ` +
+    `$f=$s.IconLocation -replace ',\\d+$',''; if ($f -and -not (Test-Path -LiteralPath $f)) { $s.IconLocation=${quote(exe + ",0")}; $w=$true } ` +
+    `if ($w) { $s.Save() } }`
   ).join("; ");
   execFile("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
     { windowsHide: true }, (err) => { if (err) logLine(`shortcuts: sync failed (${err.message})`); });
@@ -1283,6 +1288,20 @@ const NNN_DOMAINS = [
   "gelbooru.com", "danbooru.donmai.us", "sankakucomplex.com", "animeheaven.me", "9anime.to",
 ];
 
+// Ask-for-these-back sites. A music video called "sexy anime" is the music, not
+// a porn page, so a title or address on these hosts is never a hit - and the
+// host lists are filtered with the same set so DNS never takes them down.
+const NNN_ALLOWED = [
+  "youtube.com", "youtube-nocookie.com", "youtu.be", "yt.be", "ytimg.com", "googlevideo.com",
+  "tiktok.com", "tiktokv.com", "tiktokcdn.com", "ttwstatic.com", "byteoversea.com",
+  "whatsapp.com", "web.whatsapp.com", "whatsapp.net", "wa.me", "whatsappweb.com",
+  "ichigo.tv",
+];
+// Desktop apps of the same services: the process name settles it even when the
+// window title is just the song or the chat.
+const NNN_ALLOWED_APPS = /^(youtube|tiktok|whatsapp|whatsapp ?beta|ichigo)/i;
+const NNN_ALLOWED_TITLE = /\b(?:youtube|youtu\.be|tiktok|whatsapp|ichigo\.tv)\b/i;
+
 const NNN_FILE_LIST = () => path.join(app.getPath("userData"), "no-nut-domains.json");
 // Several independent porn/NSFW lists, merged. One list is never the whole
 // internet; four of them catch the sites the others have never heard of.
@@ -1316,6 +1335,7 @@ function nnnAllDomains() {
   for (const host of [...NNN_DOMAINS, ...nnnExtraDomains]) {
     const clean = String(host || "").trim().toLowerCase().replace(/^www\./, "");
     if (!clean || clean === "localhost" || seen.has(clean)) continue;
+    if (nnnAllowedDomain(clean)) continue;
     seen.add(clean);
     out.push(clean);
   }
@@ -1341,7 +1361,9 @@ async function nnnPullList(force = false) {
         const host = (parts.length > 1 ? parts[1] : parts[0]).toLowerCase();
         if (!/^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(host)) continue;
         if (host === "localhost" || host === "local" || host === "localhost.localdomain") continue;
-        found.add(host.replace(/^www\./, ""));
+        const bare = host.replace(/^www\./, "");
+        if (nnnAllowedDomain(bare)) continue;
+        found.add(bare);
       }
       answered += 1;
     } catch (err) {
@@ -1408,6 +1430,32 @@ function nnnDomainHit(text) {
     if (root && root.length > 3 && nnnRoots.has(root)) return token;
   }
   return "";
+}
+
+// A host boundary, not a substring: "notyoutube.com" is not YouTube.
+function nnnAllowedDomain(text) {
+  const low = String(text || "").toLowerCase();
+  if (!low) return false;
+  for (const host of NNN_ALLOWED) {
+    let at = low.indexOf(host);
+    while (at >= 0) {
+      const before = at === 0 ? "" : low[at - 1];
+      const after = low[at + host.length] || "";
+      if (!/[a-z0-9-]/.test(before) && !/[a-z0-9-]/.test(after)) return true;
+      at = low.indexOf(host, at + 1);
+    }
+  }
+  return false;
+}
+
+// One question per window: is this a place he asked to keep? A readable
+// address decides it; only when the address is unreadable does the title
+// count, so a porn tab titled "Best anime - YouTube" still dies.
+function nnnAllowedWindow(row) {
+  if (NNN_ALLOWED_APPS.test(String(row.proc || ""))) return true;
+  const url = String(row.url || "");
+  if (url) return nnnAllowedDomain(url);
+  return nnnAllowedDomain(row.title) || NNN_ALLOWED_TITLE.test(String(row.title || ""));
 }
 
 const nnnFile = () => path.join(NNN_DATA, "no-nut-november.json");
@@ -1832,6 +1880,9 @@ async function nnnSweep() {
     const rows = await nnnWindows();
     for (const row of rows) {
       const isBrowser = NNN_BROWSERS.test(row.proc);
+      // YouTube, TikTok, WhatsApp and ichigo.tv are his call: a video or a chat
+      // there keeps its title, whatever words are in it.
+      if (nnnAllowedWindow(row)) continue;
       let hit = nnnTextHit(`${row.title} ${row.proc}`) || nnnDomainHit(`${row.title} ${row.proc}`);
       // A page title can be innocent ("Home", "Watch") while its address is
       // not, so the address nnnWindows read for this window is checked too.

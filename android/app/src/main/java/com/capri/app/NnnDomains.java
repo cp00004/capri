@@ -34,6 +34,20 @@ final class NnnDomains {
 	private static volatile Set<String> domains = null;
 	private static volatile long loadedAt = 0;
 
+	// Ask-for-these-back sites. A music video called "sexy anime" is the song,
+	// not a porn page: these hosts and the apps built on them are never hits,
+	// and the downloaded host list is filtered with the same set.
+	private static final String[] ALLOWED = {
+		"youtube.com", "youtube-nocookie.com", "youtu.be", "yt.be", "ytimg.com", "googlevideo.com",
+		"tiktok.com", "tiktokv.com", "tiktokcdn.com", "ttwstatic.com", "byteoversea.com",
+		"whatsapp.com", "web.whatsapp.com", "whatsapp.net", "wa.me", "whatsappweb.com",
+		"ichigo.tv",
+	};
+
+	private static final String[] ALLOWED_PACKAGES = {
+		"youtube", "tiktok", "musically", "trill", "whatsapp", "ichigo",
+	};
+
 	private NnnDomains() {}
 
 	static boolean ready() {
@@ -61,6 +75,7 @@ final class NnnDomains {
 
 	// The part of a URL that decides it: "static.pornhub.com" is pornhub.com.
 	static boolean isBlockedHost(String host) {
+		if (isAllowedHost(host)) return false;
 		Set<String> set = domains;
 		if (set == null || host == null || host.isEmpty()) return false;
 		String h = host.toLowerCase(Locale.US);
@@ -73,9 +88,40 @@ final class NnnDomains {
 		return false;
 	}
 
+	static boolean isAllowedHost(String host) {
+		if (host == null || host.isEmpty()) return false;
+		String h = host.toLowerCase(Locale.US);
+		if (h.endsWith(".")) h = h.substring(0, h.length() - 1);
+		int guard = 0;
+		while (h.indexOf('.') > 0 && guard++ < 8) {
+			for (String allowed : ALLOWED) if (h.equals(allowed)) return true;
+			h = h.substring(h.indexOf('.') + 1);
+		}
+		return false;
+	}
+
+	// The apps themselves: a YouTube player, a TikTok feed or a WhatsApp chat
+	// carries words in its own UI that must never close it.
+	static boolean isAllowedApp(String pkg) {
+		if (pkg == null || pkg.isEmpty()) return false;
+		String p = pkg.toLowerCase(Locale.US);
+		for (String marker : ALLOWED_PACKAGES) if (p.contains(marker)) return true;
+		return false;
+	}
+
+	// Whether the screen is one of those sites. The first host in the readable
+	// text is the address bar in every browser that exposes one; hosts further
+	// down are page content.
+	private static boolean allowedPage(String haystack) {
+		if (haystack == null || haystack.isEmpty()) return false;
+		Matcher m = HOST.matcher(haystack.toLowerCase(Locale.US));
+		return m.find() && isAllowedHost(m.group());
+	}
+
 	// Words, brands, adult TLDs and the host list in one answer. Non-browser
 	// apps pass strict=true so an ordinary chat about anime stays open.
 	static String hit(String haystack, boolean strict) {
+		if (allowedPage(haystack)) return "";
 		String word = strict ? NnnRules.strictHit(haystack) : NnnRules.firstHit(haystack);
 		if (!word.isEmpty()) return word;
 		if (!ready() || haystack == null) return "";
@@ -146,6 +192,7 @@ final class NnnDomains {
 				String host = parts[parts.length - 1].toLowerCase(Locale.US);
 				if (!VALID.matcher(host).matches()) continue;
 				if (host.equals("localhost") || host.startsWith("localhost.")) continue;
+				if (isAllowedHost(host)) continue;
 				into.add(host);
 			}
 			return true;
