@@ -726,6 +726,13 @@ async function chatCompletion({ provider, messages, tools, signal }) {
     payload.max_tokens = 1400;
     if (/large|medium|magistral/i.test(provider.model)) payload.reasoning_effort = "low";
   }
+  if (provider.name === "groq" && /gpt-oss|qwen3/i.test(provider.model)) {
+    // A reasoning model that thinks aloud put "…" and </think> in her mouth
+    // and held the first token for half a minute. Hide the thoughts and keep
+    // them short: the whole turn is waiting on this line.
+    payload.reasoning_effort = "low";
+    payload.reasoning_format = "hidden";
+  }
   if (tools) {
     payload.tools = tools;
     payload.tool_choice = "auto";
@@ -1579,6 +1586,31 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
     let buffer = "";
     let content = "";
     const calls = [];
+    // Providers that stream their reasoning inside content put "…" and
+    // "</think>" in her mouth. Drop everything between the tags, even when a
+    // tag is split across two frames.
+    let inThink = false;
+    const spokenPart = (rawText) => {
+      let out = "";
+      let rest = rawText;
+      while (rest) {
+        if (inThink) {
+          const end = rest.search(/<\/think(?:ing)?>/i);
+          if (end === -1) return out;
+          rest = rest.slice(end).replace(/^<\/think(?:ing)?>/i, "");
+          inThink = false;
+          continue;
+        }
+        const start = rest.search(/<think(?:ing)?>/i);
+        if (start === -1) { out += rest; break; }
+        out += rest.slice(0, start);
+        const tagEnd = rest.indexOf(">", start);
+        if (tagEnd === -1) break;
+        rest = rest.slice(tagEnd + 1);
+        inThink = true;
+      }
+      return out.replace(/<\/think(?:ing)?>/gi, "");
+    };
 
     const takeFrame = (frame) => {
       for (const line of frame.split("\n")) {
@@ -1591,7 +1623,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         if (!delta) continue;
 
         if (delta.content) {
-          const text = contentText(delta.content);
+          const text = spokenPart(contentText(delta.content));
           if (text) {
             content += text;
             finalText += text;
