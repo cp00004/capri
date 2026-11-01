@@ -103,6 +103,7 @@ public class MainActivity extends BridgeActivity {
 
 		requestRuntime(false);
 		NnnReceiver.schedule(this);
+		UpdateScheduler.schedule(this);
 	}
 
 	// Everything the phone has to hand over before she can actually watch: mic,
