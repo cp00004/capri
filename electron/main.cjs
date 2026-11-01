@@ -2021,6 +2021,9 @@ async function nnnSweep() {
   try {
     const rows = await nnnWindows();
     for (const row of rows) {
+      // Never her own window: the settings page and the chat both carry words
+      // the blocklist knows.
+      if (row.pid === process.pid || /^capri/i.test(row.proc)) continue;
       const isBrowser = NNN_BROWSERS.test(row.proc);
       // YouTube, TikTok, WhatsApp and ichigo.tv are his call: a video or a chat
       // there keeps its title, whatever words are in it.
