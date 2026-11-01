@@ -415,6 +415,15 @@ function extractZip(zip, dir) {
   });
 }
 
+function unlockFolder(dir) {
+  let user = "";
+  try { user = require("os").userInfo().username; } catch { return; }
+  if (!user) return;
+  try {
+    execFileSync("icacls.exe", [dir, "/remove:d", user], { stdio: "ignore", timeout: 15000, windowsHide: true });
+  } catch { /* not locked */ }
+}
+
 function pruneOldVersions(keepDir) {
   try {
     // Keep the running build plus the newest other one. A taskbar pin points at
@@ -430,6 +439,10 @@ function pruneOldVersions(keepDir) {
     for (const name of fs.readdirSync(UPD_ROOT)) {
       const full = path.join(UPD_ROOT, name);
       if (full === keepDir || name === "current.json" || name === "handoff.json" || keep.has(full)) continue;
+      // Older builds denied delete on their own folder. Without lifting that
+      // first, every stale exe stays launchable and can come back as a second
+      // copy that fights the running one.
+      unlockFolder(full);
       try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* in use */ }
     }
   } catch { /* nothing unpacked yet */ }
