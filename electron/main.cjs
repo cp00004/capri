@@ -426,22 +426,14 @@ function unlockFolder(dir) {
 
 function pruneOldVersions(keepDir) {
   try {
-    // Keep the running build plus the newest other one. A taskbar pin points at
-    // an exe inside one of these folders: deleting every old one left the pin
-    // with a dead path and no icon.
-    const others = fs.readdirSync(UPD_ROOT)
-      .filter((name) => {
-        const full = path.join(UPD_ROOT, name);
-        return full !== keepDir && name !== "current.json" && name !== "handoff.json" && fs.existsSync(path.join(full, "Capri.exe"));
-      })
-      .sort((a, b) => cmpVersion(b, a));
-    const keep = new Set(others.slice(0, 1).map((name) => path.join(UPD_ROOT, name)));
+    // Only the running build survives. An older exe left on disk is a second
+    // Capri waiting to happen: its own startup takeover closes the newer app
+    // and its old relaunch path then fails, leaving nothing running. Every
+    // shortcut and the taskbar pin are retargeted at the running build.
     for (const name of fs.readdirSync(UPD_ROOT)) {
       const full = path.join(UPD_ROOT, name);
-      if (full === keepDir || name === "current.json" || name === "handoff.json" || keep.has(full)) continue;
-      // Older builds denied delete on their own folder. Without lifting that
-      // first, every stale exe stays launchable and can come back as a second
-      // copy that fights the running one.
+      if (full === keepDir || name === "current.json" || name === "handoff.json" || name === "one-copy.json") continue;
+      // Older builds denied delete on their own folder, so lift that first.
       unlockFolder(full);
       try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* in use */ }
     }
