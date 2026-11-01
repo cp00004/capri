@@ -39,7 +39,10 @@ if (!gotLock) {
   app.quit();
   process.exit(0);
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_event, argv) => {
+    const args = Array.isArray(argv) ? argv : [];
+    // The watchdog's own launches are not the owner opening her again.
+    if (!args.includes("--nnn-guard") && !args.includes("--nnn-hidden") && dedupeTakeover()) return;
     // A second launch used to vanish: the first window stayed behind whatever
     // was already on screen. Raise it the same way a taskbar click would.
     raiseWindow();
@@ -434,30 +437,44 @@ function pruneOldVersions(keepDir) {
 
 // ── One Capri ────────────────────────────────────────────────────────────────
 // Two copies mean two windows answering, two ears on the mic and two voices.
-// The copy that starts last is the one the owner just opened, so it closes every
-// other copy - itself included - and comes back as the newest installed build.
-function otherCapriPids() {
+// The copy that starts last is the one the owner just opened. Two of her at
+// once was a real state after an update: the old build kept the window and the
+// lock, the new one vanished, and Task Manager only showed more of her. Any
+// second copy now closes every copy - this one too - and comes back as the
+// newest installed build. A plain double-click of the same build only raises
+// the window.
+function otherCapriProcs() {
   if (process.platform !== "win32") return [];
   try {
     const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
-      `Get-CimInstance Win32_Process -Filter "Name='Capri.exe'" | Where-Object { $_.ProcessId -ne ${process.pid} -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch '--nnn-guard' } | ForEach-Object { $_.ProcessId }`,
+      `Get-CimInstance Win32_Process -Filter "Name='Capri.exe'" | Where-Object { $_.ProcessId -ne ${process.pid} -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch '--nnn-guard' } | ForEach-Object { "$($_.ProcessId)|$($_.ExecutablePath)" }`,
     ], { encoding: "utf8", timeout: 8000, windowsHide: true });
-    return String(out).split(/\s+/).map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0);
+    return String(out).split(/\r?\n/).map((line) => {
+      const at = line.indexOf("|");
+      if (at < 1) return null;
+      return { pid: Number(line.slice(0, at)), exe: line.slice(at + 1).trim() };
+    }).filter((row) => row && Number.isInteger(row.pid) && row.pid > 0);
   } catch { return []; }
 }
+
+const sameExe = (a, b) => {
+  try { return path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase(); } catch { return false; }
+};
 
 function newestInstalledExe() {
   const current = readCurrent();
   const exe = current?.dir ? path.join(current.dir, "Capri.exe") : "";
-  return exe && fs.existsSync(exe) ? exe : process.execPath;
+  if (exe && fs.existsSync(exe) && cmpVersion(current.version, app.getVersion()) > 0) return exe;
+  return process.execPath;
 }
 
 function dedupeTakeover() {
   if (process.platform !== "win32" || process.env.CAPRI_ONE_COPY === "1") return false;
-  const pids = otherCapriPids();
-  if (!pids.length) return false;
-  logLine(`one-copy: closing ${pids.length} other Capri instance(s)`);
-  for (const pid of pids) { try { process.kill(pid); } catch { /* already gone */ } }
+  const others = otherCapriProcs();
+  const strays = others.filter((row) => !row.exe || !sameExe(row.exe, process.execPath));
+  if (!strays.length) return false;
+  logLine(`one-copy: closing ${strays.length} other Capri instance(s)`);
+  for (const row of others) { try { process.kill(row.pid); } catch { /* already gone */ } }
   const exe = newestInstalledExe();
   // Come back once this process has let go of the single-instance lock.
   try {
