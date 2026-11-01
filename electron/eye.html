@@ -836,7 +836,7 @@
     if (cfg.session) headers["X-Capri-Profile"] = cfg.session;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const res = await fetch(`${micApi()}/stt`, {
+        const res = await fetch(`${micApi()}/stt?lang=en`, {
           method: "POST",
           headers,
           body: blob,

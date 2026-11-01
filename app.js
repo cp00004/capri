@@ -1828,7 +1828,7 @@ async function checkWakeClip(blob) {
   let text = "";
   try {
     const clip = await toWav(blob);
-    const res = await api("/api/stt?prompt=Capri%20is%20the%20assistant%27s%20name.%20The%20user%20says%20Capri.", {
+    const res = await api("/api/stt?lang=en&prompt=Capri%20is%20the%20assistant%27s%20name.%20The%20user%20says%20Capri.", {
       method: "POST",
       headers: {
         "Content-Type": clip.type || "audio/webm",
@@ -2246,7 +2246,7 @@ async function transcribe(blob) {
 
   try {
     const clip = await toWav(blob);
-    const res = await api("/api/stt", {
+    const res = await api("/api/stt?lang=en", {
       method: "POST",
       headers: { "Content-Type": clip.type || "audio/webm" },
       body: clip,
@@ -3030,6 +3030,9 @@ async function handleNoNut(userText) {
 }
 
 async function respond(userText) {
+  // She was spoken to. The eye may comment on the screen for a couple of
+  // minutes after this, never on its own.
+  try { window.capriNative?.addressed?.(); } catch { /* browser build */ }
   if (await handleNoNut(userText)) return;
   state.history.push({ role: "user", content: userText });
   state.history = state.history.slice(-16);

@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld("capriNative", {
     name: String(name || ""),
   }),
   eyeReply: (text) => ipcRenderer.send("capri-eye-reply", String(text || "")),
+  addressed: () => ipcRenderer.send("capri-addressed"),
   saveSession: (token) => ipcRenderer.invoke("capri-session-save", String(token || "")),
   loadSession: () => ipcRenderer.invoke("capri-session-load"),
   clearSession: () => ipcRenderer.invoke("capri-session-clear"),

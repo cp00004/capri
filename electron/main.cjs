@@ -890,6 +890,11 @@ let eyeWatchTimer = null;
 let eyeTopTimer = null;
 let eyeTrack = { key: "", since: 0, said: "" };
 let eyeLastSay = 0;
+// Screen banter is only a follow-up to a conversation. Without a recent turn
+// she chatters at whatever is playing, which is the one thing he never asked
+// for: she speaks when spoken to.
+let eyeLastAddressed = 0;
+const EYE_BANTER_WINDOW = 120_000;
 let eyeBusy = false;
 let eyeDrag = null;
 
@@ -1277,6 +1282,12 @@ async function watchScreen() {
     if (dwell < (ctx.kind === "chat" ? 12_000 : 22_000)) return;
     if (eyeTrack.said === key && ctx.kind !== "chat") return;
     if (now - eyeLastSay < 70_000) return;
+    if (now - eyeLastAddressed > EYE_BANTER_WINDOW) {
+      // Nobody is talking to her. Restart the clock so she does not fire the
+      // instant he says her name hours later about whatever is on screen.
+      eyeTrack = { key, since: now, said: key, snippet: "" };
+      return;
+    }
     if (ctx.kind === "chat") {
       // The conversation on screen, not just the app name. She waits until the
       // messages settle, and only speaks again when the lines change.
@@ -2468,9 +2479,12 @@ ipcMain.on("capri-eye-config", (_event, cfg) => {
 
 // Orders spoken to the eye run through her real chat turn, so timers, memory
 // and device calls behave exactly as when the window is in front.
+ipcMain.on("capri-addressed", () => { eyeLastAddressed = Date.now(); });
+
 ipcMain.on("eye-ask", (_event, text) => {
   const line = String(text || "").replace(/\s+/g, " ").trim().slice(0, 600);
   if (!line) return;
+  eyeLastAddressed = Date.now();
   try { win?.webContents.send("capri-eye-ask", line); } catch { /* window gone */ }
 });
 
