@@ -85,10 +85,10 @@ const FREETHEAI_MODEL_CHAIN = [...new Set(String(
   process.env.CAPRI_FREETHEAI_MODELS || "fta/lion/gpt-4.1,fta/olf/gpt-oss:120b,fta/dog/gpt-4.1-mini",
 ).split(",").map((m) => m.trim()).filter(Boolean))];
 const MISTRAL_BASE = "https://api.mistral.ai/v1";
-// Small and medium are not in every free plan (they answer 429), large and
-// ministral-8b do, so the chain skips straight to the ones that work.
+// Small and medium are not in every free plan (they answer 429), while the
+// Ministral pair answers in under a second and calls tools, so they lead.
 const MISTRAL_MODEL_CHAIN = [...new Set(String(
-  process.env.CAPRI_MISTRAL_MODELS || "mistral-small-2603,ministral-14b-latest,ministral-8b-latest",
+  process.env.CAPRI_MISTRAL_MODELS || "ministral-14b-latest,ministral-8b-latest,mistral-small-2603",
 ).split(",").map((m) => m.trim()).filter(Boolean))];
 
 // Places the quick-open pass may launch before the model even runs. Anything
