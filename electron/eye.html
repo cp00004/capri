@@ -1113,7 +1113,14 @@
     } catch { /* optional */ }
   }
 
-  const WAKE_WORDS = new Set(["capri", "capry", "caprie", "caprea", "copri", "kepri", "caprice", "gabri", "kapri"]);
+  // Names that are only ever the assistant. "gabri", "copri" and "kepri" were in
+  // here once and every foreign video with a Gabriel in it woke her up.
+  const WAKE_WORDS = new Set([
+    "capri", "capry", "capree", "caprie", "caprii", "kapri", "kapry", "kabri", "cabri",
+    "caprice", "cappy", "cappi", "kappri", "kappry", "cappree",
+  ]);
+  // Only at the front of the clip: "vieni a Capri" is a lyric, not an order.
+  const WAKE_LEAD = new Set(["hey", "ok", "okay", "yo", "hi", "hello", "oh", "um", "uh", "so"]);
   function editDistance(a, b) {
     const m = a.length, n = b.length;
     const row = new Array(n + 1);
@@ -1129,34 +1136,33 @@
     }
     return row[n];
   }
+  function wakeAt(tokens) {
+    for (let i = 0; i <= 1 && i < tokens.length; i++) {
+      if (i === 1 && !WAKE_LEAD.has(tokens[0])) break;
+      const token = tokens[i].replace(/^'+|'+$/g, "");
+      if (!token) continue;
+      if (WAKE_WORDS.has(token)) return { index: i, consumed: 1 };
+      if (token === "cap") {
+        const next = (tokens[i + 1] || "").replace(/^'+|'+$/g, "");
+        if (/^(ri|ree|ry|rie)$/.test(next)) return { index: i, consumed: 2 };
+      }
+      if (token.length >= 4 && token.length <= 7 && token.startsWith("cap") && editDistance(token, "capri") <= 1) {
+        return { index: i, consumed: 1 };
+      }
+    }
+    return null;
+  }
   function isWakePhrase(text) {
     const clean = String(text || "").toLowerCase().replace(/[^a-z0-9' ]+/g, " ").replace(/\s+/g, " ").trim();
     if (!clean || /\bcapricorn\b/.test(clean)) return false;
-    const tokens = clean.split(" ");
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i].replace(/^'+|'+$/g, "");
-      if (!token) continue;
-      if (WAKE_WORDS.has(token)) return true;
-      if (token === "cap" && ["ri", "ree", "ry", "rie"].includes(tokens[i + 1])) return true;
-      if (token.length >= 4 && token.length <= 7 && editDistance(token, "capri") <= 1) return true;
-    }
-    return false;
+    return Boolean(wakeAt(clean.split(" ")));
   }
   function wakeRemainder(text) {
     const tokens = String(text || "").trim().split(/\s+/);
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i].toLowerCase().replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
-      if (!token) continue;
-      let consumed = 1;
-      let hit = WAKE_WORDS.has(token);
-      if (!hit && token === "cap") {
-        const next = (tokens[i + 1] || "").toLowerCase().replace(/[^a-z]/g, "");
-        if (/^(ri|ree|ry|rie)$/.test(next)) { hit = true; consumed = 2; }
-      }
-      if (!hit && token.length >= 4 && token.length <= 7 && editDistance(token, "capri") <= 1) hit = true;
-      if (hit) return tokens.slice(i + consumed).join(" ").replace(/^[\s,.;:!?-]+/, "").trim();
-    }
-    return "";
+    const low = tokens.map((t) => t.toLowerCase().replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, ""));
+    const hit = wakeAt(low);
+    if (!hit) return "";
+    return tokens.slice(hit.index + hit.consumed).join(" ").replace(/^[\s,.;:!?-]+/, "").trim();
   }
 
   // The eye window may open while the mic is in use by Capri's window; retry

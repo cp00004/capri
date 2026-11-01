@@ -14,7 +14,7 @@ const {
   net: electronNet
 } = require("electron");
 
-const { spawn, execFile } = require("child_process");
+const { spawn, execFile, execFileSync } = require("child_process");
 
 // Her ear runs on an AudioContext that nobody tapped a button to start. With
 // Chromium's default autoplay policy that context comes up suspended, so the
@@ -430,6 +430,48 @@ function pruneOldVersions(keepDir) {
       try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* in use */ }
     }
   } catch { /* nothing unpacked yet */ }
+}
+
+// ── One Capri ────────────────────────────────────────────────────────────────
+// Two copies mean two windows answering, two ears on the mic and two voices.
+// The copy that starts last is the one the owner just opened, so it closes every
+// other copy - itself included - and comes back as the newest installed build.
+function otherCapriPids() {
+  if (process.platform !== "win32") return [];
+  try {
+    const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+      `Get-CimInstance Win32_Process -Filter "Name='Capri.exe'" | Where-Object { $_.ProcessId -ne ${process.pid} -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch '--nnn-guard' } | ForEach-Object { $_.ProcessId }`,
+    ], { encoding: "utf8", timeout: 8000, windowsHide: true });
+    return String(out).split(/\s+/).map((n) => Number(n)).filter((n) => Number.isInteger(n) && n > 0);
+  } catch { return []; }
+}
+
+function newestInstalledExe() {
+  const current = readCurrent();
+  const exe = current?.dir ? path.join(current.dir, "Capri.exe") : "";
+  return exe && fs.existsSync(exe) ? exe : process.execPath;
+}
+
+function dedupeTakeover() {
+  if (process.platform !== "win32" || process.env.CAPRI_ONE_COPY === "1") return false;
+  const pids = otherCapriPids();
+  if (!pids.length) return false;
+  logLine(`one-copy: closing ${pids.length} other Capri instance(s)`);
+  for (const pid of pids) { try { process.kill(pid); } catch { /* already gone */ } }
+  const exe = newestInstalledExe();
+  // Come back once this process has let go of the single-instance lock.
+  try {
+    const child = spawn("cmd.exe", ["/c", `ping -n 3 127.0.0.1 >nul & start "" "${exe}"`], {
+      detached: true, stdio: "ignore", windowsHide: true, env: { ...process.env, CAPRI_ONE_COPY: "1" },
+    });
+    child.on("error", () => {});
+    child.unref();
+  } catch (err) {
+    logLine(`one-copy: relaunch failed (${err.message})`);
+  }
+  quitting = true;
+  setTimeout(() => app.exit(0), 200);
+  return true;
 }
 
 async function installOverlay(feed, latest) {
@@ -2733,6 +2775,7 @@ app.whenReady().then(async () => {
   if (process.platform === "win32") app.setAppUserModelId("com.capricorn.capri");
   logLine(`start v${app.getVersion()} pid=${process.pid} electron=${process.versions.electron}`);
   if (GUARD_MODE) { nnnGuardBoot(); return; }
+  if (!HIDDEN_MODE && dedupeTakeover()) return;
   if (handoffToNewer()) return;
   pruneOldVersions(readCurrent()?.dir || "");
   // Pick a bindable port first; the bundled server is only a fallback, so a

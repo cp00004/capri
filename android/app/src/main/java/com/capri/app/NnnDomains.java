@@ -41,7 +41,7 @@ final class NnnDomains {
 		"youtube.com", "youtube-nocookie.com", "youtu.be", "yt.be", "ytimg.com", "googlevideo.com",
 		"tiktok.com", "tiktokv.com", "tiktokcdn.com", "ttwstatic.com", "byteoversea.com",
 		"whatsapp.com", "web.whatsapp.com", "whatsapp.net", "wa.me", "whatsappweb.com",
-		"ichigo.tv",
+		"ichigo.tv", "ichigotv.bond",
 	};
 
 	private static final String[] ALLOWED_PACKAGES = {

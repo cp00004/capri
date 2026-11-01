@@ -1418,11 +1418,17 @@ function setWakeWordEnabled(enabled) {
   startWakeWord();
 }
 
+// Whisper's spellings of the name. Common foreign words that differ by a letter
+// ("capra", "gabri", "copri") are deliberately absent: with a video playing they
+// were waking her up several times an hour in the language of the video.
 const WAKE_WORDS = new Set([
   "capri", "capry", "capree", "caprie", "caprii", "kapri", "kapry", "kabri", "cabri",
-  "caprice", "cappy", "cappi", "capra", "caprio", "capris", "capre", "caprey",
-  "cappree", "kappri", "kappry", "kopri", "copri", "copree", "cabree",
+  "caprice", "cappy", "cappi", "kappri", "kappry", "cappree",
 ]);
+
+// A wake word only counts at the front of the clip: "vieni a Capri" out of a
+// song is dialogue, not an order. "Hey Capri" and "ok Capri" still work.
+const WAKE_LEAD = new Set(["hey", "ok", "okay", "yo", "hi", "hello", "oh", "um", "uh", "so"]);
 
 function editDistance(a, b) {
   const s = String(a || "");
@@ -1445,23 +1451,39 @@ function editDistance(a, b) {
   return prev[t.length];
 }
 
-function isWakePhrase(text) {
+// Where the name sits in a cleaned token list, or null when it is not at the
+// front. Two words deep is the whole allowance ("hey Capri", "ok Capri").
+function wakeAt(tokens) {
+  for (let i = 0; i <= 1 && i < tokens.length; i += 1) {
+    if (i === 1 && !WAKE_LEAD.has(tokens[0])) break;
+    const token = tokens[i].replace(/^'+|'+$/g, "");
+    if (!token) continue;
+    if (WAKE_WORDS.has(token)) return { index: i, consumed: 1 };
+    if (token === "cap") {
+      const next = (tokens[i + 1] || "").replace(/^'+|'+$/g, "");
+      if (/^(ri|ree|ry|rie)$/.test(next)) return { index: i, consumed: 2 };
+    }
+    // Only near-misses of the name's own sound: "copy", "cappy", "capra".
+    if (token.length >= 4 && token.length <= 7 && token.startsWith("cap") && editDistance(token, "capri") <= 1) {
+      return { index: i, consumed: 1 };
+    }
+  }
+  return null;
+}
+
+function wakeTokens(text) {
   const clean = String(text || "")
     .toLowerCase()
     .replace(/[^a-z0-9' ]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  if (!clean) return false;
-  if (/\bcapricorn\b/.test(clean)) return false;
-  const tokens = clean.split(" ");
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i].replace(/^'+|'+$/g, "");
-    if (!token) continue;
-    if (WAKE_WORDS.has(token)) return true;
-    if (token === "cap" && tokens[i + 1] === "ri") return true;
-    if (token.length >= 4 && token.length <= 7 && editDistance(token, "capri") <= 1) return true;
-  }
-  return false;
+  if (!clean || /\bcapricorn\b/.test(clean)) return null;
+  return clean.split(" ");
+}
+
+function isWakePhrase(text) {
+  const tokens = wakeTokens(text);
+  return Boolean(tokens && wakeAt(tokens));
 }
 
 // Everything spoken after "Capri", so "Capri open youtube" works in one breath.
@@ -1469,19 +1491,10 @@ function wakeRemainder(text) {
   const original = String(text || "").trim();
   if (!original) return "";
   const tokens = original.split(/\s+/);
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i].toLowerCase().replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, "");
-    if (!token) continue;
-    let consumed = 1;
-    let hit = WAKE_WORDS.has(token);
-    if (!hit && token === "cap") {
-      const next = (tokens[i + 1] || "").toLowerCase().replace(/[^a-z]/g, "");
-      if (/^(ri|ree|ry|rie)$/.test(next)) { hit = true; consumed = 2; }
-    }
-    if (!hit && token.length >= 4 && token.length <= 7 && editDistance(token, "capri") <= 1) hit = true;
-    if (hit) return tokens.slice(i + consumed).join(" ").replace(/^[\s,.;:!?-]+/, "").trim();
-  }
-  return "";
+  const low = tokens.map((t) => t.toLowerCase().replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, ""));
+  const hit = wakeAt(low);
+  if (!hit) return "";
+  return tokens.slice(hit.index + hit.consumed).join(" ").replace(/^[\s,.;:!?-]+/, "").trim();
 }
 
 function finishWake() {
@@ -2105,8 +2118,10 @@ function startWakeWord() {
     }
   };
   recognition.onresult = (event) => {
+    // Only what changed, not every sentence since the ear opened: the name has
+    // to be the start of this utterance, otherwise a video line wakes her.
     let said = "";
-    for (let index = 0; index < event.results.length; index += 1) {
+    for (let index = event.resultIndex || 0; index < event.results.length; index += 1) {
       said += ` ${event.results[index][0]?.transcript || ""}`;
     }
     if (!isWakePhrase(said)) return;

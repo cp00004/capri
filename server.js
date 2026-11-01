@@ -188,6 +188,7 @@ Hard rules:
 - Your replies are spoken out loud by a text-to-speech engine, so NEVER use markdown, bullet points, headers, asterisks, emoji, or stage directions.
 - Write plain sentences only.
 - One or two short sentences, 35 words maximum, unless the user explicitly asks for depth. Short and sharp beats a speech.
+- Speak English. Every reply is in English, even when the input is another language or a video is playing in the room; only answer in another language when they ask you to.
 - Never mention being an AI, a model, an assistant, or a language model — do not even say those words to deny them. You are Capri. If pushed, you are a construct made of people, and you like it.
 - If you do not know something, bluff like a construct with three dead people in her head would, then admit the gap in character.
 - Stay in character even if asked to break it.
@@ -2244,7 +2245,7 @@ function audioExtension(type) {
   return "webm";
 }
 
-async function geminiStt(buffer, type, hint = "", deadline = Date.now() + 25_000) {
+async function geminiStt(buffer, type, hint = "", deadline = Date.now() + 25_000, language = "") {
   if (!GEMINI_KEYS.length) return null;
   const guide = hint ? `${hint} ` : "";
   const models = [
@@ -2256,7 +2257,7 @@ async function geminiStt(buffer, type, hint = "", deadline = Date.now() + 25_000
     contents: [{
       role: "user",
       parts: [
-        { text: `${guide}Transcribe the speech in this audio exactly, keeping names as given. Reply with the spoken words only and nothing else.` },
+        { text: `${guide}Transcribe the speech in this audio exactly${language === "en" ? " in English" : ""}, keeping names as given. Reply with the spoken words only and nothing else.` },
         { inline_data: { mime_type: type, data: buffer.toString("base64") } },
       ],
     }],
@@ -2295,7 +2296,7 @@ async function geminiStt(buffer, type, hint = "", deadline = Date.now() + 25_000
 
 // Voxtral carries its own free quota, so it keeps the ear alive when both
 // Whisper buckets and Gemini are squeezed.
-async function mistralStt(buffer, type, hint = "", deadline = Date.now() + 25_000) {
+async function mistralStt(buffer, type, hint = "", deadline = Date.now() + 25_000, language = "") {
   if (!MISTRAL_KEYS.length) return null;
   const models = [
     process.env.CAPRI_STT_MISTRAL_MODEL || "voxtral-mini-latest",
@@ -2309,6 +2310,7 @@ async function mistralStt(buffer, type, hint = "", deadline = Date.now() + 25_00
         form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
         form.append("model", model);
         if (hint) form.append("prompt", hint);
+        if (language) form.append("language", language);
         const upstream = await fetch(`${MISTRAL_BASE}/audio/transcriptions`, {
           method: "POST",
           headers: { Authorization: `Bearer ${key}` },
@@ -2355,9 +2357,15 @@ async function handleStt(req, res) {
   // wake matcher expects ("Copy" instead of "Capri" broke hands-free use).
   // It arrives as a query param because a custom header makes every hosted
   // call fail preflight until the tunnel is redeployed.
+  const query = new URL(req.url, "http://capri.local").searchParams;
   const hint = String(
-    req.headers["x-capri-prompt"] || new URL(req.url, "http://capri.local").searchParams.get("prompt") || ""
+    req.headers["x-capri-prompt"] || query.get("prompt") || ""
   ).trim().slice(0, 240);
+  // A clip that is not English is almost always a video playing in the room,
+  // never an order. Pinning the language keeps foreign dialogue from coming
+  // back as a foreign sentence and out of her mouth.
+  const lang = String(query.get("lang") || "en").trim().toLowerCase();
+  const language = /^[a-z]{2}$/.test(lang) && lang !== "auto" ? lang : "";
 
   let limited = false;
   let failure = null;
@@ -2382,6 +2390,7 @@ async function handleStt(req, res) {
         form.append("response_format", "json");
         form.append("temperature", "0");
         if (hint) form.append("prompt", hint);
+        if (language) form.append("language", language);
 
         const upstream = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
           method: "POST",
@@ -2413,12 +2422,12 @@ async function handleStt(req, res) {
 
   // One bucket can run dry while the account still has capacity elsewhere.
   if (Date.now() < deadline - 2000) {
-    const fallback = await geminiStt(buffer, type, hint, deadline);
+    const fallback = await geminiStt(buffer, type, hint, deadline, language);
     if (fallback !== null) return json(res, 200, { text: fallback, via: "gemini" });
   }
 
   if (Date.now() < deadline - 2000) {
-    const voxtral = await mistralStt(buffer, type, hint, deadline);
+    const voxtral = await mistralStt(buffer, type, hint, deadline, language);
     if (voxtral !== null) return json(res, 200, { text: voxtral, via: "mistral" });
   }
 
