@@ -100,8 +100,18 @@ async function runOne(call) {
   const started = Date.now();
   let result;
   try {
-    const { executeTool } = await import("./lib/pc.js");
-    result = await executeTool(call.name, call.args || {});
+    const { prepare, snapshot, recordUndo } = await import("./lib/hands-policy.js");
+    const verdict = await prepare(call.name, call.args || {});
+    if (!verdict.allow) {
+      result = verdict.dry
+        ? { ok: true, dry_run: true, output: `Dry run is on, so nothing ran. Would have: ${verdict.preview}` }
+        : { ok: false, denied: true, error: verdict.reason || "The user declined this action." };
+    } else {
+      const snap = snapshot(call.name, call.args || {});
+      const { executeTool } = await import("./lib/pc.js");
+      result = await executeTool(call.name, call.args || {});
+      if (result?.ok !== false) recordUndo(snap);
+    }
   } catch (err) {
     result = { ok: false, error: String(err?.message || err) };
   }
