@@ -377,8 +377,12 @@ final class CapriVoice {
 				.trim();
 		if (text.isEmpty() || text.contains("capricorn")) return null;
 		String[] words = text.split(" ");
-		for (int i = 0; i < words.length; i += 1) {
+		// The name only counts at the front of the clip. A video or a song that
+		// happens to say something like it mid-sentence is dialogue, not an order.
+		int limit = Math.min(words.length, 2);
+		for (int i = 0; i < limit; i += 1) {
 			String word = words[i].replaceAll("^'+|'+$", "");
+			if (i == 1 && !LEAD.contains(words[0].replaceAll("^'+|'+$", ""))) break;
 			boolean hit = WAKE.contains(word);
 			int used = 1;
 			if (!hit && word.equals("cap") && i + 1 < words.length) {
