@@ -65,9 +65,13 @@ const PORT = Number(process.env.PORT || 4173);
 const MODEL = process.env.CAPRI_MODEL || "openai/gpt-oss-120b";
 // Free tiers cap tokens per minute per model, so when one model is capped the
 // next link in the chain still answers instead of failing the whole turn.
+// Every name here has to be live on the key: a retired model answers 404 and
+// spends one of the four attempts a turn gets, which is how "open youtube"
+// ended on "the relays are all busy". llama-3.3-70b and llama-3.1-8b are gone
+// from Groq's catalogue; qwen3.8 answers in a fraction of a second.
 const GROQ_MODEL_CHAIN = [...new Set([
   MODEL,
-  ...String(process.env.CAPRI_MODEL_CHAIN || "openai/gpt-oss-20b,llama-3.3-70b-versatile,llama-3.1-8b-instant").split(","),
+  ...String(process.env.CAPRI_MODEL_CHAIN || "openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b").split(","),
 ].map((m) => m.trim()).filter(Boolean))];
 const GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english";
 const STT_MODEL = process.env.CAPRI_STT_MODEL || "whisper-large-v3-turbo";
@@ -84,7 +88,7 @@ const MISTRAL_BASE = "https://api.mistral.ai/v1";
 // Small and medium are not in every free plan (they answer 429), large and
 // ministral-8b do, so the chain skips straight to the ones that work.
 const MISTRAL_MODEL_CHAIN = [...new Set(String(
-  process.env.CAPRI_MISTRAL_MODELS || "mistral-large-4,ministral-8b-latest",
+  process.env.CAPRI_MISTRAL_MODELS || "mistral-small-2603,ministral-14b-latest,ministral-8b-latest",
 ).split(",").map((m) => m.trim()).filter(Boolean))];
 
 // A key list with commas or newlines gives several free buckets to rotate through.
@@ -540,7 +544,7 @@ function runHandsTool(name, args) {
   });
 }
 
-function friendlyError(status, raw, provider = "groq") {
+function friendlyError(status, raw, provider = "groq", model = MODEL) {
   let message = raw;
   try {
     const parsed = JSON.parse(raw);
@@ -564,7 +568,7 @@ function friendlyError(status, raw, provider = "groq") {
     return "FreeTheAI wants today's check-in. Open freetheai.org/checkin once, then ask again.";
   }
   if (status === 429) return "Rate limit hit. Give it a minute, choom.";
-  if (status === 404) return `Model not available on this key: ${provider === "gemini" ? GEMINI_MODEL : MODEL}`;
+  if (status === 404) return `Model not available on this key: ${model}`;
   return String(message).slice(0, 400) || `Upstream error ${status}`;
 }
 
@@ -736,7 +740,7 @@ async function chatCompletion({ provider, messages, tools, signal }) {
 
   if (!upstream.ok || !upstream.body) {
     const raw = await upstream.text().catch(() => "");
-    const err = new Error(friendlyError(upstream.status, raw, provider.name));
+    const err = new Error(friendlyError(upstream.status, raw, provider.name, provider.model));
     err.status = upstream.status;
     err.body = raw;
     err.provider = provider.name;
@@ -1421,9 +1425,11 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   const toolSet = pcLocked || remote ? [...deviceDefs, ...MEMORY_TOOL_DEFS, ...sightTools] : [...TOOL_DEFS, ...deviceDefs, ...MEMORY_TOOL_DEFS];
 
   // "open youtube" is the most common order. Fire it at the device before the
-  // model runs, so the app is already up while she says her line.
+  // model runs, so the app is already up while she says her line. The desktop
+  // window is a device too: it has no phone/web header, so this used to skip
+  // the quick-open entirely and left the whole turn to a relay.
   let quickTarget = "";
-  if (remote && userText) {
+  if (userText) {
     const quick = String(userText).match(/^\s*(?:hey\s+)?(?:please\s+)?(?:can\s+you\s+)?(?:open|launch|start|go\s+to|pull\s+up|fire\s+up|play)\s+(.{1,60})$/i);
     if (quick) {
       const target = quick[1]
@@ -1436,7 +1442,10 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         // the real app goes first - Roblox, Spotify, Discord, Minecraft - and the
         // browser tab only covers what the PC does not have installed.
         let launchedOnPc = false;
-        if (HANDS_TOKEN && handsOnline() && !mobile) {
+        if (!remote) {
+          // The window that asked is on this PC and opens it itself.
+          sse(res, { type: "device_call", name: "open_on_device", label: `open ${target}`, args: { target } });
+        } else if (HANDS_TOKEN && handsOnline() && !mobile) {
           const quickRes = await Promise.race([
             runHandsTool("open_app", { name: target }),
             new Promise((resolve) => setTimeout(() => resolve(null), 2500)),
@@ -1674,8 +1683,10 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       const pcOpen = ["open_app", "open_target", "search_open"].includes(call.function.name);
       let result;
 
-      if ((deviceOpen || pcOpen) && (mobile || web) && target) {
+      if (target && (deviceOpen || (pcOpen && (mobile || web)))) {
         // The client opens it on its own device; the server has no hands there.
+        // This window is a device too, so a desktop turn opens in its browser
+        // instead of failing with "open_on_phone is for the phone app".
         // Skip the echo when the quick-open pass already launched this target.
         const q = openKey(quickTarget);
         const t = openKey(target);
@@ -1684,7 +1695,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         }
         result = { ok: true, output: `opened ${target} on their device` };
       } else if (deviceOpen) {
-        result = { ok: false, error: "open_on_phone is for the phone app; use open_target on the PC" };
+        result = { ok: false, error: "no target was named" };
       } else if (call.function.name === "set_reminder") {
         // The device owns the clock: hand it the delay and let it wake itself.
         const seconds = Math.max(3, Math.min(86_400, Math.round(Number(args.seconds) || 0)));
