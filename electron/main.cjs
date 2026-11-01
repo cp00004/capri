@@ -1227,16 +1227,51 @@ const NNN_REPORT_GAP = 30 * 60_000;
 const NNN_MARK = "capri-no-nut-november";
 // Titles and process names she watches for. Deliberately blunt: this is his
 // request, not a content classifier, so a false positive costs him a browser
-// restart and a miss costs him the whole point.
+// restart and a miss costs him the whole point. Same list the phone uses.
 const NNN_WORDS = [
-  "porn", "pornhub", "onlyfans", "fansly", "chaturbate", "stripchat", "livejasmin", "camsoda",
-  "bongacams", "cam4", "mydirtyhobby", "brazzers", "naughty", "nude", "nudes", "nsfw", "rule ?34",
-  "hentai", "eroge", "erotic", "sex", "sexy", "xnxx", "xvideos", "xhamster", "redtube", "youporn",
-  "spankbang", "tube8", "eporner", "beeg", "fetlife", "kink", "feet ?pic", "leaked", "cam ?show",
-  "adult", "xxx", "boobs", "milf", "blowjob", "orgy", "bdsm", "webcam ?models? ?live",
-  "anime", "ecchi", "ahegao", "doujin", "lewds?", "shemale", "sexcam", "sex ?tape", "sex ?video",
+  "porn", "pornos", "porno", "pornography", "pornographic", "pornstars?", "pornhub",
+  "hentai", "hentais?", "hentaihaven", "ecchi", "ahegao", "doujinshi?", "eroge", "erotic",
+  "anime", "yaoi", "yuri", "loli", "shota",
+  "sex", "sexy", "sexual", "sexting", "sexcam", "sex ?tapes?", "sex ?videos?", "shemale",
+  "xxx", "xxxx", "nsfw", "nude", "nudes", "nudity", "naked", "lewds?",
+  "adult", "milf", "gilf", "dilf", "bdsm", "fetish", "orgy", "threesome", "foursome",
+  "gangbang", "creampie", "cumshot", "blowjob", "handjob", "anal", "pussy", "vagina", "penis",
+  "nipples?", "boobs", "tits", "titties", "horny", "masturbation", "masturbate",
+  "orgasm", "squirting", "camgirls?", "cam ?shows?", "onlyfans", "fansly", "rule ?34",
+  "nhentai", "e621", "gelbooru", "danbooru", "hanime", "sankaku", "erome", "xhamster",
+  "xvideos?", "xnxx", "redtube", "youporn", "spankbang", "chaturbate", "stripchat",
+  "livejasmin", "bongacams", "camsoda", "cam4", "mydirtyhobby", "jerkmate", "manyvids",
+  "brazzers", "naughty", "fetlife", "kink", "feet ?pics?", "leaked", "webcam ?models? ?live",
+  "pornmd", "fap", "fapping", "fapello", "coomer", "incest", "stepmoms?", "stepsis",
+  "stepsister", "stepbro", "bestiality", "zoophilia", "sexvid", "xkeezmovies",
 ];
 const NNN_PATTERN = new RegExp(`(?:\\b(?:${NNN_WORDS.join("|")})\\b)`, "i");
+// Brand fragments: these only ever appear on adult sites, so a plain substring
+// is safe and catches them inside titles, domains and share links.
+const NNN_BRANDS = [
+  "pornhub", "xvideos", "xnxx", "xhamster", "redtube", "youporn", "spankbang", "tube8",
+  "eporner", "beeg", "txxx", "javhd", "missav", "supjav", "javbus", "javgg", "7mmtv",
+  "vjav", "hanime.tv", "hentaihaven", "e-hentai", "exhentai", "hitomi.la", "rule34",
+  "gelbooru", "danbooru", "konachan", "yande.re", "sankakucomplex", "onlyfans", "fansly",
+  "justfor.fans", "manyvids", "fanvue", "chaturbate", "stripchat", "livejasmin", "bongacams",
+  "camsoda", "cam4.com", "myfreecams", "flirtymania", "xlovecam", "cherry.tv", "jerkmate",
+  "dirtyroulette", "brazzers", "bangbros", "realitykings", "mofos", "naughtyamerica",
+  "digitalplayground", "adultfriendfinder", "fetlife", "kink.com", "literotica", "lushstories",
+  "porntrex", "hqporner", "thumbzilla", "motherless", "efukt", "erome.com", "e621.net",
+  "fapello", "fapdu", "faphouse", "fap18", "fapflix", "camwhores", "alotporn", "anyporn",
+  "anysex", "3movs", "4tube", "empflix", "gotporn", "drtuber", "hellporno", "hdsex", "hdzog",
+  "hclips", "hdtube", "iceporn", "cliphunter", "bobs-tube", "bigtits", "ass4all", "amateur8",
+  "analdin", "anon-v", "bonporn", "camhub", "ceporn", "cumlouder", "desiporn", "extremesex",
+  "fux.com", "gayporn", "hentaipros", "hentaifox", "hentai2read", "sxyprn", "tnaflix",
+  "upornia", "porntube", "pornone", "porn300", "pornid", "pornhd", "porngo", "porndig",
+  "pornwhite", "pornhat", "pornosocket", "pornolab", "youjizz", "yespornplease", "pornoxo",
+  "pornhits", "pornburst", "pornzog", "porn4days", "pornflip", "pornobae", "xxxtube", "xxxbp",
+  "xporn", "xporno", "yxosh", "zbporn", "24porn", "9taxi", "ah-me", "yuvutu", "xozilla",
+  "xvidzz", "sunporno", "porntop", "porntopic", "pornrage", "pornvids", "noodlemagazine",
+  "xvideo", "nhentai", "camsoda", "bongacams", "myfreecams",
+];
+const NNN_TLD = /\.(?:porn|sex|xxx|adult|nude|sexy)\b/i;
+
 const NNN_DOMAINS = [
   "pornhub.com", "www.pornhub.com", "xvideos.com", "www.xvideos.com", "xnxx.com", "www.xnxx.com",
   "xhamster.com", "www.xhamster.com", "redtube.com", "www.redtube.com", "youporn.com", "www.youporn.com",
@@ -1339,6 +1374,21 @@ function nnnIndexRoots() {
     const root = labels.length > 1 ? labels[labels.length - 2] : labels[0];
     if (root && root.length > 3 && !NNN_PATTERN.test(root)) nnnRoots.add(root);
   }
+}
+
+// Words first, then the brand fragments, then an adult TLD. Everything the
+// window title or the process name says about itself goes through here.
+function nnnTextHit(text) {
+  const clean = String(text || "");
+  if (!clean) return "";
+  const word = NNN_PATTERN.exec(clean);
+  if (word) return word[0];
+  const low = clean.toLowerCase();
+  for (const brand of NNN_BRANDS) {
+    if (low.includes(brand)) return brand;
+  }
+  const tld = NNN_TLD.exec(low);
+  return tld ? tld[0] : "";
 }
 
 // Only tokens that read like a host count - "pornhub.com" in a tab title, not
@@ -1772,7 +1822,7 @@ async function nnnSweep() {
   try {
     const rows = await nnnWindows();
     for (const row of rows) {
-      const hit = NNN_PATTERN.test(row.title) || NNN_PATTERN.test(row.proc) || nnnDomainHit(row.title);
+      const hit = nnnTextHit(`${row.title} ${row.proc}`) || nnnDomainHit(`${row.title} ${row.proc}`);
       if (!hit) continue;
       const rule = typeof hit === "string" ? hit : `${row.proc || "app"}: ${row.title}`;
       what = what || `${row.title.slice(0, 90)}${row.proc ? ` [${row.proc}]` : ""}`;

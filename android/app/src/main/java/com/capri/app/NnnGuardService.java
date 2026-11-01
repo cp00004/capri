@@ -104,7 +104,8 @@ public class NnnGuardService extends AccessibilityService {
 		StringBuilder sb = new StringBuilder(2048);
 		sb.append(pkg).append(' ');
 		CharSequence cls = event.getClassName();
-		if (cls != null) sb.append(cls).append(' ');
+		String clsName = cls == null ? "" : cls.toString();
+		sb.append(clsName).append(' ');
 		java.util.List<CharSequence> texts = event.getText();
 		if (texts != null) {
 			for (CharSequence text : texts) {
@@ -114,15 +115,26 @@ public class NnnGuardService extends AccessibilityService {
 		AccessibilityNodeInfo root = getRootInActiveWindow();
 		if (root != null) collect(root, sb, 0, new int[] { MAX_NODES });
 		String haystack = sb.length() > MAX_CHARS ? sb.substring(0, MAX_CHARS) : sb.toString();
-		String hit = NnnDomains.hit(haystack, !isBrowser(pkg));
+		String hit = NnnDomains.hit(haystack, !isWeb(pkg, clsName, haystack));
 		if (hit.isEmpty()) return;
 		block(pkg, hit);
 	}
 
 	// Where the address bar lives. In these packages every rule applies; other
 	// apps are judged by the unambiguous terms so a chat is not closed for the
-	// word "anime".
-	private static boolean isBrowser(String pkg) {
+	// word "anime". A webview inside a social app runs in that app's package, so
+	// the screen itself has to say it is a page: a webview class, or a full URL
+	// in the address bar.
+	private static boolean isWeb(String pkg, String cls, String haystack) {
+		if (isBrowser(pkg)) return true;
+		String c = cls.toLowerCase(Locale.US);
+		if (c.contains("webview") || c.contains("browser") || c.contains("chromium")) return true;
+		String p = pkg.toLowerCase(Locale.US);
+		if (p.contains("webview") || p.contains("chromium")) return true;
+		String h = haystack.toLowerCase(Locale.US);
+		return h.contains("http://") || h.contains("https://");
+	}
+
 		String p = pkg.toLowerCase(Locale.US);
 		return p.contains("browser") || p.contains("chrome") || p.contains("firefox")
 				|| p.contains("opera") || p.contains("brave") || p.contains("duckduckgo")
