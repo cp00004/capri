@@ -116,7 +116,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.5.19";
+const APP_VERSION = "4.5.20";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -2649,9 +2649,9 @@ async function nnnSync() {
   const dismissed = Number(local.dismissed || 0) === nnnSeasonAt().end;
   const shouldArm = state.armed && Date.now() < Number(state.releaseAt || 0) && !dismissed;
   if (shouldArm && !local.active) await nativeNoNut("arm");
-  else if (!state.armed && local.active && !local.awaitingCode) {
-    await nativeNoNut("release", "", "the shared switch is off");
-  }
+  // A shared switch that says "off" is an announcement, not an order: the
+  // calendar put this machine in the season and only the code takes it out.
+  // Releasing here is what made the PC guard die a few seconds after it armed.
   return state;
 }
 
