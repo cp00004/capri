@@ -62,7 +62,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 const DEVICES_FILE = path.join(DATA_DIR, ".capri-devices.json");
 
 const PORT = Number(process.env.PORT || 4173);
-const MODEL = process.env.CAPRI_MODEL || "openai/gpt-oss-120b";
+const MODEL = process.env.CAPRI_MODEL || "qwen/qwen3.8-27b";
 // Free tiers cap tokens per minute per model, so when one model is capped the
 // next link in the chain still answers instead of failing the whole turn.
 // Every name here has to be live on the key: a retired model answers 404 and
@@ -90,6 +90,17 @@ const MISTRAL_BASE = "https://api.mistral.ai/v1";
 const MISTRAL_MODEL_CHAIN = [...new Set(String(
   process.env.CAPRI_MISTRAL_MODELS || "mistral-small-2603,ministral-14b-latest,ministral-8b-latest",
 ).split(",").map((m) => m.trim()).filter(Boolean))];
+
+// Places the quick-open pass may launch before the model even runs. Anything
+// else ("play lofi", "open the chat with Ana") stays with the model.
+const QUICK_SITES = new Set([
+  "youtube", "you tube", "yt", "tiktok", "tik tok", "whatsapp", "whatsapp web",
+  "discord", "spotify", "instagram", "insta", "facebook", "twitter", "x", "reddit",
+  "twitch", "netflix", "roblox", "minecraft", "steam", "gmail", "google",
+  "google maps", "maps", "github", "chatgpt", "chat gpt", "gemini", "character ai",
+  "ichigo", "ichigo tv", "ichigotv", "amazon", "snapchat", "telegram",
+  "pinterest", "play store", "store",
+]);
 
 // A key list with commas or newlines gives several free buckets to rotate through.
 function readKeys(...names) {
@@ -1430,13 +1441,19 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   // the quick-open entirely and left the whole turn to a relay.
   let quickTarget = "";
   if (userText) {
-    const quick = String(userText).match(/^\s*(?:hey\s+)?(?:please\s+)?(?:can\s+you\s+)?(?:open|launch|start|go\s+to|pull\s+up|fire\s+up|play)\s+(.{1,60})$/i);
+    const quick = String(userText).match(/^\s*(?:hey\s+)?(?:capri[,\s]+)?(?:please\s+)?(?:can\s+you\s+)?(?:open|launch|start|go\s+to|pull\s+up|bring\s+up|fire\s+up|take\s+me\s+to)\s+(.{1,60})$/i);
     if (quick) {
       const target = quick[1]
-        .replace(/\b(?:on|for)\s+(?:my|the)\s+(?:pc|computer|phone|device|laptop)\b/gi, "")
+        .replace(/\b(?:on|for|in)\s+(?:my|the)\s+(?:pc|computer|phone|device|laptop)\b/gi, "")
         .replace(/[.?!]+$/, "")
+        .replace(/^(?:the|my)\s+/i, "")
+        .replace(/\s+/g, " ")
         .trim();
-      if (target && !/\b(?:about|up to you|your eyes|the door)\b/i.test(target)) {
+      // Only a site she can name without guessing: "open lofi" or "open the
+      // chat with Ana" is content the model has to handle, not an address.
+      const quickKey = target.toLowerCase();
+      const knownSite = QUICK_SITES.has(quickKey) || /^[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/\S*)?$/i.test(quickKey);
+      if (target && knownSite && !/\b(?:about|up to you|your eyes|the door)\b/i.test(target)) {
         quickTarget = target;
         // A web page cannot start a desktop program. When the PC agent is online
         // the real app goes first - Roblox, Spotify, Discord, Minecraft - and the
