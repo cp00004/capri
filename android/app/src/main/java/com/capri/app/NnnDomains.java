@@ -42,6 +42,9 @@ final class NnnDomains {
 		"tiktok.com", "tiktokv.com", "tiktokcdn.com", "ttwstatic.com", "byteoversea.com",
 		"whatsapp.com", "web.whatsapp.com", "whatsapp.net", "wa.me", "whatsappweb.com",
 		"ichigo.tv", "ichigotv.bond",
+		// His own places: repo, Pages site, Deplexo app page and hosted backend.
+		"github.com", "cp00004.github.io", "deplexo.com", "capricorn.de.deplexo.com",
+		"localhost", "127.0.0.1",
 	};
 
 	private static final String[] ALLOWED_PACKAGES = {
@@ -92,6 +95,8 @@ final class NnnDomains {
 		if (host == null || host.isEmpty()) return false;
 		String h = host.toLowerCase(Locale.US);
 		if (h.endsWith(".")) h = h.substring(0, h.length() - 1);
+		// Dotless hosts (localhost) never enter the walk below.
+		for (String allowed : ALLOWED) if (h.equals(allowed)) return true;
 		int guard = 0;
 		while (h.indexOf('.') > 0 && guard++ < 8) {
 			for (String allowed : ALLOWED) if (h.equals(allowed)) return true;

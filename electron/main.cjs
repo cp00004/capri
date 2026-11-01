@@ -440,6 +440,28 @@ function pruneOldVersions(keepDir) {
   } catch { /* nothing unpacked yet */ }
 }
 
+// The release never carries keys, so the install folder is the only place they
+// live. Keep a copy in her data folder and put it back if an update or a manual
+// reinstall ever leaves the app without one.
+function keepEnvSafe() {
+  const store = path.join(app.getPath("userData"), "env-backup");
+  try {
+    fs.mkdirSync(store, { recursive: true });
+    for (const name of [".env", "agent.env"]) {
+      const live = path.join(app.getAppPath(), name);
+      const saved = path.join(store, name);
+      if (fs.existsSync(live)) {
+        fs.copyFileSync(live, saved);
+      } else if (fs.existsSync(saved)) {
+        fs.copyFileSync(saved, live);
+        logLine(`env: restored ${name} from backup`);
+      }
+    }
+  } catch (err) {
+    logLine(`env: backup failed (${err.message})`);
+  }
+}
+
 // ── One Capri ────────────────────────────────────────────────────────────────
 // Two copies mean two windows answering, two ears on the mic and two voices.
 // The copy that starts last is the one the owner just opened. Two of her at
@@ -552,16 +574,17 @@ async function installOverlay(feed, latest) {
   }
 
   // Model keys only ever exist on this machine, never in the release. Carry the
-  // current .env across so an unpack does not leave her with no relays.
+  // current env files across so an unpack does not leave her with no relays.
   try {
-    const envSrc = path.join(app.getAppPath(), ".env");
-    if (fs.existsSync(envSrc)) {
-      const envDst = path.join(dir, "resources", "app", ".env");
+    for (const name of [".env", "agent.env"]) {
+      const envSrc = path.join(app.getAppPath(), name);
+      if (!fs.existsSync(envSrc)) continue;
+      const envDst = path.join(dir, "resources", "app", name);
       fs.mkdirSync(path.dirname(envDst), { recursive: true });
       fs.copyFileSync(envSrc, envDst);
     }
   } catch (err) {
-    logLine(`update: could not carry .env (${err.message})`);
+    logLine(`update: could not carry env files (${err.message})`);
   }
 
   writeCurrent({ version: latest, dir });
@@ -1414,6 +1437,10 @@ const NNN_ALLOWED = [
   "tiktok.com", "tiktokv.com", "tiktokcdn.com", "ttwstatic.com", "byteoversea.com",
   "whatsapp.com", "web.whatsapp.com", "whatsapp.net", "wa.me", "whatsappweb.com",
   "ichigo.tv", "ichigotv.bond",
+  // Her own places: the repo page, the Pages site, the Deplexo app page and the
+  // hosted backend, plus the local UI she serves herself.
+  "github.com", "cp00004.github.io", "deplexo.com", "capricorn.de.deplexo.com",
+  "localhost", "127.0.0.1",
 ];
 // Desktop apps of the same services: the process name settles it even when the
 // window title is just the song or the chat.
@@ -2822,6 +2849,7 @@ app.whenReady().then(async () => {
   if (process.platform === "win32") app.setAppUserModelId("com.capricorn.capri");
   logLine(`start v${app.getVersion()} pid=${process.pid} electron=${process.versions.electron}`);
   if (GUARD_MODE) { nnnGuardBoot(); return; }
+  try { keepEnvSafe(); } catch { /* the backup must never block startup */ }
   if (!HIDDEN_MODE && dedupeTakeover()) return;
   if (handoffToNewer()) return;
   // Deleting old builds can take a while and must never hold the window shut.
