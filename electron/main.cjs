@@ -939,6 +939,10 @@ function showEye() {
   if (eye.isVisible()) {
     // Already out: make sure nothing has stacked over her in the meantime.
     try { eye.setAlwaysOnTop(true, "screen-saver"); eye.moveTop(); } catch { /* older electron */ }
+    // A page that missed the last live flag would stay asleep with the window
+    // still on screen, so re-assert it (and the cursor feed) every time.
+    startEyeTimers();
+    sendEyeLive(true);
     return;
   }
   eye.setBounds(eyeBounds());
@@ -958,10 +962,11 @@ function showEye() {
 
 function hideEye() {
   if (!eyeWin || eyeWin.isDestroyed()) return;
-  if (!eyeWin.isVisible()) { stopEyeTimers(); return; }
-  // A hide mid-drag used to leave the drag loop running against a gone window.
+  // The page hears about it even if the window is already off screen: a hide it
+  // never saw is what let it believe she was still clickable and listening.
   stopEyeDrag(false);
   sendEyeLive(false);
+  if (!eyeWin.isVisible()) { stopEyeTimers(); return; }
   eyeWin.hide();
   try { eyeWin.setIgnoreMouseEvents(true, { forward: true }); } catch { /* older electron */ }
   stopEyeTimers();
@@ -2390,7 +2395,13 @@ ipcMain.on("capri-eye-config", (_event, cfg) => {
   if (typeof cfg?.key === "string") eyeApi.key = cfg.key;
   writeEyeState({ enabled: eyeEnabled, banter: eyeBanter });
   if (!eyeEnabled) hideEye();
-  else if (eyeWin && !eyeWin.isDestroyed()) sendEyeConfig();
+  else {
+    if (eyeWin && !eyeWin.isDestroyed()) sendEyeConfig();
+    // Switching her back on used to leave the overlay gone until the window
+    // lost focus on its own; bring her straight back instead.
+    eyeDismissed = false;
+    syncEye();
+  }
 });
 
 // Orders spoken to the eye run through her real chat turn, so timers, memory
@@ -2413,7 +2424,13 @@ ipcMain.on("eye-hide", () => { eyeDismissed = true; hideEye(); });
 // meant the window had to keep the pointer inside while it clamped at the edges;
 // past the edge the pointer left, no release arrived, and the drag never ended.
 function startEyeDrag() {
-  if (!eyeWin || eyeWin.isDestroyed() || eyeDrag) return;
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  // A release the page never delivered used to keep the old drag object alive,
+  // and every later grab was ignored by this check. A new grab always wins.
+  if (eyeDrag) stopEyeDrag(false);
+  // A fresh grab must find a window that takes clicks, whatever it was doing
+  // before the last hide/show cycle.
+  try { eyeWin.setIgnoreMouseEvents(false, { forward: true }); } catch { /* older electron */ }
   const point = screen.getCursorScreenPoint();
   const [x, y] = eyeWin.getPosition();
   eyeDrag = {

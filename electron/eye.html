@@ -370,7 +370,11 @@
     return alphaAt((clientX - rect.left) / rect.width, (clientY - rect.top) / rect.height);
   }
 
+  // This only records what the page last told main. Main forces click-through
+  // on its own whenever the eye is hidden and shown, so the cache can be stale
+  // in either direction - that is what left her dead to the mouse after X.
   let ignoring = true;
+  let keepAliveAt = 0;
   function setIgnore(next) {
     if (next === ignoring) return;
     ignoring = next;
@@ -381,6 +385,12 @@
     if (drag.on) { setIgnore(false); return; }
     const inside = clientX >= 0 && clientY >= 0 && clientX <= window.innerWidth && clientY <= window.innerHeight;
     setIgnore(!inside || !interactiveAt(clientX, clientY));
+  }
+
+  // Forget the cached value and ask again from where the pointer really is.
+  function syncHit() {
+    ignoring = null;
+    refreshHit(cursor ? cursor.x : -1, cursor ? cursor.y : -1);
   }
 
   window.addEventListener("mousemove", (event) => refreshHit(event.clientX, event.clientY), { passive: true });
@@ -599,6 +609,12 @@
     // that count a drag looks like a tap and she teleports on release.
     if (drag.on && Number.isFinite(point.moved)) drag.moved = Math.max(drag.moved, point.moved);
     refreshHit(point.x, point.y);
+    // While she sits under the pointer, keep telling main to let clicks
+    // through to her: a hide/show cycle can drop that flag without a word.
+    if (state.live && ignoring === false && performance.now() - keepAliveAt > 800) {
+      keepAliveAt = performance.now();
+      try { window.capriEye?.clickThrough(false); } catch { /* older shell */ }
+    }
   });
 
   // Dragging leaves the eye behind for a frame, which reads as a streak.
@@ -742,20 +758,25 @@
   // Hidden eye means no mic: stop listening the moment the overlay goes away.
   window.capriEye?.onLive((live) => {
     state.live = Boolean(live);
-    // Main forces click-through on whenever the eye goes away, without telling
-    // this side. Trusting the cached flag here left her deaf to the mouse after
-    // a hide/show: the page thought it was already clickable and never asked.
-    ignoring = true;
+    // Main re-applies its own click-through flag on every hide and show, so the
+    // cached one is worthless here. Throw it away and test again from scratch,
+    // otherwise a stale "already clickable" leaves her deaf and undraggable.
+    ignoring = null;
     if (!state.live) {
       endDrag(true);
+      setIgnore(true);
       bubble.classList.remove("show");
       shutdownWake();
       if (talk.active) stopTalk();
     } else {
+      // A release lost while she was away must not keep the next grab captive.
+      endDrag(true);
       ghosts.length = 0;
       shards.length = 0;
       lastStamp = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
       if (wakeOn.on) setTimeout(startWake, 400);
+      // The pointer may already be resting on her when she comes back.
+      setTimeout(syncHit, 60);
     }
   });
 
