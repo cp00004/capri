@@ -1679,20 +1679,25 @@ addEventListener('keydown',(e)=>e.preventDefault());addEventListener('contextmen
   return "data:text/html;charset=utf-8," + encodeURIComponent(html);
 }
 
-// Visible top-level windows with the handle, the rectangle and the process.
-// The handle is what lets her close one tab or one window instead of a whole
-// browser session.
+// Visible top-level windows with the handle, the rectangle, the process and,
+// for browsers, the address the window is showing. The handle is what lets her
+// close one tab or one window instead of a whole browser session. The address
+// is read here, in the same pass, because a page title can be innocent while
+// the URL is not and one PowerShell per sweep keeps the check to a single cost.
 function nnnWindows() {
   return new Promise((resolve) => {
     const ps = [
+      `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes`,
       `Add-Type -Namespace CapriNnn -Name Win -MemberDefinition '[StructLayout(LayoutKind.Sequential)] public struct RECT { public int L; public int T; public int R; public int B; } [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l); public delegate bool EnumWindowsProc(IntPtr h, IntPtr l); [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h); [DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();'`,
       `$fg = [int64][CapriNnn.Win]::GetForegroundWindow()`,
       `$rows = New-Object System.Collections.ArrayList`,
       `$cb = [CapriNnn.Win+EnumWindowsProc]{ param($h,$l) if ([CapriNnn.Win]::IsWindowVisible($h)) { $sb = New-Object System.Text.StringBuilder 512; [void][CapriNnn.Win]::GetWindowTextW($h,$sb,512); if ($sb.Length -gt 2) { $p = 0; [void][CapriNnn.Win]::GetWindowThreadProcessId($h,[ref]$p); $r = New-Object CapriNnn.Win+RECT; [void][CapriNnn.Win]::GetWindowRect($h,[ref]$r); [void]$rows.Add([pscustomobject]@{ pid = [int]$p; hwnd = [int64]$h; l = $r.L; t = $r.T; w = ($r.R - $r.L); h = ($r.B - $r.T); title = $sb.ToString(); fg = ([int64]$h -eq $fg) }) }; }; return $true }`,
       `[void][CapriNnn.Win]::EnumWindows($cb,[IntPtr]::Zero)`,
-      // Tab separated: a window title can contain anything, including the
-      // delimiter, so pid, process, handle, rectangle and title stay in order.
-      `$rows | ForEach-Object { $n = try { (Get-Process -Id $_.pid -ErrorAction Stop).ProcessName } catch { "" }; Write-Output ([string]$_.pid + [char]9 + $n + [char]9 + [string]$_.hwnd + [char]9 + [string]$_.l + [char]9 + [string]$_.t + [char]9 + [string]$_.w + [char]9 + [string]$_.h + [char]9 + $_.title + [char]9 + $(if ($_.fg) { "1" } else { "0" })) }`,
+      `$browsers = @('chrome','msedge','brave','chromium','firefox','opera','vivaldi','thorium','librewolf','waterfox','arc')`,
+      // Address bar via UI Automation. Only values that look like an address
+      // count, so a search box rendered by the page is never mistaken for one.
+      // Minimized windows are skipped: nobody is looking at their page.
+      `$rows | ForEach-Object { $n = try { (Get-Process -Id $_.pid -ErrorAction Stop).ProcessName } catch { "" }; $u = ""; if (($browsers -contains $n.ToLower()) -and ($_.w -gt 200) -and ($_.h -gt 100)) { try { $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$_.hwnd); if ($root) { $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit); foreach ($e in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)) { try { $v = $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value } catch { continue }; if ($v -match '^(https?|file)://' -or $v -match '^[a-z0-9-]+([.][a-z0-9-]+)+') { $u = $v; break } } } } catch { } }; Write-Output ([string]$_.pid + [char]9 + $n + [char]9 + [string]$_.hwnd + [char]9 + [string]$_.l + [char]9 + [string]$_.t + [char]9 + [string]$_.w + [char]9 + [string]$_.h + [char]9 + $(if ($_.fg) { "1" } else { "0" }) + [char]9 + $u + [char]9 + $_.title) }`,
     ].join("; ");
     execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 6000 }, (err, stdout) => {
       if (err) return resolve([]);
@@ -1703,8 +1708,10 @@ function nnnWindows() {
           proc: String(parts[1] || "").trim(),
           hwnd: Number(parts[2]) || 0,
           rect: { x: Number(parts[3]) || 0, y: Number(parts[4]) || 0, width: Number(parts[5]) || 0, height: Number(parts[6]) || 0 },
-          title: String(parts[7] || "").trim(),
-          fg: String(parts[8] || "") === "1",
+          fg: String(parts[7] || "") === "1",
+          url: String(parts[8] || "").trim(),
+          // A title can contain anything, tabs included, so it keeps the tail.
+          title: String(parts.slice(9).join("\t") || "").trim(),
         };
       }).filter((row) => row.pid > 4 && row.title));
     });
@@ -1723,36 +1730,6 @@ function nnnPs(command) {
     execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", bytes],
       { windowsHide: true, timeout: 8000 }, (err) => resolve(!err));
   });
-}
-
-function nnnPsOut(command, timeout = 8000) {
-  const bytes = Buffer.from(command, "utf16le").toString("base64");
-  return new Promise((resolve) => {
-    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", bytes],
-      { windowsHide: true, timeout }, (err, stdout) => resolve(err ? "" : String(stdout || "").trim()));
-  });
-}
-
-// A title can be innocent ("Home", "Watch") while the address is not. Browsers
-// hand their URL bar to UI Automation, so the page the tab is actually showing
-// is readable without touching the browser itself. Only the window in front is
-// asked, because that is the one being looked at.
-async function nnnBrowserUrl(hwnd) {
-  if (!hwnd) return "";
-  const script = [
-    "Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes",
-    `$root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]${hwnd})`,
-    "if (-not $root) { exit 3 }",
-    "$cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)",
-    "$edits = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)",
-    "foreach ($e in $edits) {",
-    "  try { $v = $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value } catch { continue }",
-    "  if ($v -match '^(?:https?|file)://' -or $v -match '^[a-z0-9-]+(\\.[a-z0-9-]+)+') { Write-Output $v; exit 0 }",
-    "}",
-    "exit 5",
-  ].join("; ");
-  const out = await nnnPsOut(script, 5000);
-  return String(out || "").split(/\r?\n/)[0] || "";
 }
 
 async function nnnCloseTab(hwnd, title) {
@@ -1856,10 +1833,9 @@ async function nnnSweep() {
     for (const row of rows) {
       const isBrowser = NNN_BROWSERS.test(row.proc);
       let hit = nnnTextHit(`${row.title} ${row.proc}`) || nnnDomainHit(`${row.title} ${row.proc}`);
-      if (!hit && isBrowser && row.fg) {
-        const url = await nnnBrowserUrl(row.hwnd);
-        if (url) hit = nnnTextHit(url) || nnnDomainHit(url);
-      }
+      // A page title can be innocent ("Home", "Watch") while its address is
+      // not, so the address nnnWindows read for this window is checked too.
+      if (!hit && isBrowser && row.url) hit = nnnTextHit(row.url) || nnnDomainHit(row.url);
       if (!hit) continue;
       const rule = typeof hit === "string" ? hit : `${row.proc || "app"}: ${row.title}`;
       what = what || `${row.title.slice(0, 90)}${row.proc ? ` [${row.proc}]` : ""}`;
