@@ -721,9 +721,14 @@ async function chatCompletion({ provider, messages, tools, signal }) {
     headers["HTTP-Referer"] = "https://cp00004.github.io/capri/";
     headers["X-Title"] = "Capri";
   }
+  // A free relay that accepts the socket and then goes silent used to hold the
+  // whole turn open with no answer. Cap each attempt so the next link in the
+  // chain gets a shot while the user is still waiting.
+  const budget = AbortSignal.timeout(30_000);
+  const guard = signal ? AbortSignal.any([signal, budget]) : budget;
   const upstream = await fetch(`${provider.base}/chat/completions`, {
     method: "POST",
-    signal,
+    signal: guard,
     headers,
     body: JSON.stringify(payload),
   });
@@ -1104,6 +1109,12 @@ function fallbackBanter(ctx) {
    words could seal shut everybody else's machine. */
 const NNN_FILE = path.join(DATA_DIR, ".capri-nnn.json");
 const NNN_PASSCODE = String(process.env.CAPRI_NNN_CODE || "34872");
+const NNN_NAH = "NAH UH YOU GOONER. The lock stays on until December 1st.";
+
+// During the season there is no switch to flip, not even with the old code.
+function nnnSeasonActive(now = new Date()) {
+  return now.getMonth() === 10; // November
+}
 
 function nnnDecemberOne(from = new Date()) {
   const gate = new Date(from.getFullYear(), 11, 1);
@@ -1145,6 +1156,10 @@ const SHARED_NNN = "https://capricorn.de.deplexo.com";
 async function handleSharedNnn(req, res, action) {
   // Only this machine's own page may relay; a LAN caller gets the local copy.
   if (!isLoopback(req.socket.remoteAddress)) return false;
+  if (action === "release" && nnnSeasonActive()) {
+    json(res, 403, { error: "locked", locked: true, message: NNN_NAH });
+    return true;
+  }
   let target;
   try {
     target = new URL(SHARED_NNN);
@@ -1189,6 +1204,10 @@ async function handleNoNutGlobal(req, res, action) {
   let body = {};
   try { body = (await readBody(req, 4000)) || {}; } catch (err) { return json(res, 400, { error: err.message }); }
   if (action !== "arm" && action !== "release") return json(res, 404, { error: "unknown_action" });
+
+  if (action === "release" && nnnSeasonActive()) {
+    return json(res, 403, { error: "locked", locked: true, message: NNN_NAH });
+  }
 
   const state = nnnRead();
   const given = String(body.code || "").replace(/\D/g, "").slice(0, 16);
@@ -1288,10 +1307,10 @@ ${said.length ? said.map((line) => `  - ${line}`).join("\n") : "  (nothing yet -
   // The eye carries the key saved in Settings, same as a chat turn. Without it
   // the packaged app has no relay of its own and every comment is canned.
   const ownKey = userKeyCandidates(req.headers["x-capri-key"]);
-  const chain = [...ownKey, ...orderCandidates()].slice(0, 6);
+  const chain = [...ownKey, ...orderCandidates()].slice(0, 4);
   for (const candidate of chain) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 12000);
+    const timer = setTimeout(() => controller.abort(), 9000);
     try {
       const upstream = await chatCompletion({ provider: candidate, messages, signal: controller.signal });
       const reader = upstream.body.getReader();
@@ -1299,7 +1318,7 @@ ${said.length ? said.map((line) => `  - ${line}`).join("\n") : "  (nothing yet -
       let buffer = "";
       let out = "";
       while (true) {
-        const { value, done } = await reader.read();
+        const { value, done } = await readChunk(reader, 6000);
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         let idx;
@@ -1341,6 +1360,18 @@ ${said.length ? said.map((line) => `  - ${line}`).join("\n") : "  (nothing yet -
 }
 
 
+// A streaming relay can keep the socket open and never send another token.
+// Each read gets a hard idle limit so the turn moves on instead of hanging.
+function readChunk(reader, ms) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(Object.assign(new Error("relay went quiet"), { idle: true })), ms);
+    reader.read().then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
 async function runAgent({ history, userText, toolsOn, res, controller, profile, source, mobile, web, userKey, activity }) {
   // The client's local switch wins, so a signed-out browser still respects it.
   const banterOn = typeof activity?.banter === "boolean" ? activity.banter : banterEnabled(profile);
@@ -1370,7 +1401,10 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   if (!candidates.length) throw new Error("No chat key is set. Add GROQ_API_KEY, MISTRAL_API_KEY or FREETHEAI_API_KEY in the hosting panel.");
   let candIdx = 0;
   let attempts = 0;
-  const maxAttempts = Math.max(1, Math.min(candidates.length, 10));
+  // Four links is enough to cover a capped bucket or two; walking every free
+  // relay in the chain is what made a single turn feel like a dead app.
+  const maxAttempts = Math.max(1, Math.min(candidates.length, 4));
+  const turnUntil = Date.now() + 40_000;
   let waitSlept = false;
   let lastProvider = candidates[0] || { name: CHAT_PROVIDER };
 
@@ -1438,6 +1472,15 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   }
 
   for (let step = 0; step < MAX_STEPS; step++) {
+    if (Date.now() > turnUntil) {
+      const note = " The relays are all busy. Give me a breath and say that again.";
+      if (!spoke) {
+        sse(res, { type: "delta", text: note });
+        spoke = true;
+      }
+      finalText += note;
+      break;
+    }
     let upstream;
     let provider;
     try {
@@ -1470,12 +1513,17 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
           coolDown(provider, 300);
         } else if (status === 404) {
           coolDown(provider, 600);
+        } else {
+          // A silent or timed-out relay needs a breather too, or every turn
+          // starts by waiting on it again.
+          coolDown(provider, 15);
         }
         candIdx += 1;
+        sse(res, { type: "status", label: "switching link" });
         // Everything is cooling: wait out the shortest window instead of failing.
         if (candIdx % candidates.length === 0 && !waitSlept) {
           waitSlept = true;
-          const wait = Math.min(4000, 600 + attempts * 700);
+          const wait = Math.min(1200, 300 + attempts * 300);
           await new Promise((r) => setTimeout(r, wait));
         }
         step -= 1;
@@ -1537,18 +1585,38 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       }
     };
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf("\n\n")) !== -1) {
-        const frame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        takeFrame(frame);
+    let wentQuiet = false;
+    try {
+      while (true) {
+        const { value, done } = await readChunk(reader, 14_000);
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          takeFrame(frame);
+        }
       }
+      if (buffer.trim()) takeFrame(buffer);
+    } catch (err) {
+      if (!err?.idle) throw err;
+      wentQuiet = true;
     }
-    if (buffer.trim()) takeFrame(buffer);
+
+    if (wentQuiet) {
+      try { await upstream.body.cancel(); } catch { /* already gone */ }
+      // Nothing came out of this link yet: cool it and let the next one try.
+      if (!content && attempts < maxAttempts && Date.now() < turnUntil) {
+        coolDown(provider, 20);
+        candIdx += 1;
+        attempts += 1;
+        sse(res, { type: "status", label: "switching link" });
+        step -= 1;
+        continue;
+      }
+      if (!content && !spoke) throw new Error("The relay stopped answering. Say that again.");
+    }
 
     const toolCalls = calls.filter((c) => c?.function?.name);
     if (!toolCalls.length) {
@@ -2176,7 +2244,7 @@ function audioExtension(type) {
   return "webm";
 }
 
-async function geminiStt(buffer, type, hint = "") {
+async function geminiStt(buffer, type, hint = "", deadline = Date.now() + 25_000) {
   if (!GEMINI_KEYS.length) return null;
   const guide = hint ? `${hint} ` : "";
   const models = [
@@ -2198,6 +2266,7 @@ async function geminiStt(buffer, type, hint = "") {
   // means the voice is out of capacity.
   for (const key of GEMINI_KEYS) {
     for (const model of models) {
+      if (Date.now() >= deadline) return null;
       try {
         const upstream = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
@@ -2205,7 +2274,7 @@ async function geminiStt(buffer, type, hint = "") {
             method: "POST",
             headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
             body,
-            signal: AbortSignal.timeout(25_000),
+            signal: AbortSignal.timeout(Math.max(2500, Math.min(12_000, deadline - Date.now()))),
           }
         );
         if (!upstream.ok) continue;
@@ -2226,7 +2295,7 @@ async function geminiStt(buffer, type, hint = "") {
 
 // Voxtral carries its own free quota, so it keeps the ear alive when both
 // Whisper buckets and Gemini are squeezed.
-async function mistralStt(buffer, type, hint = "") {
+async function mistralStt(buffer, type, hint = "", deadline = Date.now() + 25_000) {
   if (!MISTRAL_KEYS.length) return null;
   const models = [
     process.env.CAPRI_STT_MISTRAL_MODEL || "voxtral-mini-latest",
@@ -2234,6 +2303,7 @@ async function mistralStt(buffer, type, hint = "") {
   ].filter((m, i, all) => all.indexOf(m) === i);
   for (const key of MISTRAL_KEYS) {
     for (const model of models) {
+      if (Date.now() >= deadline) return null;
       try {
         const form = new FormData();
         form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
@@ -2243,7 +2313,7 @@ async function mistralStt(buffer, type, hint = "") {
           method: "POST",
           headers: { Authorization: `Bearer ${key}` },
           body: form,
-          signal: AbortSignal.timeout(25_000),
+          signal: AbortSignal.timeout(Math.max(2500, Math.min(10_000, deadline - Date.now()))),
         });
         if (!upstream.ok) continue;
         const data = await upstream.json().catch(() => null);
@@ -2291,14 +2361,20 @@ async function handleStt(req, res) {
 
   let limited = false;
   let failure = null;
+  // The mic request has a hard budget. Three Whisper passes plus a Gemini sweep
+  // could run for over a minute, which read as "she heard me and froze".
+  const started = Date.now();
+  const deadline = started + 36_000;
+  const groqUntil = started + 22_000;
   const ordered = GROQ_KEYS.length
     ? GROQ_KEYS.slice(sttRotation % GROQ_KEYS.length).concat(GROQ_KEYS.slice(0, sttRotation % GROQ_KEYS.length))
     : [];
   sttRotation += 1;
 
   outer:
-  for (let pass = 0; pass < 3; pass += 1) {
+  for (let pass = 0; pass < 2; pass += 1) {
     for (const key of ordered) {
+      if (Date.now() >= groqUntil) break outer;
       try {
         const form = new FormData();
         form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
@@ -2311,7 +2387,7 @@ async function handleStt(req, res) {
           method: "POST",
           headers: { Authorization: `Bearer ${key}` },
           body: form,
-          signal: AbortSignal.timeout(12_000),
+          signal: AbortSignal.timeout(Math.max(3000, Math.min(10_000, groqUntil - Date.now()))),
         });
 
         const raw = await upstream.text();
@@ -2332,15 +2408,19 @@ async function handleStt(req, res) {
       }
     }
     // Keys refill on a rolling minute; a beat between passes finds capacity.
-    if (pass < 2) await new Promise((r) => setTimeout(r, 700 * (pass + 1)));
+    if (pass < 1) await new Promise((r) => setTimeout(r, 600));
   }
 
   // One bucket can run dry while the account still has capacity elsewhere.
-  const fallback = await geminiStt(buffer, type, hint);
-  if (fallback !== null) return json(res, 200, { text: fallback, via: "gemini" });
+  if (Date.now() < deadline - 2000) {
+    const fallback = await geminiStt(buffer, type, hint, deadline);
+    if (fallback !== null) return json(res, 200, { text: fallback, via: "gemini" });
+  }
 
-  const voxtral = await mistralStt(buffer, type, hint);
-  if (voxtral !== null) return json(res, 200, { text: voxtral, via: "mistral" });
+  if (Date.now() < deadline - 2000) {
+    const voxtral = await mistralStt(buffer, type, hint, deadline);
+    if (voxtral !== null) return json(res, 200, { text: voxtral, via: "mistral" });
+  }
 
   if (limited) {
     return json(res, 429, {

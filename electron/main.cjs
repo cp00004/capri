@@ -27,6 +27,9 @@ app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 // working with Capri closed. It gets its own profile folder so it can run next
 // to the real app, but it reads and writes the main profile's state.
 const GUARD_MODE = process.argv.includes("--nnn-guard");
+// The watchdog starts Capri without a window so the lock is enforced even when
+// the last copy was killed from Task Manager.
+const HIDDEN_MODE = process.argv.includes("--nnn-hidden");
 const NNN_DATA = app.getPath("userData");
 if (GUARD_MODE) app.setPath("userData", require("path").join(NNN_DATA, "nnn-guard"));
 
