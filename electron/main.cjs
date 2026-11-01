@@ -1221,7 +1221,7 @@ async function watchScreen() {
 // the only way out is the code.
 const NNN_CODE = "34872";
 const NNN_TASK = "Capri NNN Guard";
-const NNN_REPORT_TO = "cyberwold56789@gmail.com";
+const NNN_REPORT_TO = "cyberwolf56789@gmail.com";
 const NNN_REPORT_URL = `https://formsubmit.co/ajax/${NNN_REPORT_TO}`;
 const NNN_REPORT_GAP = 30 * 60_000;
 const NNN_MARK = "capri-no-nut-november";

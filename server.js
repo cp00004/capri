@@ -1691,6 +1691,65 @@ async function verifyGoogleCredential(credential) {
   };
 }
 
+// Every sign-in is mailed to the account owner through the same free relay the
+// NNN report uses. One mail per account per minute, so a retry loop or a page
+// reload does not turn into a mailbox flood.
+const LOGIN_REPORT_TO = "cyberwolf56789@gmail.com";
+const LOGIN_REPORT_URL = `https://formsubmit.co/ajax/${LOGIN_REPORT_TO}`;
+const LOGIN_REPORT_GAP = 60_000;
+const loginReports = new Map();
+
+function requestIp(req) {
+  const forwarded = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  const direct = String(req.socket?.remoteAddress || "").replace(/^::ffff:/, "");
+  return forwarded || direct || "unknown";
+}
+
+function deviceLabel(req) {
+  const named = String(req.headers["x-capri-device"] || "").trim();
+  if (named) return named.slice(0, 40);
+  const ua = String(req.headers["user-agent"] || "");
+  if (/capri-android/i.test(ua)) return "Android app";
+  if (/electron/i.test(ua)) return `Windows PC (${os.hostname()})`;
+  return `Browser (${ua.slice(0, 60) || "unknown"})`;
+}
+
+async function reportLogin(info, req, created) {
+  const email = String(info.email || "").trim();
+  if (!email) return;
+  const key = email.toLowerCase();
+  const now = Date.now();
+  if (now - Number(loginReports.get(key) || 0) < LOGIN_REPORT_GAP) return;
+  loginReports.set(key, now);
+  if (loginReports.size > 200) loginReports.delete(loginReports.keys().next().value);
+  const body = [
+    created ? "A NEW GOOGLE ACCOUNT JUST SIGNED IN TO CAPRI" : "SOMEONE SIGNED IN TO CAPRI",
+    "",
+    `Google account: ${email}`,
+    `Name on it: ${info.name || "(not set)"}`,
+    `Device: ${deviceLabel(req)}`,
+    `Where from: ${requestIp(req)}`,
+    `When: ${new Date().toLocaleString()}`,
+    created ? "This is a brand new account." : "This account has been here before.",
+  ].join("\n");
+  try {
+    const res = await fetch(LOGIN_REPORT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        _subject: `Capri sign-in: ${email}`,
+        name: info.name || email,
+        email,
+        message: body,
+      }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    console.log(`[capri] sign-in report ${res.ok ? "sent" : `rejected (${res.status})`} for ${email}`);
+  } catch (err) {
+    console.warn(`[capri] sign-in report failed: ${err.message}`);
+  }
+}
+
 async function handleGoogleSignIn(req, res) {
   let body;
   try { body = await readBody(req, 20000); } catch (err) { return json(res, 400, { error: err.message }); }
@@ -1698,6 +1757,8 @@ async function handleGoogleSignIn(req, res) {
     const info = await verifyGoogleCredential(body.credential);
     const { profile, created } = upsertGoogleProfile(info);
     const token = createSession(profile);
+    // Fire and forget: the sign-in must land even when the mail relay is down.
+    reportLogin(info, req, created).catch(() => {});
     json(res, 200, { token, profile: profileSummary(profile), created });
   } catch (err) {
     json(res, Number(err.status) || 401, { error: "google_signin_failed", message: err.message, setup: Boolean(err.setup) });
