@@ -1685,13 +1685,14 @@ addEventListener('keydown',(e)=>e.preventDefault());addEventListener('contextmen
 function nnnWindows() {
   return new Promise((resolve) => {
     const ps = [
-      `Add-Type -Namespace CapriNnn -Name Win -MemberDefinition '[StructLayout(LayoutKind.Sequential)] public struct RECT { public int L; public int T; public int R; public int B; } [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l); public delegate bool EnumWindowsProc(IntPtr h, IntPtr l); [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h); [DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);'`,
+      `Add-Type -Namespace CapriNnn -Name Win -MemberDefinition '[StructLayout(LayoutKind.Sequential)] public struct RECT { public int L; public int T; public int R; public int B; } [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr l); public delegate bool EnumWindowsProc(IntPtr h, IntPtr l); [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h); [DllImport("user32.dll", CharSet=System.Runtime.InteropServices.CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n); [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid); [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();'`,
+      `$fg = [int64][CapriNnn.Win]::GetForegroundWindow()`,
       `$rows = New-Object System.Collections.ArrayList`,
-      `$cb = [CapriNnn.Win+EnumWindowsProc]{ param($h,$l) if ([CapriNnn.Win]::IsWindowVisible($h)) { $sb = New-Object System.Text.StringBuilder 512; [void][CapriNnn.Win]::GetWindowTextW($h,$sb,512); if ($sb.Length -gt 2) { $p = 0; [void][CapriNnn.Win]::GetWindowThreadProcessId($h,[ref]$p); $r = New-Object CapriNnn.Win+RECT; [void][CapriNnn.Win]::GetWindowRect($h,[ref]$r); [void]$rows.Add([pscustomobject]@{ pid = [int]$p; hwnd = [int64]$h; l = $r.L; t = $r.T; w = ($r.R - $r.L); h = ($r.B - $r.T); title = $sb.ToString() }) }; }; return $true }`,
+      `$cb = [CapriNnn.Win+EnumWindowsProc]{ param($h,$l) if ([CapriNnn.Win]::IsWindowVisible($h)) { $sb = New-Object System.Text.StringBuilder 512; [void][CapriNnn.Win]::GetWindowTextW($h,$sb,512); if ($sb.Length -gt 2) { $p = 0; [void][CapriNnn.Win]::GetWindowThreadProcessId($h,[ref]$p); $r = New-Object CapriNnn.Win+RECT; [void][CapriNnn.Win]::GetWindowRect($h,[ref]$r); [void]$rows.Add([pscustomobject]@{ pid = [int]$p; hwnd = [int64]$h; l = $r.L; t = $r.T; w = ($r.R - $r.L); h = ($r.B - $r.T); title = $sb.ToString(); fg = ([int64]$h -eq $fg) }) }; }; return $true }`,
       `[void][CapriNnn.Win]::EnumWindows($cb,[IntPtr]::Zero)`,
       // Tab separated: a window title can contain anything, including the
       // delimiter, so pid, process, handle, rectangle and title stay in order.
-      `$rows | ForEach-Object { $n = try { (Get-Process -Id $_.pid -ErrorAction Stop).ProcessName } catch { "" }; Write-Output ([string]$_.pid + [char]9 + $n + [char]9 + [string]$_.hwnd + [char]9 + [string]$_.l + [char]9 + [string]$_.t + [char]9 + [string]$_.w + [char]9 + [string]$_.h + [char]9 + $_.title) }`,
+      `$rows | ForEach-Object { $n = try { (Get-Process -Id $_.pid -ErrorAction Stop).ProcessName } catch { "" }; Write-Output ([string]$_.pid + [char]9 + $n + [char]9 + [string]$_.hwnd + [char]9 + [string]$_.l + [char]9 + [string]$_.t + [char]9 + [string]$_.w + [char]9 + [string]$_.h + [char]9 + $_.title + [char]9 + $(if ($_.fg) { "1" } else { "0" })) }`,
     ].join("; ");
     execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { windowsHide: true, timeout: 6000 }, (err, stdout) => {
       if (err) return resolve([]);
@@ -1703,6 +1704,7 @@ function nnnWindows() {
           hwnd: Number(parts[2]) || 0,
           rect: { x: Number(parts[3]) || 0, y: Number(parts[4]) || 0, width: Number(parts[5]) || 0, height: Number(parts[6]) || 0 },
           title: String(parts[7] || "").trim(),
+          fg: String(parts[8] || "") === "1",
         };
       }).filter((row) => row.pid > 4 && row.title));
     });
@@ -1721,6 +1723,36 @@ function nnnPs(command) {
     execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", bytes],
       { windowsHide: true, timeout: 8000 }, (err) => resolve(!err));
   });
+}
+
+function nnnPsOut(command, timeout = 8000) {
+  const bytes = Buffer.from(command, "utf16le").toString("base64");
+  return new Promise((resolve) => {
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", bytes],
+      { windowsHide: true, timeout }, (err, stdout) => resolve(err ? "" : String(stdout || "").trim()));
+  });
+}
+
+// A title can be innocent ("Home", "Watch") while the address is not. Browsers
+// hand their URL bar to UI Automation, so the page the tab is actually showing
+// is readable without touching the browser itself. Only the window in front is
+// asked, because that is the one being looked at.
+async function nnnBrowserUrl(hwnd) {
+  if (!hwnd) return "";
+  const script = [
+    "Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes",
+    `$root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]${hwnd})`,
+    "if (-not $root) { exit 3 }",
+    "$cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Edit)",
+    "$edits = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)",
+    "foreach ($e in $edits) {",
+    "  try { $v = $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value } catch { continue }",
+    "  if ($v -match '^(?:https?|file)://' -or $v -match '^[a-z0-9-]+(\\.[a-z0-9-]+)+') { Write-Output $v; exit 0 }",
+    "}",
+    "exit 5",
+  ].join("; ");
+  const out = await nnnPsOut(script, 5000);
+  return String(out || "").split(/\r?\n/)[0] || "";
 }
 
 async function nnnCloseTab(hwnd, title) {
@@ -1822,14 +1854,18 @@ async function nnnSweep() {
   try {
     const rows = await nnnWindows();
     for (const row of rows) {
-      const hit = nnnTextHit(`${row.title} ${row.proc}`) || nnnDomainHit(`${row.title} ${row.proc}`);
+      const isBrowser = NNN_BROWSERS.test(row.proc);
+      let hit = nnnTextHit(`${row.title} ${row.proc}`) || nnnDomainHit(`${row.title} ${row.proc}`);
+      if (!hit && isBrowser && row.fg) {
+        const url = await nnnBrowserUrl(row.hwnd);
+        if (url) hit = nnnTextHit(url) || nnnDomainHit(url);
+      }
       if (!hit) continue;
       const rule = typeof hit === "string" ? hit : `${row.proc || "app"}: ${row.title}`;
       what = what || `${row.title.slice(0, 90)}${row.proc ? ` [${row.proc}]` : ""}`;
       rect = rect || row.rect;
       const key = `${row.hwnd}`;
       const last = Number(NNN_CLOSED.get(key) || 0);
-      const isBrowser = NNN_BROWSERS.test(row.proc);
       if (!isBrowser) {
         if (Date.now() - last < 4000) continue;
         NNN_CLOSED.set(key, Date.now());
