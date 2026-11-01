@@ -4,4 +4,5 @@
     <string name="title_activity_main">Capri</string>
     <string name="package_name">com.capri.app</string>
     <string name="custom_url_scheme">com.capri.app</string>
+    <string name="nnn_accessibility_description">No Nut November web blocking: Capri reads the address and text of the page you have open and closes it when it is porn, hentai or anime. Nothing is read while the season is off.</string>
 </resources>

@@ -2712,11 +2712,15 @@ function paintNnn() {
     nnnBlockedEl.textContent = `${blocked} blocked attempt${blocked === 1 ? "" : "s"}`;
   }
   if (nnnGuardEl) {
+    const guardLink = Boolean(window.CapriEyes?.guardSettings);
     nnnGuardEl.textContent = !nnnHasShell()
       ? "this browser: protection runs in Capri desktop / Android"
       : sites
-        ? "browser guard: tabs closed + site list active"
-        : "browser guard: tabs closed (site list needs admin once)";
+        ? "browser guard: ON - pages close the moment they match"
+        : guardLink
+          ? "browser guard: OFF - tap to turn it on"
+          : "browser guard: tabs closed (site list needs admin once)";
+    nnnGuardEl.style.cursor = guardLink && !sites ? "pointer" : "";
   }
   if (nnnStateEl) {
     nnnStateEl.textContent = mode === "active" ? "LOCKED" : mode === "after" ? "done" : active ? "armed" : "off";

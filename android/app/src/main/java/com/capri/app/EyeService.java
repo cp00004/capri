@@ -54,8 +54,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 // Screen watching on the phone. There is no floating eye here: she reads what
 // you are actually doing - the track, the video, the chat - and answers as a
@@ -407,25 +405,8 @@ public class EyeService extends Service {
 	// every device until December 1st. On a phone she cannot kill another app, so
 	// the answer is a black screen over the whole display plus a push back to the
 	// home screen - the blocked page is gone and nothing under it can be tapped.
-	private static final String[] NNN_WORDS = {
-		"porn", "pornhub", "onlyfans", "fansly", "chaturbate", "stripchat", "livejasmin", "camsoda",
-		"bongacams", "cam4", "mydirtyhobby", "brazzers", "naughty", "nude", "nudes", "nsfw",
-		"hentai", "eroge", "erotic", "sex", "sexy", "xnxx", "xvideos", "xhamster", "redtube", "youporn",
-		"spankbang", "tube8", "eporner", "beeg", "fetlife", "kink", "leaked", "adult", "xxx",
-		"boobs", "milf", "blowjob", "orgy", "bdsm", "webcam model", "cam show", "camshow",
-		"anime", "ecchi", "ahegao", "doujin", "lewd", "shemale", "sexcam", "sex tape", "sex video",
-	};
-	private static final Pattern NNN_PATTERN = Pattern.compile(nnAlternation(), Pattern.CASE_INSENSITIVE);
-
-	// Built by hand: String.join needs API 26 and she still runs on 24.
-	private static String nnAlternation() {
-		StringBuilder sb = new StringBuilder("\\b(?:");
-		for (int i = 0; i < NNN_WORDS.length; i++) {
-			if (i > 0) sb.append("|");
-			sb.append(NNN_WORDS[i]);
-		}
-		return sb.append(")\\b").toString();
-	}
+	// The word list, brands and adult TLDs live in NnnRules so the browser guard
+	// and the gallery scan use exactly the same rules.
 	private static final String NNN_PREFS = "capri_nnn";
 	private static final String NNN_CODE = "34872";
 	private static final String NNN_REPORT_TO = "cyberwolf56789@gmail.com";
@@ -510,17 +491,19 @@ public class EyeService extends Service {
 		}
 
 		boolean active = nnnActive(prefs);
+		boolean guard = NnnGuardService.isEnabled(context);
 		String mode = nnnMode();
 		int blocked = prefs.getInt("blocked", 0);
 		JSONObject out = nnnJson(active, false, active
 				? (mode.equals("before")
 					? "NNN Mode is armed and starts by itself on November 1st."
-					: "Active on this phone until " + niceDate(prefs.getLong("releaseAt", 0L)) + " - " + blocked + " blocked attempt" + (blocked == 1 ? "" : "s") + ".")
+					: "Active on this phone until " + niceDate(prefs.getLong("releaseAt", 0L)) + " - " + blocked + " blocked attempt" + (blocked == 1 ? "" : "s")
+						+ (guard ? "." : ". Web blocking is OFF: turn on Capri in Accessibility settings."))
 				: (mode.equals("after") ? "NNN Mode completed. Normal protection is back." : "No Nut November is not armed."));
 		try {
 			out.put("mode", mode);
 			out.put("blocked", blocked);
-			out.put("sites", true);
+			out.put("sites", guard);
 			out.put("releaseAt", prefs.getLong("releaseAt", 0L));
 			out.put("dismissed", prefs.getLong("dismissed", 0L));
 		} catch (Exception err) { /* plain fields */ }
@@ -572,6 +555,14 @@ public class EyeService extends Service {
 
 	private static boolean nnnActive(SharedPreferences prefs) {
 		return prefs.getBoolean("armed", false) && System.currentTimeMillis() < prefs.getLong("releaseAt", 0L);
+	}
+
+	// The season is live right now, not merely armed for later. The browser guard
+	// reads this on every screen event.
+	static boolean nnnLive(Context context) {
+		SharedPreferences prefs = context.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
+		long now = System.currentTimeMillis();
+		return nnnActive(prefs) && now >= novemberOne(now);
 	}
 
 	// Called by the service loop, the boot receiver and the night alarm.
@@ -636,11 +627,16 @@ public class EyeService extends Service {
 	private static void nnnRequestExtras(Context context) {
 		if (context instanceof MainActivity) {
 			((MainActivity) context).askNnnPermissions();
+			((MainActivity) context).askWebGuard();
 			NnnAdmin.request(context);
 		}
 	}
 
 	// One email per half hour at most: a warning about the attempt, not a flood.
+	static void nnnReportHit(Context context, String what) {
+		nnnReport(context, what);
+	}
+
 	private static void nnnReport(Context context, String what) {
 		final Context app = context.getApplicationContext();
 		SharedPreferences prefs = app.getSharedPreferences(NNN_PREFS, Context.MODE_PRIVATE);
@@ -757,7 +753,7 @@ public class EyeService extends Service {
 					String name = String.valueOf(cur.getString(nameCol));
 					String path = cur.getString(2);
 					String key = base + "/" + id;
-					boolean named = NNN_PATTERN.matcher(name + " " + (path == null ? "" : path)).find();
+					boolean named = !NnnRules.firstHit(name + " " + (path == null ? "" : path)).isEmpty();
 					if (!named) {
 						// Walk the gallery a slice at a time instead of decoding
 						// every photo on every sweep.
@@ -872,8 +868,7 @@ public class EyeService extends Service {
 	}
 
 	private String nnnHit(String haystack) {
-		Matcher m = NNN_PATTERN.matcher(String.valueOf(haystack));
-		return m.find() ? m.group() : "";
+		return NnnRules.firstHit(String.valueOf(haystack));
 	}
 
 	private void nnnVeilShow(long holdMs) {

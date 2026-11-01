@@ -2,6 +2,7 @@ package com.capri.app;
 
 import android.Manifest;
 import android.app.AlarmManager;
+import android.app.AlertDialog;
 import android.app.AppOpsManager;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
@@ -40,6 +41,7 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
 	private static final int CAPRI_PERMISSION_REQUEST = 1723;
 	private boolean nnnAdminAsked = false;
+	private boolean guardDialogOpen = false;
 	private WebView web;
 	private final CapriVoice.Sink voiceSink = new CapriVoice.Sink() {
 		@Override
@@ -437,6 +439,17 @@ public class MainActivity extends BridgeActivity {
 		public void grantMedia() {
 			askNnnPermissions();
 		}
+
+		// The page's "browser guard: OFF" line opens the accessibility page.
+		@JavascriptInterface
+		public void guardSettings() {
+			runOnUiThread(MainActivity.this::openGuardSettings);
+		}
+
+		@JavascriptInterface
+		public String guardOn() {
+			return NnnGuardService.isEnabled(MainActivity.this) ? "1" : "0";
+		}
 	}
 
 	// Google's own ear, used by the page while it is open. The service uses the
@@ -520,7 +533,41 @@ public class MainActivity extends BridgeActivity {
 			if (!missing.isEmpty()) {
 				ActivityCompat.requestPermissions(MainActivity.this, missing.toArray(new String[0]), CAPRI_MEDIA_REQUEST);
 			}
+			askWebGuard();
 		});
+	}
+
+	// Web blocking is an accessibility service, and Android only lets the owner
+	// switch that on. Asked once per stretch, then straight to the right page.
+	void askWebGuard() {
+		runOnUiThread(() -> {
+			if (isFinishing() || guardDialogOpen || NnnGuardService.isEnabled(this)) return;
+			long now = System.currentTimeMillis();
+			SharedPreferences prefs = getSharedPreferences("capri_nnn", MODE_PRIVATE);
+			if (now - prefs.getLong("guardAskedAt", 0L) < 6L * 60 * 60 * 1000L) return;
+			prefs.edit().putLong("guardAskedAt", now).apply();
+			guardDialogOpen = true;
+			new AlertDialog.Builder(this)
+					.setTitle("Turn on web blocking")
+					.setMessage("Android needs Capri switched on under Accessibility before the phone can read a page address and close porn, hentai or anime sites the moment they open. It reads on-screen text only.")
+					.setPositiveButton("Open settings", (dialog, which) -> {
+						guardDialogOpen = false;
+						openGuardSettings();
+					})
+					.setNegativeButton("Later", (dialog, which) -> guardDialogOpen = false)
+					.setOnCancelListener(dialog -> guardDialogOpen = false)
+					.show();
+		});
+	}
+
+	void openGuardSettings() {
+		try {
+			startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+		} catch (Exception err) {
+			try {
+				startActivity(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+			} catch (Exception again) { /* no settings app at all */ }
+		}
 	}
 
 	@Override
@@ -549,6 +596,7 @@ public class MainActivity extends BridgeActivity {
 			nnnAdminAsked = true;
 			NnnAdmin.request(this);
 		}
+		if (EyeService.nnnNeeded(this) || EyeService.nnnArmed(this)) askWebGuard();
 		if (grantFlow) new android.os.Handler(getMainLooper()).postDelayed(this::nextGrant, 700);
 	}
 
