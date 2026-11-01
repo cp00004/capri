@@ -468,26 +468,30 @@ function newestInstalledExe() {
   return process.execPath;
 }
 
+// A takeover just happened and the old copy is still dying: the fresh copy must
+// not treat that corpse as a duplicate and restart again.
+const takenOverAt = () => Number(readJson(path.join(UPD_ROOT, "one-copy.json"))?.at || 0);
+
 function dedupeTakeover() {
   if (process.platform !== "win32" || process.env.CAPRI_ONE_COPY === "1") return false;
+  if (Date.now() - takenOverAt() < 90_000) return false;
   const others = otherCapriProcs();
   const strays = others.filter((row) => !row.exe || !sameExe(row.exe, process.execPath));
   if (!strays.length) return false;
   logLine(`one-copy: closing ${strays.length} other Capri instance(s)`);
   for (const row of others) { try { process.kill(row.pid); } catch { /* already gone */ } }
   const exe = newestInstalledExe();
-  // Come back once this process has let go of the single-instance lock.
+  // Electron starts the new copy once this process has released the lock. A
+  // detached `cmd /c start` look plausible and never came back; app.relaunch is
+  // the path the updater already uses after every version change.
+  quitting = true;
   try {
-    const child = spawn("cmd.exe", ["/c", `ping -n 3 127.0.0.1 >nul & start "" "${exe}"`], {
-      detached: true, stdio: "ignore", windowsHide: true, env: { ...process.env, CAPRI_ONE_COPY: "1" },
-    });
-    child.on("error", () => {});
-    child.unref();
+    writeJson(path.join(UPD_ROOT, "one-copy.json"), { at: Date.now(), exe });
+    app.relaunch({ execPath: exe, args: [] });
   } catch (err) {
     logLine(`one-copy: relaunch failed (${err.message})`);
   }
-  quitting = true;
-  setTimeout(() => app.exit(0), 200);
+  setTimeout(() => app.exit(0), 300);
   return true;
 }
 
