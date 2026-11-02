@@ -80,10 +80,12 @@
     position: absolute; right: 40px; top: -90px; width: 760px; height: 1290px;
     background: url("/public/assets/capri-portrait.jpg") center 30% / cover no-repeat;
     filter: saturate(1.15) contrast(1.05);
-    -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 42%, #000 78%, transparent 100%),
-      linear-gradient(180deg, transparent 0%, #000 14%, #000 82%, transparent 100%);
-    -webkit-mask-composite: source-in;
-    mask-composite: intersect;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 40%, #000 100%);
+    mask-image: linear-gradient(90deg, transparent 0%, #000 40%, #000 100%);
+  }
+  #s1 .portraitFade {
+    position: absolute; right: 40px; top: -90px; width: 760px; height: 1290px;
+    background: linear-gradient(180deg, var(--bg) 0%, rgba(7,0,12,0) 16%, rgba(7,0,12,0) 76%, var(--bg) 100%);
   }
   #s1 .tint {
     position: absolute; right: 0; top: 0; width: 900px; height: 1080px;
@@ -114,10 +116,10 @@
   .chip.hot { color: #07000c; background: var(--mint); border-color: var(--mint); }
 
   /* -------------------------------------------------------------- s2 wake */
-  #s2 .left { position: absolute; left: 120px; top: 236px; width: 900px; }
+  #s2 .left { position: absolute; left: 120px; top: 236px; width: 980px; }
   #s2 .say { margin-top: 26px; }
-  #s2 .say .line1 { font: 800 132px/0.94 var(--ui); letter-spacing: -0.03em; }
-  #s2 .say .line2 { margin-top: 10px; font: 800 84px/1 var(--ui); letter-spacing: -0.02em; color: var(--mint); text-shadow: 0 0 40px rgba(77,255,157,.34); }
+  #s2 .say .line1 { font: 800 118px/0.94 var(--ui); letter-spacing: -0.03em; white-space: nowrap; }
+  #s2 .say .line2 { margin-top: 10px; font: 800 72px/1 var(--ui); letter-spacing: -0.02em; color: var(--mint); white-space: nowrap; text-shadow: 0 0 40px rgba(77,255,157,.34); }
   #s2 .chips { margin-top: 56px; display: flex; gap: 14px; }
   #s2 .right { position: absolute; right: 150px; top: 150px; width: 720px; height: 800px; }
   .orb { position: absolute; left: 210px; top: 40px; width: 300px; height: 300px; }
@@ -258,6 +260,13 @@
   .ph-wave { display: flex; align-items: center; gap: 4px; height: 46px; margin-top: 6px; padding: 0 4px; }
   .ph-wave i { flex: 1; background: linear-gradient(180deg, var(--mint), rgba(77,255,157,.1)); border-radius: 2px; }
   .ph-bar { margin-top: auto; height: 74px; display: flex; align-items: center; justify-content: space-around; border-top: 1px solid rgba(77,255,157,.2); font: 11px/1 var(--mono); letter-spacing: 2px; color: rgba(234,246,255,.65); background: rgba(7,0,12,.6); }
+  .ph-nnn {
+    margin: auto 16px 14px; border: 1px solid rgba(255,43,69,.4); background: rgba(255,43,69,.06);
+    padding: 12px 14px 13px; font: 11px/1 var(--mono); letter-spacing: 2px; color: rgba(234,246,255,.72);
+  }
+  .ph-nnn b { color: var(--red); font-weight: 500; }
+  .ph-nnn .bar { margin-top: 10px; height: 4px; background: rgba(255,43,69,.16); }
+  .ph-nnn .bar i { display: block; height: 100%; width: 3.3%; background: var(--red); box-shadow: 0 0 10px rgba(255,43,69,.8); }
   .ph-bar span.on { color: var(--mint); text-shadow: 0 0 12px rgba(77,255,157,.6); }
   .notif {
     position: absolute; left: 1180px; top: 76px; width: 420px; z-index: 30;
@@ -291,7 +300,8 @@
 
   /* ---------------------------------------------------------------- s7 cta */
   #s7 { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-  #s7 .mk { width: 210px; height: 140px; background: url("/public/assets/eye-spy.png") center / 210px auto no-repeat; filter: drop-shadow(0 0 26px rgba(77,255,157,.35)); }
+  #s7 .mk { width: 470px; height: 314px; }
+  #s7 canvas#mkCanvas { width: 470px; height: 314px; filter: drop-shadow(0 0 30px rgba(77,255,157,.4)) drop-shadow(0 0 80px rgba(255,79,216,.18)); }
   #s7 .get { margin-top: 26px; font: 800 132px/0.95 var(--ui); letter-spacing: -0.03em; }
   #s7 .get span { color: var(--mint); text-shadow: 0 0 60px rgba(77,255,157,.35); }
   #s7 .cards { margin-top: 46px; display: flex; gap: 20px; }
@@ -325,6 +335,7 @@
   <!-- 01 title -->
   <section class="scene" id="s1">
     <div class="portrait" id="s1portrait"></div>
+    <div class="portraitFade"></div>
     <div class="tint"></div>
     <div class="stack">
       <div class="word" id="s1word"><span>C</span><span>A</span><span>P</span><span>R</span><span>I</span></div>
@@ -460,6 +471,7 @@
           <div class="msg capri" id="s5m2">done. lofi, as usual.</div>
           <div class="ph-wave" id="s5wave"></div>
         </div>
+        <div class="ph-nnn"><b>NNN</b> · DAY 01 / 30<div class="bar"><i></i></div></div>
         <div class="ph-bar"><span class="on">◉ TALK</span><span>EYE</span><span>NNN</span></div>
       </div>
     </div>
@@ -485,7 +497,7 @@
 
   <!-- 07 cta -->
   <section class="scene" id="s7">
-    <div class="mk" id="s7mk"></div>
+    <div class="mk" id="s7mk"><canvas id="mkCanvas" width="940" height="628"></canvas></div>
     <div class="get" id="s7get">GET <span>CAPRI</span></div>
     <div class="cards">
       <div class="dl" id="s7d1"><div class="glyph">⊞</div><div><div class="t">WINDOWS</div><div class="s">CAPRI-V4-SETUP.EXE</div></div></div>
@@ -736,6 +748,36 @@
     cut.height = y1 - y0 + 1;
     cut.getContext("2d").drawImage(work, x0, y0, cut.width, cut.height, 0, 0, cut.width, cut.height);
     eye.cut = cut;
+
+    // The iris is the only strongly blue mass in the art, so measuring it beats
+    // guessing at fractions and keeps the socket exactly on the printed pupil.
+    const cd = cut.getContext("2d").getImageData(0, 0, cut.width, cut.height).data;
+    let sx = 0, sy = 0, n = 0;
+    for (let y = 0; y < cut.height; y++) {
+      for (let x = 0; x < cut.width; x++) {
+        const i = (y * cut.width + x) * 4;
+        const r = cd[i], g = cd[i + 1], b = cd[i + 2];
+        if (b > 150 && b - r > 70 && b - g > 30) { sx += x; sy += y; n++; }
+      }
+    }
+    if (n > 50) {
+      eye.cxRaw = sx / n;
+      eye.cyRaw = sy / n;
+      const dists = [];
+      for (let y = 0; y < cut.height; y++) {
+        for (let x = 0; x < cut.width; x++) {
+          const i = (y * cut.width + x) * 4;
+          const r = cd[i], g = cd[i + 1], b = cd[i + 2];
+          if (b > 150 && b - r > 70 && b - g > 30) dists.push(Math.hypot(x - eye.cxRaw, y - eye.cyRaw));
+        }
+      }
+      dists.sort((a, b) => a - b);
+      eye.rRaw = dists[Math.floor(dists.length * 0.96)] || 100;
+    } else {
+      eye.cxRaw = 0.4817 * cut.width;
+      eye.cyRaw = 0.621 * cut.height;
+      eye.rRaw = 0.0978 * cut.width;
+    }
     eye.ready = true;
     layoutEye();
   }
@@ -748,54 +790,67 @@
     eye.dh = cut.height * eye.scale;
     eye.ox = (EW - eye.dw) / 2;
     eye.oy = (EH - eye.dh) / 2;
-    // Measured against the trimmed art in the shell; same fractions here.
-    eye.cx = eye.ox + 0.4817 * eye.dw;
-    eye.cy = eye.oy + 0.621 * eye.dh;
-    eye.r = 0.0978 * eye.dw;
+    eye.cx = eye.ox + eye.cxRaw * eye.scale;
+    eye.cy = eye.oy + eye.cyRaw * eye.scale;
+    eye.r = eye.rRaw * eye.scale;
   }
 
-  // Draws her cut art, then slides the iris inside a fixed socket so the eye
-  // actually looks around instead of the whole face moving.
+  // Draws her cut art, covers the printed iris with a shadowed socket, then
+  // slides a disc cut from the same art inside it: the glance reads as a pupil
+  // travelling, not as the whole face shifting.
   function drawEye(t) {
     if (!eye.ready) return;
     ectx.clearRect(0, 0, EW, EH);
     ectx.drawImage(eye.cut, eye.ox, eye.oy, eye.dw, eye.dh);
 
-    const amp = eye.r * 0.42;
+    const amp = eye.r * 0.28;
     const gx = (Math.sin(t * 1.55) * 0.85 + Math.sin(t * 0.53 + 1.2) * 0.45) * amp;
     const gy = (Math.cos(t * 1.13 + 0.4) * 0.7 + Math.sin(t * 0.71) * 0.3) * amp;
 
-    const cx = eye.cx + gx * 0.0, cy = eye.cy + gy * 0.0;
+    const cx = eye.cx, cy = eye.cy;
+    const r = eye.r;
+
+    // socket: the recess the iris sits in, so the printed one is never visible
+    const socket = ectx.createRadialGradient(cx, cy, r * 0.05, cx, cy, r * 1.02);
+    socket.addColorStop(0, "rgba(10,0,12,.98)");
+    socket.addColorStop(0.72, "rgba(8,0,10,.98)");
+    socket.addColorStop(0.9, "rgba(6,0,10,.94)");
+    socket.addColorStop(1, "rgba(6,0,10,0)");
+    ectx.fillStyle = socket;
+    ectx.beginPath();
+    ectx.arc(cx, cy, r * 1.03, 0, Math.PI * 2);
+    ectx.fill();
+
     ectx.save();
     ectx.beginPath();
-    ectx.arc(cx, cy, eye.r * 1.02, 0, Math.PI * 2);
+    ectx.arc(cx, cy, r * 0.97, 0, Math.PI * 2);
     ectx.clip();
     ectx.drawImage(eye.cut, eye.ox + gx, eye.oy + gy, eye.dw, eye.dh);
     // soft inner rim so the disc reads as recessed
-    const rim = ectx.createRadialGradient(cx, cy, eye.r * 0.55, cx, cy, eye.r * 1.02);
+    const rim = ectx.createRadialGradient(cx, cy, r * 0.45, cx, cy, r * 0.99);
     rim.addColorStop(0, "rgba(0,0,0,0)");
-    rim.addColorStop(1, "rgba(3,0,8,.42)");
+    rim.addColorStop(1, "rgba(3,0,8,.55)");
     ectx.fillStyle = rim;
-    ectx.fillRect(cx - eye.r, cy - eye.r, eye.r * 2, eye.r * 2);
+    ectx.fillRect(cx - r, cy - r, r * 2, r * 2);
     // scanning band
-    const sy = cy - eye.r + ((t * 120) % (eye.r * 2));
+    const sy = cy - r + ((t * 120) % (r * 2));
     const band = ectx.createLinearGradient(0, sy - 14, 0, sy + 14);
     band.addColorStop(0, "rgba(77,255,157,0)");
-    band.addColorStop(0.5, "rgba(77,255,157,.22)");
+    band.addColorStop(0.5, "rgba(77,255,157,.25)");
     band.addColorStop(1, "rgba(77,255,157,0)");
     ectx.fillStyle = band;
-    ectx.fillRect(cx - eye.r, sy - 14, eye.r * 2, 28);
+    ectx.fillRect(cx - r, sy - 14, r * 2, 28);
     ectx.restore();
 
     // fixed catchlight
-    const g = eye.r * 0.46;
-    const gl = ectx.createRadialGradient(cx - eye.r * 0.3, cy - eye.r * 0.38, 1, cx - eye.r * 0.3, cy - eye.r * 0.38, g);
+    const g = r * 0.4;
+    const gl = ectx.createRadialGradient(cx - r * 0.3, cy - r * 0.34, 1, cx - r * 0.3, cy - r * 0.34, g);
     gl.addColorStop(0, "rgba(255,255,255,.85)");
-    gl.addColorStop(0.5, "rgba(200,255,232,.3)");
+    gl.addColorStop(0.5, "rgba(200,255,232,.28)");
     gl.addColorStop(1, "rgba(200,255,232,0)");
     ectx.fillStyle = gl;
     ectx.beginPath();
-    ectx.arc(cx - eye.r * 0.3, cy - eye.r * 0.38, g, 0, Math.PI * 2);
+    ectx.arc(cx - r * 0.3, cy - r * 0.34, g, 0, Math.PI * 2);
     ectx.fill();
   }
 
@@ -908,17 +963,21 @@
     reveal(s6.c1, t, 0.85, 0.5, 18);
     reveal(s6.c2, t, 1.05, 0.5, 18);
     reveal(s6.c3, t, 1.25, 0.5, 18);
-    const cells = s6.cal.children;
-    for (let i = 1; i < cells.length; i++) {
-      const cell = cells[i];
-      const on = ramp(t, 1.3 + i * 0.035, 1.55 + i * 0.035) > 0.5;
-      cell.classList.toggle("done", on);
-    }
   }
 
   /* ---------------------------------------------------------------- scene 7 */
   const s7 = { mk: $("s7mk"), get: $("s7get"), d1: $("s7d1"), d2: $("s7d2"), url: $("s7url"), foot: $("s7foot") };
+  const mkCtx = $("mkCanvas").getContext("2d");
+  function drawMark() {
+    if (!eye.cut) return;
+    const cw = 940, ch = 628;
+    const k = Math.min(cw / eye.cut.width, ch / eye.cut.height) * 0.98;
+    const w = eye.cut.width * k, h = eye.cut.height * k;
+    mkCtx.clearRect(0, 0, cw, ch);
+    mkCtx.drawImage(eye.cut, (cw - w) / 2, (ch - h) / 2, w, h);
+  }
   function s7Draw(t) {
+    drawMark();
     const p = easeOut(ramp(t, 0.05, 0.7));
     s7.mk.style.opacity = String(p);
     s7.mk.style.transform = `scale(${(0.9 + p * 0.1).toFixed(3)})`;

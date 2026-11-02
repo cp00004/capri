@@ -1,2 +1,3 @@
-2026/11/01-23:20:59.809 17334 Creating DB C:\Users\TestUser\Downloads\CAPRI AI\capri-desktop\ad\out\chrome-profile\Default\Service Worker\Database since it was missing.
-2026/11/01-23:20:59.886 17334 Reusing MANIFEST C:\Users\TestUser\Downloads\CAPRI AI\capri-desktop\ad\out\chrome-profile\Default\Service Worker\Database/MANIFEST-000001
+2026/11/01-23:22:34.481 17838 Reusing MANIFEST C:\Users\TestUser\Downloads\CAPRI AI\capri-desktop\ad\out\chrome-profile\Default\Service Worker\Database/MANIFEST-000001
+2026/11/01-23:22:34.482 17838 Recovering log #3
+2026/11/01-23:22:34.484 17838 Reusing old log C:\Users\TestUser\Downloads\CAPRI AI\capri-desktop\ad\out\chrome-profile\Default\Service Worker\Database/000003.log 

@@ -1,2 +1,3 @@
-2026/11/01-23:20:59.403 166b0 Creating DB C:\Users\TestUser\Downloads\CAPRI AI\capri-desktop\ad\out\chrome-profile\Default\Local Storage\leveldb since it was missing.
-2026/11/01-23:20:59.471 166b0 Reusing MANIFEST C:\Users\TestUser\Downloads\CAPRI AI\capri-desktop\ad\out\chrome-profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/11/01-23:22:34.673 15d98 Reusing MANIFEST C:\Users\TestUser\Downloads\CAPRI AI\capri-desktop\ad\out\chrome-profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/11/01-23:22:34.675 15d98 Recovering log #3
+2026/11/01-23:22:34.681 15d98 Reusing old log C:\Users\TestUser\Downloads\CAPRI AI\capri-desktop\ad\out\chrome-profile\Default\Local Storage\leveldb/000003.log 
