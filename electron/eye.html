@@ -374,9 +374,8 @@
   // on its own whenever the eye is hidden and shown, so the cache can be stale
   // in either direction - that is what left her dead to the mouse after X.
   let ignoring = true;
-  let keepAliveAt = 0;
-  function setIgnore(next) {
-    if (next === ignoring) return;
+  function setIgnore(next, force) {
+    if (next === ignoring && !force) return;
     ignoring = next;
     try { window.capriEye?.clickThrough(next); } catch { /* older shell */ }
   }
@@ -609,13 +608,16 @@
     // that count a drag looks like a tap and she teleports on release.
     if (drag.on && Number.isFinite(point.moved)) drag.moved = Math.max(drag.moved, point.moved);
     refreshHit(point.x, point.y);
-    // While she sits under the pointer, keep telling main to let clicks
-    // through to her: a hide/show cycle can drop that flag without a word.
-    if (state.live && ignoring === false && performance.now() - keepAliveAt > 800) {
-      keepAliveAt = performance.now();
-      try { window.capriEye?.clickThrough(false); } catch { /* older shell */ }
-    }
   });
+
+  // A hide/show cycle re-applies main's own click-through flag, and a lost
+  // mouseleave can leave both sides disagreeing about whether she is clickable.
+  // Restating the current verdict keeps her draggable instead of dead.
+  setInterval(() => {
+    if (!state.live || drag.on) return;
+    if (ignoring === null) syncHit();
+    else setIgnore(ignoring, true);
+  }, 1200);
 
   // Dragging leaves the eye behind for a frame, which reads as a streak.
   window.capriEye?.onMove(({ dx, dy }) => {

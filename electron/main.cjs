@@ -914,7 +914,8 @@ function createWindow() {
   });
   win.on("focus", () => {
     clearTimeout(eyeBlurTimer);
-    eyeDismissed = false;
+    // Hiding the eye with X has to outlast a visit to her window; only turning
+    // Eye Spy back on in settings brings her out again.
     // Back in her own window means the eye gets out of the way, pinned or not.
     hideEye();
     // Coming back to a window that has been open for hours is a good moment to
@@ -935,6 +936,7 @@ let eyeWin = null;
 let eyeEnabled = true;
 let eyeBanter = true;
 let eyeDismissed = false;
+let eyeLiveOn = false;
 const eyeApi = { base: "", token: "", session: "", key: "" };
 let eyeCursorTimer = null;
 let eyeWatchTimer = null;
@@ -1014,7 +1016,10 @@ function createEye() {
   eyeWin.webContents.on("did-finish-load", () => {
     sendEyeConfig();
     eyeWin?.webContents.send("eye-pinned", Boolean(readEyeState().pinned));
-    eyeWin?.webContents.send("eye-live", Boolean(eyeWin?.isVisible()));
+    // A reloaded page never saw the last live transition; hand it the truth and
+    // keep the dedupe above in step with it.
+    eyeLiveOn = Boolean(eyeWin?.isVisible());
+    eyeWin?.webContents.send("eye-live", eyeLiveOn);
   });
   let lastPos = null;
   eyeWin.on("moved", () => {
@@ -1031,6 +1036,19 @@ function createEye() {
   return eyeWin;
 }
 
+// Chromium drops the press (mousedown) on a window that cannot take focus, so a
+// non-focusable eye looks alive but can never be dragged and her buttons never
+// fire. She becomes focusable only while the pointer is actually on her.
+function eyeFocusable(on) {
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  if (on) {
+    try { eyeWin.setFocusable(true); } catch { /* older electron */ }
+    return;
+  }
+  try { if (eyeWin.isFocused()) eyeWin.blur(); } catch { /* older electron */ }
+  try { eyeWin.setFocusable(false); } catch { /* older electron */ }
+}
+
 function showEye() {
   if (!eyeEnabled) return;
   const eye = createEye();
@@ -1038,7 +1056,9 @@ function showEye() {
     // Already out: make sure nothing has stacked over her in the meantime.
     try { eye.setAlwaysOnTop(true, "screen-saver"); eye.moveTop(); } catch { /* older electron */ }
     // A page that missed the last live flag would stay asleep with the window
-    // still on screen, so re-assert it (and the cursor feed) every time.
+    // still on screen, so re-assert it (and the cursor feed) every time. The
+    // page treats a repeat as a no-op; sending it on every tick used to cancel
+    // a drag halfway through.
     startEyeTimers();
     sendEyeLive(true);
     return;
@@ -1050,6 +1070,7 @@ function showEye() {
   // last. Re-assert it every time she comes back on screen.
   try { eye.setAlwaysOnTop(true, "screen-saver"); } catch { /* older electron */ }
   eye.showInactive();
+  eyeFocusable(false);
   try { eye.moveTop(); } catch { /* older electron */ }
   startEyeTimers();
   sendEyeConfig();
@@ -1064,6 +1085,7 @@ function hideEye() {
   // never saw is what let it believe she was still clickable and listening.
   stopEyeDrag(false);
   sendEyeLive(false);
+  eyeFocusable(false);
   if (!eyeWin.isVisible()) { stopEyeTimers(); return; }
   eyeWin.hide();
   try { eyeWin.setIgnoreMouseEvents(true, { forward: true }); } catch { /* older electron */ }
@@ -1079,19 +1101,21 @@ function syncEye() {
   // listening on her own, because nothing in her loop depends on that window.
   if (!win || win.isDestroyed()) { showEye(); return; }
   const away = !win.isFocused() || win.isMinimized() || !win.isVisible();
-  if (!away) {
-    eyeDismissed = false;
-    hideEye();
-    return;
-  }
+  if (!away) { hideEye(); return; }
   if (eyeDismissed) return;
   showEye();
 }
 
 function sendEyeLive(live) {
-  try { eyeWin?.webContents.send("eye-live", Boolean(live)); } catch { /* closing */ }
+  const next = Boolean(live);
+  // syncEye re-shows an already-visible eye every two seconds; the page treats
+  // every live=true as "stop what you were doing", which used to drop a drag
+  // mid-grab. Only transitions are worth sending.
+  if (next === eyeLiveOn) return;
+  eyeLiveOn = next;
+  try { eyeWin?.webContents.send("eye-live", next); } catch { /* closing */ }
   // Her window's own wake listener steps aside while the eye owns the mic.
-  try { win?.webContents.send("capri-eye-live", Boolean(live)); } catch { /* closing */ }
+  try { win?.webContents.send("capri-eye-live", next); } catch { /* closing */ }
 }
 
 function sendEyeConfig() {
@@ -2523,6 +2547,7 @@ ipcMain.handle("capri-hands-policy-set", (_event, patch) => {
 ipcMain.handle("capri-hands-undo", () => undoHands());
 
 ipcMain.on("capri-eye-config", (_event, cfg) => {
+  const wasEnabled = eyeEnabled;
   eyeEnabled = cfg?.enabled !== false;
   eyeBanter = cfg?.banter !== false;
   if (typeof cfg?.base === "string") eyeApi.base = cfg.base.replace(/\/+$/, "");
@@ -2533,9 +2558,9 @@ ipcMain.on("capri-eye-config", (_event, cfg) => {
   if (!eyeEnabled) hideEye();
   else {
     if (eyeWin && !eyeWin.isDestroyed()) sendEyeConfig();
-    // Switching her back on used to leave the overlay gone until the window
-    // lost focus on its own; bring her straight back instead.
-    eyeDismissed = false;
+    // Switching her back on is the one thing that clears a dismissal; a config
+    // resend while she is already on must not undo the X the user clicked.
+    if (!wasEnabled) eyeDismissed = false;
     syncEye();
   }
 });
@@ -2576,6 +2601,7 @@ function startEyeDrag() {
   if (eyeDrag) stopEyeDrag(false);
   // A fresh grab must find a window that takes clicks, whatever it was doing
   // before the last hide/show cycle.
+  eyeFocusable(true);
   try { eyeWin.setIgnoreMouseEvents(false, { forward: true }); } catch { /* older electron */ }
   const point = screen.getCursorScreenPoint();
   const [x, y] = eyeWin.getPosition();
@@ -2637,7 +2663,9 @@ ipcMain.on("eye-set-pinned", (_event, pinned) => {
 // pass through, so the transparent margin stops swallowing the cursor.
 ipcMain.on("eye-click-through", (_event, ignore) => {
   if (!eyeWin || eyeWin.isDestroyed()) return;
-  try { eyeWin.setIgnoreMouseEvents(Boolean(ignore), { forward: true }); } catch { /* older electron */ }
+  const through = Boolean(ignore);
+  eyeFocusable(!through);
+  try { eyeWin.setIgnoreMouseEvents(through, { forward: true }); } catch { /* older electron */ }
 });
 
 // Leave a glitch burst where she was, then set her down somewhere else.
