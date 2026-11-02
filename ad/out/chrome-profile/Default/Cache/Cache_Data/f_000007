@@ -89,7 +89,7 @@
   }
   #s1 .tint {
     position: absolute; right: 0; top: 0; width: 900px; height: 1080px;
-    background: linear-gradient(90deg, var(--bg) 0%, rgba(7,0,12,.72) 34%, rgba(255,79,216,.16) 78%, rgba(7,0,12,.9) 100%);
+    background: linear-gradient(90deg, rgba(7,0,12,0) 0%, rgba(7,0,12,.34) 38%, rgba(255,79,216,.14) 76%, rgba(7,0,12,.86) 100%);
   }
   #s1 .stack { position: relative; z-index: 3; padding-left: 120px; }
   #s1 .word {
@@ -749,30 +749,48 @@
     cut.getContext("2d").drawImage(work, x0, y0, cut.width, cut.height, 0, 0, cut.width, cut.height);
     eye.cut = cut;
 
-    // The iris is the only strongly blue mass in the art, so measuring it beats
-    // guessing at fractions and keeps the socket exactly on the printed pupil.
+    // The iris is the only strongly blue mass in the art. Lashes also catch a
+    // little blue, so measure the largest connected blue blob rather than every
+    // bluish pixel; that puts the socket exactly on the printed pupil.
     const cd = cut.getContext("2d").getImageData(0, 0, cut.width, cut.height).data;
-    let sx = 0, sy = 0, n = 0;
-    for (let y = 0; y < cut.height; y++) {
-      for (let x = 0; x < cut.width; x++) {
-        const i = (y * cut.width + x) * 4;
-        const r = cd[i], g = cd[i + 1], b = cd[i + 2];
-        if (b > 150 && b - r > 70 && b - g > 30) { sx += x; sy += y; n++; }
+    const bw = cut.width, bh = cut.height;
+    const isBlue = (i) => cd[i + 2] > 150 && cd[i + 2] - cd[i] > 70 && cd[i + 2] - cd[i + 1] > 30;
+    const seen = new Uint8Array(bw * bh);
+    let best = null;
+    for (let y0 = 0; y0 < bh; y0++) {
+      for (let x0 = 0; x0 < bw; x0++) {
+        const start = y0 * bw + x0;
+        if (seen[start] || !isBlue(start * 4)) continue;
+        const stack = [start];
+        seen[start] = 1;
+        const pts = [];
+        while (stack.length) {
+          const p = stack.pop();
+          pts.push(p);
+          const px = p % bw, py = (p - px) / bw;
+          const around = [
+            px > 0 ? p - 1 : -1,
+            px < bw - 1 ? p + 1 : -1,
+            py > 0 ? p - bw : -1,
+            py < bh - 1 ? p + bw : -1,
+          ];
+          for (const q of around) {
+            if (q < 0 || seen[q] || !isBlue(q * 4)) continue;
+            seen[q] = 1;
+            stack.push(q);
+          }
+        }
+        if (!best || pts.length > best.length) best = pts;
       }
     }
-    if (n > 50) {
-      eye.cxRaw = sx / n;
-      eye.cyRaw = sy / n;
-      const dists = [];
-      for (let y = 0; y < cut.height; y++) {
-        for (let x = 0; x < cut.width; x++) {
-          const i = (y * cut.width + x) * 4;
-          const r = cd[i], g = cd[i + 1], b = cd[i + 2];
-          if (b > 150 && b - r > 70 && b - g > 30) dists.push(Math.hypot(x - eye.cxRaw, y - eye.cyRaw));
-        }
-      }
+    if (best && best.length > 400) {
+      let sx = 0, sy = 0;
+      for (const p of best) { sx += p % bw; sy += (p - (p % bw)) / bw; }
+      eye.cxRaw = sx / best.length;
+      eye.cyRaw = sy / best.length;
+      const dists = best.map((p) => Math.hypot((p % bw) - eye.cxRaw, (p - (p % bw)) / bw - eye.cyRaw));
       dists.sort((a, b) => a - b);
-      eye.rRaw = dists[Math.floor(dists.length * 0.96)] || 100;
+      eye.rRaw = dists[Math.floor(dists.length * 0.98)] || 100;
     } else {
       eye.cxRaw = 0.4817 * cut.width;
       eye.cyRaw = 0.621 * cut.height;
@@ -811,25 +829,25 @@
     const r = eye.r;
 
     // socket: the recess the iris sits in, so the printed one is never visible
-    const socket = ectx.createRadialGradient(cx, cy, r * 0.05, cx, cy, r * 1.02);
+    const socket = ectx.createRadialGradient(cx, cy, r * 0.05, cx, cy, r);
     socket.addColorStop(0, "rgba(10,0,12,.98)");
-    socket.addColorStop(0.72, "rgba(8,0,10,.98)");
-    socket.addColorStop(0.9, "rgba(6,0,10,.94)");
+    socket.addColorStop(0.82, "rgba(8,0,10,.97)");
+    socket.addColorStop(0.94, "rgba(6,0,10,.8)");
     socket.addColorStop(1, "rgba(6,0,10,0)");
     ectx.fillStyle = socket;
     ectx.beginPath();
-    ectx.arc(cx, cy, r * 1.03, 0, Math.PI * 2);
+    ectx.arc(cx, cy, r, 0, Math.PI * 2);
     ectx.fill();
 
     ectx.save();
     ectx.beginPath();
-    ectx.arc(cx, cy, r * 0.97, 0, Math.PI * 2);
+    ectx.arc(cx, cy, r * 0.94, 0, Math.PI * 2);
     ectx.clip();
     ectx.drawImage(eye.cut, eye.ox + gx, eye.oy + gy, eye.dw, eye.dh);
     // soft inner rim so the disc reads as recessed
-    const rim = ectx.createRadialGradient(cx, cy, r * 0.45, cx, cy, r * 0.99);
+    const rim = ectx.createRadialGradient(cx, cy, r * 0.5, cx, cy, r * 0.96);
     rim.addColorStop(0, "rgba(0,0,0,0)");
-    rim.addColorStop(1, "rgba(3,0,8,.55)");
+    rim.addColorStop(1, "rgba(3,0,8,.5)");
     ectx.fillStyle = rim;
     ectx.fillRect(cx - r, cy - r, r * 2, r * 2);
     // scanning band
