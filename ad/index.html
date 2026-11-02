@@ -153,7 +153,7 @@
     filter: drop-shadow(0 0 26px rgba(77,255,157,.32)) drop-shadow(0 0 70px rgba(255,79,216,.16));
   }
   #s3 .b-eye {
-    left: 178px; top: 836px; width: 640px; min-height: 58px;
+    left: 178px; top: 820px; width: 640px; min-height: 58px;
     font: 500 27px/1.3 var(--ui);
   }
   #s3 .b-eye .who i { font-style: normal; color: var(--pink); }
@@ -277,20 +277,41 @@
   .notif small { display: block; margin-top: 6px; font: 400 13px/1.4 var(--mono); letter-spacing: .5px; color: rgba(234,246,255,.72); }
 
   /* ---------------------------------------------------------------- s6 nnn */
-  #s6 .inner { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 150px; }
+  #s6 .inner { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 140px; }
   #s6 .redwash {
     position: absolute; right: -180px; top: -120px; width: 1100px; height: 1100px;
     background: radial-gradient(circle at 50% 50%, rgba(255,43,69,.22), rgba(255,43,69,0) 62%);
   }
-  #s6 .date { font: 500 34px/1 var(--mono); letter-spacing: 12px; color: var(--red); }
-  #s6 .h-xl { margin-top: 24px; max-width: 1200px; }
-  #s6 .h-xl .l2 { display: block; color: var(--red); text-shadow: 0 0 60px rgba(255,43,69,.35); }
-  #s6 .cards { margin-top: 52px; display: flex; gap: 16px; }
-  .lockcard {
-    width: 330px; border: 1px solid rgba(255,43,69,.35); background: rgba(255,43,69,.05);
-    padding: 22px 22px 20px; font: 500 16px/1.35 var(--mono); letter-spacing: 1.5px; color: rgba(234,246,255,.88);
+  #s6 .date { font: 500 28px/1 var(--mono); letter-spacing: 10px; color: var(--red); display: flex; align-items: center; gap: 18px; }
+  #s6 .date .bar { width: 56px; height: 2px; background: var(--red); box-shadow: 0 0 14px var(--red); }
+  #s6 .nnn { margin-top: 20px; display: flex; align-items: baseline; gap: 26px; font: 800 176px/0.84 var(--ui); letter-spacing: -0.035em; }
+  #s6 .nnn .l1 { color: var(--red); text-shadow: 0 0 80px rgba(255,43,69,.5); }
+  #s6 .nnn .l2 { text-shadow: 0 0 60px rgba(234,246,255,.18); }
+  #s6 .nns { margin-top: 12px; font: 500 46px/1 var(--mono); letter-spacing: 10px; color: rgba(234,246,255,.9); }
+  #s6 .guarantee {
+    margin-top: 28px; width: 784px; height: 92px; display: flex; transform: rotate(-1.6deg);
+    border: 2px solid var(--red); background: rgba(255,43,69,.08);
+    box-shadow: 0 0 44px rgba(255,43,69,.2), inset 0 0 44px rgba(255,43,69,.09);
   }
-  .lockcard b { display: block; font: 800 40px/1 var(--ui); color: var(--red); margin-bottom: 12px; letter-spacing: 0; }
+  #s6 .guarantee .pct { width: 176px; display: grid; place-items: center; background: var(--red); color: #14000a; font: 800 46px/1 var(--ui); letter-spacing: -1px; }
+  #s6 .guarantee .txt { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 24px; }
+  #s6 .guarantee .txt b { font: 800 30px/1 var(--ui); letter-spacing: 3px; }
+  #s6 .guarantee .txt span { margin-top: 11px; font: 500 22px/1 var(--mono); letter-spacing: 7px; color: var(--red); }
+  #s6 .cards { margin-top: 34px; display: flex; gap: 14px; }
+  .lockcard {
+    width: 300px; border: 1px solid rgba(255,43,69,.35); background: rgba(255,43,69,.05);
+    padding: 18px 20px 17px; font: 500 15px/1.35 var(--mono); letter-spacing: 1.5px; color: rgba(234,246,255,.88);
+  }
+  .lockcard b { display: block; font: 800 34px/1 var(--ui); color: var(--red); margin-bottom: 10px; letter-spacing: 0; }
+  #s6 .ticker {
+    position: absolute; left: 0; right: 0; top: 104px; height: 42px; overflow: hidden;
+    border-top: 1px solid rgba(255,43,69,.35); border-bottom: 1px solid rgba(255,43,69,.35);
+    background: rgba(255,43,69,.06);
+  }
+  #s6 .ticker .run {
+    position: absolute; left: 0; top: 0; height: 100%; display: flex; align-items: center; gap: 44px;
+    white-space: nowrap; font: 600 17px/1 var(--mono); letter-spacing: 6px; color: rgba(255,120,135,.9);
+  }
   #s6 .calendar { position: absolute; right: 150px; top: 300px; width: 520px; }
   #s6 .cal-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
   #s6 .cell { height: 52px; border: 1px solid rgba(234,246,255,.14); display: grid; place-items: center; font: 14px/1 var(--mono); color: rgba(234,246,255,.45); }
@@ -299,21 +320,49 @@
   #s6 .cal-cap { margin-top: 18px; display: flex; justify-content: space-between; font: 11px/1 var(--mono); letter-spacing: 3px; color: rgba(234,246,255,.5); }
 
   /* ---------------------------------------------------------------- s7 cta */
-  #s7 { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  #s7 { display: flex; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 140px; }
   #s7 .mk { width: 470px; height: 314px; }
   #s7 canvas#mkCanvas { width: 470px; height: 314px; filter: drop-shadow(0 0 30px rgba(77,255,157,.4)) drop-shadow(0 0 80px rgba(255,79,216,.18)); }
   #s7 .get { margin-top: 26px; font: 800 132px/0.95 var(--ui); letter-spacing: -0.03em; }
   #s7 .get span { color: var(--mint); text-shadow: 0 0 60px rgba(77,255,157,.35); }
   #s7 .cards { margin-top: 46px; display: flex; gap: 20px; }
   .dl {
+    position: relative; overflow: hidden;
     width: 440px; border: 1px solid rgba(77,255,157,.42); background: rgba(77,255,157,.05);
     padding: 22px 24px; display: flex; align-items: center; gap: 20px;
+  }
+  .dl .shine {
+    position: absolute; top: -60%; left: 0; width: 120px; height: 220%;
+    background: linear-gradient(90deg, rgba(77,255,157,0) 0%, rgba(77,255,157,.22) 50%, rgba(77,255,157,0) 100%);
+    transform: translateX(-200px) rotate(14deg); pointer-events: none;
   }
   .dl .glyph { width: 52px; height: 52px; border: 1px solid rgba(77,255,157,.55); display: grid; place-items: center; font: 18px/1 var(--mono); color: var(--mint); }
   .dl .t { font: 700 26px/1 var(--ui); letter-spacing: 2px; }
   .dl .s { margin-top: 8px; font: 400 14px/1 var(--mono); letter-spacing: 2px; color: var(--dim); }
   #s7 .url { margin-top: 44px; font: 500 34px/1 var(--mono); letter-spacing: 3px; color: var(--mint); text-shadow: 0 0 34px rgba(77,255,157,.35); }
   #s7 .foot { margin-top: 18px; font: 400 15px/1 var(--mono); letter-spacing: 4px; color: rgba(234,246,255,.45); }
+
+  /* ------------------------------------------------------------- vfx layer */
+  #stage { transform-origin: 50% 50%; }
+  canvas#fx { position: absolute; inset: 0; z-index: 57; pointer-events: none; }
+  canvas#sparks { position: absolute; inset: 0; z-index: 63; pointer-events: none; mix-blend-mode: screen; }
+
+  /* voice captions */
+  #subs {
+    position: absolute; left: 50%; bottom: 126px; transform: translateX(-50%); z-index: 70;
+    display: none; align-items: center; gap: 18px; padding: 13px 24px 14px;
+    background: rgba(7,0,12,.84); border: 1px solid rgba(77,255,157,.3); border-left: 3px solid var(--pink);
+    box-shadow: 0 14px 50px rgba(0,0,0,.6), 0 0 46px rgba(77,255,157,.1);
+  }
+  #subs .tag { font: 11px/1 var(--mono); letter-spacing: 4px; color: var(--mint); white-space: nowrap; }
+  #subs .tx { font: 600 30px/1 var(--ui); letter-spacing: .4px; white-space: nowrap; }
+  #subs .line { display: none; }
+  #subs .line.on { display: inline; }
+  #subs .w { color: rgba(234,246,255,.2); }
+  #subs .w.on { color: var(--ink); text-shadow: 0 0 24px rgba(77,255,157,.3); }
+  #subs .w.hit.on { color: var(--mint); text-shadow: 0 0 30px rgba(77,255,157,.7); }
+  #subs .eq { display: flex; gap: 3px; align-items: center; height: 26px; }
+  #subs .eq i { width: 3px; border-radius: 2px; background: var(--mint); box-shadow: 0 0 9px rgba(77,255,157,.55); }
 </style>
 </head>
 <body>
@@ -321,7 +370,14 @@
   <canvas id="bg" width="1920" height="1080"></canvas>
   <div id="noise"></div>
   <div id="scan"></div>
+  <canvas id="fx" width="1920" height="1080"></canvas>
   <div id="vignette"></div>
+  <canvas id="sparks" width="1920" height="1080"></canvas>
+  <div id="subs">
+    <span class="tag">CAPRI // VOICE</span>
+    <span class="tx" id="subsTx"></span>
+    <span class="eq" id="subsEq"></span>
+  </div>
 
   <div class="hud">
     <div class="hud-tl"><span class="dot"></span><span>CAPRI // PROJECT CAPRICORN</span></div>
@@ -348,7 +404,7 @@
     <div class="stamp" id="s1stamp">
       <div class="chip hot">VOICE FIRST</div>
       <div class="chip">EYE SPY</div>
-      <div class="chip">NNN GUARD</div>
+      <div class="chip">NNN MODE</div>
     </div>
   </section>
 
@@ -480,9 +536,15 @@
   <!-- 06 nnn -->
   <section class="scene" id="s6">
     <div class="redwash"></div>
+    <div class="ticker"><div class="run" id="s6tick"></div></div>
     <div class="inner">
-      <div class="date" id="s6date">NOV 1 — DEC 1</div>
-      <div class="h-xl"><span id="s6l1">SHE LOCKED</span><span class="l2" id="s6l2">THE DOOR.</span></div>
+      <div class="date" id="s6date"><span class="bar"></span><span>NOV 1 — DEC 1 · ARMED</span></div>
+      <div class="nnn"><span class="l1" id="s6l1">NNN</span><span class="l2" id="s6l2">MODE</span></div>
+      <div class="nns" id="s6nns">(NO NUT NOVEMBER)</div>
+      <div class="guarantee" id="s6g">
+        <div class="pct">100%</div>
+        <div class="txt"><b>GUARANTEE</b><span>NO CUMMING</span></div>
+      </div>
       <div class="cards">
         <div class="lockcard" id="s6c1"><b>✕</b>SITES BLOCKED</div>
         <div class="lockcard" id="s6c2"><b>✕</b>UNINSTALL REFUSED</div>
@@ -500,8 +562,8 @@
     <div class="mk" id="s7mk"><canvas id="mkCanvas" width="940" height="628"></canvas></div>
     <div class="get" id="s7get">GET <span>CAPRI</span></div>
     <div class="cards">
-      <div class="dl" id="s7d1"><div class="glyph">⊞</div><div><div class="t">WINDOWS</div><div class="s">CAPRI-V4-SETUP.EXE</div></div></div>
-      <div class="dl" id="s7d2"><div class="glyph">▤</div><div><div class="t">ANDROID</div><div class="s">CAPRI-V4.APK</div></div></div>
+      <div class="dl" id="s7d1"><span class="shine" id="s7sh1"></span><div class="glyph">⊞</div><div><div class="t">WINDOWS</div><div class="s">CAPRI-V4-SETUP.EXE</div></div></div>
+      <div class="dl" id="s7d2"><span class="shine" id="s7sh2"></span><div class="glyph">▤</div><div><div class="t">ANDROID</div><div class="s">CAPRI-V4.APK</div></div></div>
     </div>
     <div class="url" id="s7url">cp00004.github.io/capri</div>
     <div class="foot" id="s7foot">PC + ANDROID · V4.6.10</div>
@@ -527,15 +589,24 @@
 
   const W = 1920, H = 1080;
   const SCENES = [
-    { id: "s1", a: 0.0,  b: 3.2  },
-    { id: "s2", a: 3.2,  b: 7.8  },
-    { id: "s3", a: 7.8,  b: 13.0 },
-    { id: "s4", a: 13.0, b: 17.8 },
-    { id: "s5", a: 17.8, b: 22.6 },
-    { id: "s6", a: 22.6, b: 26.6 },
-    { id: "s7", a: 26.6, b: 30.0 },
+    { id: "s1", a: 0.0,  b: 3.0  },
+    { id: "s2", a: 3.0,  b: 7.4  },
+    { id: "s3", a: 7.4,  b: 12.4 },
+    { id: "s4", a: 12.4, b: 17.0 },
+    { id: "s5", a: 17.0, b: 21.6 },
+    { id: "s6", a: 21.6, b: 26.4 },
+    { id: "s7", a: 26.4, b: 32.0 },
   ];
-  const DURATION = 30;
+  const DURATION = 32;
+
+  // Same grid the soundtrack is built on, so picture and sound hit together.
+  const BEAT = 0.5, BEAT0 = 3.0;
+  const beat = (t) => {
+    if (t < BEAT0 || t > 30.2) return 0;
+    const b = (t - BEAT0) / BEAT;
+    return Math.exp(-(b - Math.floor(b)) * 5.5);
+  };
+  const IMPACTS = [3.0, 7.4, 12.4, 17.0, 21.6, 26.4, 30.2];
 
   /* ---------------------------------------------------------- typography */
   const text = {
@@ -676,7 +747,7 @@
   const s2 = {
     label: $("s2label"), l1: $("s2l1"), l2: $("s2l2"), chips: $("s2chips"),
     r1: $("s2r1"), r2: $("s2r2"), r3: $("s2r3"),
-    wave: $("s2wave"), cap: $("s2cap"),
+    wave: $("s2wave"), cap: $("s2cap"), core: document.querySelector("#s2 .orb .core"),
     bu: $("s2bu"), but: $("s2but"), bc: $("s2bc"), bct: $("s2bct"),
   };
   const s2Bars = [];
@@ -691,6 +762,9 @@
     s2.r1.style.transform = `rotate(${(t * 26).toFixed(1)}deg)`;
     s2.r2.style.transform = `rotate(${(-t * 18).toFixed(1)}deg)`;
     s2.r3.style.transform = `rotate(${(t * 40).toFixed(1)}deg)`;
+    const bp = beat(ABS);
+    s2.core.style.transform = `scale(${(1 + 0.1 * bp).toFixed(3)})`;
+    s2.core.style.boxShadow = `0 0 ${(60 + 90 * bp).toFixed(0)}px rgba(77,255,157,${(0.55 + 0.3 * bp).toFixed(2)}), 0 0 ${(160 + 160 * bp).toFixed(0)}px rgba(77,255,157,${(0.22 + 0.2 * bp).toFixed(2)})`;
 
     const speaking = t > 1.15 && t < 3.0;
     const energy = speaking ? 0.55 + 0.45 * Math.sin(t * 7.5) : 0.18;
@@ -826,7 +900,8 @@
     const gy = (Math.cos(t * 1.13 + 0.4) * 0.7 + Math.sin(t * 0.71) * 0.3) * amp;
 
     const cx = eye.cx, cy = eye.cy;
-    const r = eye.r;
+    const bp = beat(ABS);
+    const r = eye.r * (1 + 0.045 * bp);
 
     // socket: the recess the iris sits in, so the printed one is never visible
     const socket = ectx.createRadialGradient(cx, cy, r * 0.05, cx, cy, r);
@@ -870,6 +945,15 @@
     ectx.beginPath();
     ectx.arc(cx - r * 0.3, cy - r * 0.34, g, 0, Math.PI * 2);
     ectx.fill();
+
+    // beat halo around the socket
+    if (bp > 0.02) {
+      ectx.strokeStyle = `rgba(77,255,157,${(bp * 0.32).toFixed(3)})`;
+      ectx.lineWidth = 1 + bp * 3;
+      ectx.beginPath();
+      ectx.arc(cx, cy, r * (1.18 + 0.16 * (1 - bp)), 0, Math.PI * 2);
+      ectx.stroke();
+    }
   }
 
   const s3 = {
@@ -916,13 +1000,13 @@
       b.style.opacity = String(0.3 + env * 0.7);
     });
 
-    // cursor: walks to the mic, clicks, retracts
-    const cp = easeInOut(ramp(t, 2.5, 3.6));
-    const x = 330 + cp * 620;
-    const y = 620 - cp * 430;
-    s4.cursor.style.opacity = String(ramp(t, 2.35, 2.6) * (1 - ramp(t, 4.1, 4.5)));
+    // cursor: arcs from the corner to the mic, clicks, retracts
+    const cp = easeInOut(ramp(t, 2.15, 3.42));
+    const x = 190 + cp * 889;
+    const y = 660 - Math.sin(cp * Math.PI) * 44 - cp * 27;
+    s4.cursor.style.opacity = String(ramp(t, 2.0, 2.25) * (1 - ramp(t, 3.95, 4.35)));
     s4.cursor.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
-    const clickT = 3.65;
+    const clickT = 3.42;
     const cp2 = clamp01((t - clickT) / 0.45);
     s4.ring.style.opacity = String(t >= clickT ? (1 - cp2) : 0);
     s4.ring.style.transform = `translate(${(x - 32).toFixed(1)}px, ${(y - 32).toFixed(1)}px) scale(${(0.4 + cp2 * 1.4).toFixed(2)})`;
@@ -960,10 +1044,14 @@
 
   /* ---------------------------------------------------------------- scene 6 */
   const s6 = {
-    date: $("s6date"), l1: $("s6l1"), l2: $("s6l2"),
+    date: $("s6date"), l1: $("s6l1"), l2: $("s6l2"), nns: $("s6nns"), g: $("s6g"),
     c1: $("s6c1"), c2: $("s6c2"), c3: $("s6c3"),
-    cal: $("s6cal"), count: $("s6count"),
+    cal: $("s6cal"), count: $("s6count"), tick: $("s6tick"),
   };
+  s6.tick.innerHTML = (
+    '<span>NNN MODE</span><span>///</span><span>NO NUT NOVEMBER</span><span>///</span>' +
+    '<span>100% GUARANTEE</span><span>///</span><span>NO CUMMING</span><span>///</span>'
+  ).repeat(5);
   (() => {
     for (let i = 1; i <= 30; i++) {
       const d = document.createElement("div");
@@ -976,15 +1064,29 @@
 
   function s6Draw(t) {
     reveal(s6.date, t, 0.05, 0.5, 18);
-    reveal(s6.l1, t, 0.2, 0.55, 26);
-    reveal(s6.l2, t, 0.42, 0.55, 26);
-    reveal(s6.c1, t, 0.85, 0.5, 18);
-    reveal(s6.c2, t, 1.05, 0.5, 18);
-    reveal(s6.c3, t, 1.25, 0.5, 18);
+    reveal(s6.l1, t, 0.18, 0.5, 30);
+    reveal(s6.l2, t, 0.30, 0.5, 30);
+    reveal(s6.nns, t, 0.62, 0.5, 22);
+    const gp = easeOut(ramp(t, 1.0, 1.4));
+    s6.g.style.opacity = String(gp);
+    s6.g.style.transform = `rotate(-1.6deg) scale(${(1.14 - 0.14 * gp + 0.014 * beat(ABS)).toFixed(3)})`;
+    reveal(s6.c1, t, 1.46, 0.45, 18);
+    reveal(s6.c2, t, 1.62, 0.45, 18);
+    reveal(s6.c3, t, 1.78, 0.45, 18);
+    s6.tick.style.transform = `translateX(${(-((t * 115) % 1420)).toFixed(0)}px)`;
+    const cells = s6.cal.children;
+    const b = beat(ABS);
+    for (let i = 1; i < cells.length; i++) {
+      const fl = b * (0.1 + 0.14 * hash(i * 7 + Math.floor(ABS * 5)));
+      cells[i].style.borderColor = `rgba(255,43,69,${(0.14 + fl).toFixed(3)})`;
+    }
   }
 
   /* ---------------------------------------------------------------- scene 7 */
-  const s7 = { mk: $("s7mk"), get: $("s7get"), d1: $("s7d1"), d2: $("s7d2"), url: $("s7url"), foot: $("s7foot") };
+  const s7 = {
+    mk: $("s7mk"), get: $("s7get"), d1: $("s7d1"), d2: $("s7d2"),
+    url: $("s7url"), foot: $("s7foot"), sh1: $("s7sh1"), sh2: $("s7sh2"),
+  };
   const mkCtx = $("mkCanvas").getContext("2d");
   function drawMark() {
     if (!eye.cut) return;
@@ -998,20 +1100,182 @@
     drawMark();
     const p = easeOut(ramp(t, 0.05, 0.7));
     s7.mk.style.opacity = String(p);
-    s7.mk.style.transform = `scale(${(0.9 + p * 0.1).toFixed(3)})`;
+    s7.mk.style.transform = `scale(${(0.9 + p * 0.1 + 0.02 * beat(ABS)).toFixed(3)})`;
     reveal(s7.get, t, 0.25, 0.6, 28);
     reveal(s7.d1, t, 0.75, 0.5, 20);
     reveal(s7.d2, t, 0.9, 0.5, 20);
     reveal(s7.url, t, 1.25, 0.5, 16);
     reveal(s7.foot, t, 1.45, 0.5, 12);
+    const b = beat(ABS);
+    const glow = 0.42 + 0.42 * b;
+    s7.d1.style.borderColor = `rgba(77,255,157,${glow.toFixed(3)})`;
+    s7.d2.style.borderColor = `rgba(77,255,157,${glow.toFixed(3)})`;
+    s7.d1.style.boxShadow = `0 0 ${(18 + 26 * b).toFixed(0)}px rgba(77,255,157,${(0.12 + 0.2 * b).toFixed(3)})`;
+    s7.d2.style.boxShadow = `0 0 ${(18 + 26 * b).toFixed(0)}px rgba(77,255,157,${(0.12 + 0.2 * b).toFixed(3)})`;
+    const sweep = (v) => -220 + (((v % 2.6) / 2.6) * 720);
+    s7.sh1.style.transform = `translateX(${sweep(t * 1.15).toFixed(0)}px) rotate(14deg)`;
+    s7.sh2.style.transform = `translateX(${sweep(t * 1.15 + 1.3).toFixed(0)}px) rotate(14deg)`;
+  }
+
+  /* ----------------------------------------------------------- vfx + camera */
+  let ABS = 0;
+  const stage = $("stage");
+  const fctx = $("fx").getContext("2d");
+  const sctx = $("sparks").getContext("2d");
+
+  const SPARKS = Array.from({ length: 96 }, (_, i) => ({
+    x: hash(i * 3 + 1), y: hash(i * 7 + 5), v: 14 + hash(i * 5 + 9) * 88,
+    s: 0.7 + hash(i * 11 + 3) * 2.4, ph: hash(i * 13 + 2) * 6.283,
+    c: ["77,255,157", "255,79,216", "234,246,255"][i % 3],
+  }));
+
+  function drawSparks(t) {
+    sctx.clearRect(0, 0, W, H);
+    const b = beat(t);
+    for (const p of SPARKS) {
+      const y = ((p.y * H - t * p.v) % H + H) % H;
+      const x = p.x * W + Math.sin(t * 0.5 + p.ph) * 46;
+      const a = (0.1 + 0.42 * Math.abs(Math.sin(t * 1.9 + p.ph))) * (0.6 + b * 0.8);
+      sctx.fillStyle = `rgba(${p.c},${a.toFixed(3)})`;
+      sctx.fillRect(x, y, p.s, p.s * 2.2);
+    }
+    // speed strokes on the cut
+    for (const ti of IMPACTS) {
+      const d = t - ti;
+      if (d < 0 || d > 0.22) continue;
+      const k = 1 - d / 0.22;
+      for (let i = 0; i < 16; i++) {
+        const y = noise1(ti, 900 + i) * H;
+        const len = 80 + noise1(ti, 940 + i) * 420;
+        sctx.fillStyle = `rgba(234,246,255,${(k * 0.18).toFixed(3)})`;
+        sctx.fillRect(noise1(ti, 980 + i) * W, y, len, 1);
+      }
+    }
+  }
+
+  function drawFx(t) {
+    fctx.clearRect(0, 0, W, H);
+    const b = beat(t);
+    if (b > 0.03) {
+      const g = fctx.createRadialGradient(W / 2, H + 150, 60, W / 2, H + 150, 1150);
+      g.addColorStop(0, `rgba(77,255,157,${(b * 0.065).toFixed(3)})`);
+      g.addColorStop(1, "rgba(77,255,157,0)");
+      fctx.fillStyle = g;
+      fctx.fillRect(0, 0, W, H);
+    }
+
+    for (const ti of IMPACTS) {
+      const d = t - ti;
+      if (d < 0 || d > 0.85) continue;
+      const p = d / 0.85;
+      const r = 70 + p * 1000;
+      fctx.lineWidth = 2 + (1 - p) * 3;
+      fctx.strokeStyle = `rgba(77,255,157,${((1 - p) * 0.3).toFixed(3)})`;
+      fctx.beginPath(); fctx.arc(W * 0.5, H * 0.5, r, 0, Math.PI * 2); fctx.stroke();
+      fctx.strokeStyle = `rgba(255,79,216,${((1 - p) * 0.2).toFixed(3)})`;
+      fctx.beginPath(); fctx.arc(W * 0.5, H * 0.5, r * 0.74, 0, Math.PI * 2); fctx.stroke();
+    }
+
+    for (const ti of IMPACTS) {
+      const d = t - ti;
+      if (d < 0 || d > 0.26) continue;
+      const k = 1 - d / 0.26;
+      for (let i = 0; i < 5; i++) {
+        const y = Math.floor(noise1(ti * 2, 400 + i) * H);
+        const h = 2 + Math.floor(noise1(ti * 2, 500 + i) * 26);
+        const w = 140 + noise1(ti * 2, 600 + i) * 900;
+        const x = noise1(ti * 2, 700 + i) * (W - w);
+        fctx.fillStyle = i % 2 ? `rgba(255,79,216,${(0.14 * k).toFixed(3)})` : `rgba(43,107,255,${(0.14 * k).toFixed(3)})`;
+        fctx.fillRect(x, y, w, h);
+        fctx.fillStyle = `rgba(234,246,255,${(0.18 * k).toFixed(3)})`;
+        fctx.fillRect(x, y, w, 1);
+      }
+    }
+
+    const per = 6.2;
+    const ph = (t % per) / per;
+    if (ph < 0.5) {
+      const p = ph / 0.5;
+      const x = -1300 + p * 4200;
+      const lg = fctx.createLinearGradient(x - 300, 0, x + 300, 0);
+      lg.addColorStop(0, "rgba(77,255,157,0)");
+      lg.addColorStop(0.5, `rgba(77,255,157,${(0.075 * Math.sin(p * Math.PI)).toFixed(3)})`);
+      lg.addColorStop(1, "rgba(77,255,157,0)");
+      fctx.save();
+      fctx.translate(W / 2, H / 2);
+      fctx.rotate(-0.36);
+      fctx.fillStyle = lg;
+      fctx.fillRect(x - 320, -H, 640, H * 2);
+      fctx.restore();
+    }
+  }
+
+  function camera(t) {
+    let sc = SCENES[0];
+    for (const s of SCENES) if (t >= s.a) sc = s;
+    const p = clamp01((t - sc.a) / (sc.b - sc.a));
+    const since = t - sc.a;
+    const whip = sc.a > 0 && since < 0.2 ? 1 - since / 0.2 : 0;
+    stage.style.transform = `translate(${(Math.sin(t * 0.62) * 1.2).toFixed(2)}px, 0) scale(${(1.012 + 0.02 * p + whip * 0.02).toFixed(4)})`;
+    stage.style.filter = whip > 0.03 ? `blur(${(whip * 9).toFixed(1)}px)` : "none";
+  }
+
+  /* ---------------------------------------------------------- voice captions */
+  const VOICE = [
+    { a: 4.35, b: 7.10, words: ["say", "my", "name,", "good", "boy."], hit: [3, 4] },
+    { a: 9.30, b: 10.90, words: ["eyes", "on", "me."], hit: [] },
+    { a: 22.75, b: 25.20, words: ["good", "boy.", "no", "peeking."], hit: [0, 1] },
+    { a: 27.75, b: 29.40, words: ["come", "get", "me."], hit: [] },
+  ];
+  const subsEl = $("subs"), subsTx = $("subsTx"), subsEq = $("subsEq");
+  const EQ = [];
+  for (let i = 0; i < 6; i++) { const bar = document.createElement("i"); subsEq.appendChild(bar); EQ.push(bar); }
+  const subLines = VOICE.map((v) => {
+    const line = document.createElement("span");
+    line.className = "line";
+    const spans = v.words.map((w, i) => {
+      const sp = document.createElement("span");
+      sp.className = "w" + (v.hit.includes(i) ? " hit" : "");
+      sp.textContent = w + (i < v.words.length - 1 ? " " : "");
+      line.appendChild(sp);
+      return sp;
+    });
+    subsTx.appendChild(line);
+    const weights = v.words.map((w) => w.length + 2.5);
+    const total = weights.reduce((a, b) => a + b, 0);
+    let acc = 0;
+    const at = weights.map((w) => { const t0 = v.a + 0.1 + (v.b - v.a - 0.45) * (acc / total); acc += w; return t0; });
+    return { ...v, line, spans, at };
+  });
+
+  function drawSubs(t) {
+    let active = null;
+    for (const v of subLines) {
+      const on = t >= v.a && t <= v.b;
+      v.line.classList.toggle("on", on);
+      if (on) active = v;
+    }
+    subsEl.style.display = active ? "flex" : "none";
+    if (!active) return;
+    active.spans.forEach((sp, i) => sp.classList.toggle("on", t >= active.at[i]));
+    EQ.forEach((bar, i) => {
+      const h = 5 + 17 * Math.abs(Math.sin(t * 12 + i * 1.1) * Math.cos(t * 5.3 + i * 0.7));
+      bar.style.height = `${h.toFixed(1)}px`;
+      bar.style.opacity = String(0.45 + 0.55 * Math.abs(Math.sin(t * 9 + i)));
+    });
   }
 
   /* ------------------------------------------------------------------ seek */
   const drawFns = { s1: s1Draw, s2: s2Draw, s3: s3Draw, s4: s4Draw, s5: s5Draw, s6: s6Draw, s7: s7Draw };
   window.seek = (t) => {
     t = Math.max(0, Math.min(DURATION - 1e-4, Number(t) || 0));
+    ABS = t;
     drawBg(t);
+    drawFx(t);
+    drawSparks(t);
     drawHud(t);
+    camera(t);
+    drawSubs(t);
     for (const sc of SCENES) {
       const el = $(sc.id);
       const op = Math.min(ramp(t, sc.a, sc.a + 0.34), 1 - ramp(t, sc.b - 0.26, sc.b));
