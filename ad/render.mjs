@@ -21,6 +21,7 @@ const PORT = 4399;
 const args = process.argv.slice(2);
 const stillsArg = args.find((a) => a.startsWith("--stills="));
 const skipAudio = args.includes("--no-audio");
+const encodeOnly = args.includes("--encode-only");
 const chromePath = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const ffmpeg = "C:/Users/TestUser/AppData/Local/CapCut/Apps/9.5.0.4050/ffmpeg.exe";
 
@@ -113,65 +114,70 @@ async function connect() {
 }
 
 async function main() {
-  const server = await serve();
-  const chrome = launchChrome();
-  const ws = await connect();
+  if (!encodeOnly) {
+    const server = await serve();
+    const chrome = launchChrome();
+    const ws = await connect();
 
-  await rpc(ws, "Page.enable", {});
-  await rpc(ws, "Runtime.enable", {});
-  await rpc(ws, "Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: false });
-  await rpc(ws, "Emulation.setVisibleSize", { width: W, height: H }).catch(() => {});
-  await rpc(ws, "Page.navigate", { url: `http://127.0.0.1:${PORT}/ad/index.html` });
+    await rpc(ws, "Page.enable", {});
+    await rpc(ws, "Runtime.enable", {});
+    await rpc(ws, "Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: false });
+    await rpc(ws, "Emulation.setVisibleSize", { width: W, height: H }).catch(() => {});
+    await rpc(ws, "Page.navigate", { url: `http://127.0.0.1:${PORT}/ad/index.html` });
 
-  for (let i = 0; i < 120; i++) {
-    const ready = await evalJs(ws, "window.AD_READY").catch(() => false);
-    if (ready === true) break;
-    if (ready === "no-eye-art") throw new Error("eye art failed to load");
-    await sleep(100);
-  }
-  await sleep(400);
-  const fonts = await evalJs(ws, "document.fonts ? document.fonts.status : 'n/a'");
-  console.log("page ready, fonts:", fonts);
-
-  const shot = async (file) => {
-    const res = await rpc(ws, "Page.captureScreenshot", { format: "png", captureBeyondViewport: false, fromSurface: true });
-    fs.writeFileSync(file, Buffer.from(res.data, "base64"));
-  };
-
-  fs.mkdirSync(framesDir, { recursive: true });
-
-  if (stillsArg) {
-    const times = stillsArg.split("=")[1].split(",").map(Number);
-    const dir = path.join(outDir, "stills");
-    fs.mkdirSync(dir, { recursive: true });
-    for (const t of times) {
-      await evalJs(ws, `window.seek(${t})`);
-      await sleep(90);
-      const file = path.join(dir, `still-${t.toFixed(2)}.png`);
-      await shot(file);
-      console.log("still", t, "->", file);
+    for (let i = 0; i < 120; i++) {
+      const ready = await evalJs(ws, "window.AD_READY").catch(() => false);
+      if (ready === true) break;
+      if (ready === "no-eye-art") throw new Error("eye art failed to load");
+      await sleep(100);
     }
-  } else {
-    const total = FPS * DURATION;
-    for (let f = 0; f < total; f++) {
-      await evalJs(ws, `window.seek(${(f / FPS).toFixed(4)})`);
-      const file = path.join(framesDir, `f-${String(f).padStart(5, "0")}.png`);
-      await shot(file);
-      if (f % 60 === 0) console.log(`frame ${f}/${total}`);
+    await sleep(400);
+    const fonts = await evalJs(ws, "document.fonts ? document.fonts.status : 'n/a'");
+    console.log("page ready, fonts:", fonts);
+
+    const shot = async (file) => {
+      const res = await rpc(ws, "Page.captureScreenshot", { format: "png", captureBeyondViewport: false, fromSurface: true });
+      fs.writeFileSync(file, Buffer.from(res.data, "base64"));
+    };
+
+    fs.mkdirSync(framesDir, { recursive: true });
+
+    if (stillsArg) {
+      const times = stillsArg.split("=")[1].split(",").map(Number);
+      const dir = path.join(outDir, "stills");
+      fs.mkdirSync(dir, { recursive: true });
+      for (const t of times) {
+        await evalJs(ws, `window.seek(${t})`);
+        await sleep(90);
+        const file = path.join(dir, `still-${t.toFixed(2)}.png`);
+        await shot(file);
+        console.log("still", t, "->", file);
+      }
+    } else {
+      const total = FPS * DURATION;
+      for (let f = 0; f < total; f++) {
+        await evalJs(ws, `window.seek(${(f / FPS).toFixed(4)})`);
+        const file = path.join(framesDir, `f-${String(f).padStart(5, "0")}.png`);
+        await shot(file);
+        if (f % 60 === 0) console.log(`frame ${f}/${total}`);
+      }
+      console.log("frames done");
     }
-    console.log("frames done");
+
+    ws.close();
+    chrome.kill();
+    server.close();
   }
 
-  ws.close();
-  chrome.kill();
-  server.close();
+  if (stillsArg) return;
 
   if (!stillsArg) {
     const video = path.join(outDir, "capri-ad-1080p.mp4");
     const silent = path.join(outDir, "capri-ad-1080p-silent.mp4");
     execFileSync(ffmpeg, [
-      "-y", "-framerate", String(FPS), "-i", path.join(framesDir, "f-%05d.png"),
-      "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p",
+      "-y", "-framerate", String(FPS), "-start_number", "0", "-i", path.join(framesDir, "f-%05d.png"),
+      "-c:v", "h264_mf", "-rate_control", "quality", "-quality", "90",
+      "-b:v", "24M", "-pix_fmt", "yuv420p", "-g", "60",
       "-movflags", "+faststart", silent,
     ], { stdio: "inherit" });
     console.log("silent video:", silent);
