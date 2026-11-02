@@ -13,7 +13,7 @@ const root = path.resolve(here, "..");
 const outDir = path.join(here, "out");
 const framesDir = path.join(outDir, "frames");
 const FPS = 30;
-const DURATION = 30;
+const DURATION = 32;
 const W = 1920;
 const H = 1080;
 const PORT = 4399;
@@ -172,7 +172,7 @@ async function main() {
   if (stillsArg) return;
 
   if (!stillsArg) {
-    const video = path.join(outDir, "capri-ad-1080p.mp4");
+    const video = path.join(outDir, "capri-ad-1080p-v2.mp4");
     const silent = path.join(outDir, "capri-ad-1080p-silent.mp4");
     execFileSync(ffmpeg, [
       "-y", "-framerate", String(FPS), "-start_number", "0", "-i", path.join(framesDir, "f-%05d.png"),
@@ -184,26 +184,13 @@ async function main() {
 
     if (!skipAudio) {
       const wav = path.join(outDir, "capri-ad-bed.wav");
-      // Deterministic synth bed: pads, a pulse, hats and hits, all DSP.
-      const filter = [
-        "[0:a]volume='0.16*(0.65+0.35*sin(2*PI*t/8))':eval=frame,lowpass=f=520,afade=t=in:st=0:d=3[pad]",
-        "[1:a]volume='if(lt(mod(t\\,0.5)\\,0.14)\\,0.55\\,0.12)':eval=frame,lowpass=f=220[bass]",
-        "[2:a]highpass=f=6500,volume='if(lt(mod(t\\,0.25)\\,0.03)\\,0.5\\,0)':eval=frame[hat]",
-        "[3:a]volume='if(between(t\\,26.55\\,27.9)\\,0.05*(1-(t-26.55)/1.35)\\,0)':eval=frame[hit]",
-        "[pad][bass][hat][hit]amix=inputs=4:normalize=0,alimiter=limit=0.85,loudnorm=I=-16:TP=-1.5:LRA=9[a]",
-      ].join(";");
-      execFileSync(ffmpeg, [
-        "-y",
-        "-f", "lavfi", "-i", "sine=frequency=110:duration=30",
-        "-f", "lavfi", "-i", "sine=frequency=55:duration=30",
-        "-f", "lavfi", "-i", "anoisesrc=d=30:c=white:a=0.5",
-        "-f", "lavfi", "-i", "sine=frequency=220:duration=30",
-        "-filter_complex", filter, "-map", "[a]", "-ar", "48000", "-ac", "2", wav,
-      ], { stdio: "inherit" });
-
+      if (!fs.existsSync(wav)) {
+        console.log("building soundtrack...");
+        execFileSync(process.execPath, [path.join(here, "audio.mjs")], { stdio: "inherit" });
+      }
       execFileSync(ffmpeg, [
         "-y", "-i", silent, "-i", wav,
-        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", "-shortest",
         "-movflags", "+faststart", video,
       ], { stdio: "inherit" });
       console.log("video:", video);

@@ -121,7 +121,7 @@
   #s2 .say .line1 { font: 800 118px/0.94 var(--ui); letter-spacing: -0.03em; white-space: nowrap; }
   #s2 .say .line2 { margin-top: 10px; font: 800 72px/1 var(--ui); letter-spacing: -0.02em; color: var(--mint); white-space: nowrap; text-shadow: 0 0 40px rgba(77,255,157,.34); }
   #s2 .chips { margin-top: 56px; display: flex; gap: 14px; }
-  #s2 .right { position: absolute; right: 150px; top: 150px; width: 720px; height: 800px; }
+  #s2 .right { position: absolute; right: 150px; top: 90px; width: 720px; height: 860px; }
   .orb { position: absolute; left: 210px; top: 40px; width: 300px; height: 300px; }
   .orb .core {
     position: absolute; inset: 76px; border-radius: 50%;
@@ -144,8 +144,8 @@
   .bubble.user { border-left-color: var(--blue); border-color: rgba(43,107,255,.5); }
   .bubble .who { display: block; font: 10px/1 var(--mono); letter-spacing: 4px; color: var(--mint); margin-bottom: 8px; }
   .bubble.user .who { color: #7da6ff; }
-  #s2 .b-user { left: 30px; top: 566px; width: 560px; }
-  #s2 .b-cap { left: 150px; top: 676px; width: 540px; }
+  #s2 .b-user { left: 30px; top: 550px; width: 560px; }
+  #s2 .b-cap { left: 150px; top: 650px; width: 540px; }
 
   /* ---------------------------------------------------------------- s3 eye */
   #s3 canvas#eyeCanvas {
@@ -153,7 +153,7 @@
     filter: drop-shadow(0 0 26px rgba(77,255,157,.32)) drop-shadow(0 0 70px rgba(255,79,216,.16));
   }
   #s3 .b-eye {
-    left: 178px; top: 820px; width: 640px; min-height: 58px;
+    left: 178px; top: 786px; width: 640px; min-height: 58px;
     font: 500 27px/1.3 var(--ui);
   }
   #s3 .b-eye .who i { font-style: normal; color: var(--pink); }
@@ -526,6 +526,8 @@
           <div class="msg user" id="s5m1">capri, open youtube.</div>
           <div class="msg capri" id="s5m2">done. lofi, as usual.</div>
           <div class="ph-wave" id="s5wave"></div>
+          <div class="msg user" id="s5m3">and the guard?</div>
+          <div class="msg capri" id="s5m4">armed till dec 1. behave.</div>
         </div>
         <div class="ph-nnn"><b>NNN</b> · DAY 01 / 30<div class="bar"><i></i></div></div>
         <div class="ph-bar"><span class="on">◉ TALK</span><span>EYE</span><span>NNN</span></div>
@@ -668,9 +670,11 @@
       const r = noise1(t, 101 + i);
       if (r < 0.86) continue;
       const y = Math.floor(noise1(t, 201 + i) * H);
-      const h = 2 + Math.floor(noise1(t, 301 + i) * 26);
-      bctx.fillStyle = i === 0 ? "rgba(255,79,216,.09)" : i === 1 ? "rgba(43,107,255,.09)" : "rgba(77,255,157,.07)";
+      const h = 1 + Math.floor(noise1(t, 301 + i) * 2);
+      bctx.fillStyle = i === 0 ? "rgba(255,79,216,.16)" : i === 1 ? "rgba(43,107,255,.16)" : "rgba(77,255,157,.12)";
       bctx.fillRect(0, y, W, h);
+      bctx.fillStyle = "rgba(234,246,255,.12)";
+      bctx.fillRect(0, y, W, 1);
     }
   }
 
@@ -1019,7 +1023,7 @@
   const s5 = {
     copy: document.querySelector("#s5 .copy"),
     phone: $("s5phone"), notif: $("s5notif"),
-    m1: $("s5m1"), m2: $("s5m2"), wave: $("s5wave"),
+    m1: $("s5m1"), m2: $("s5m2"), m3: $("s5m3"), m4: $("s5m4"), wave: $("s5wave"),
   };
   const s5Bars = [];
   for (let i = 0; i < 34; i++) { const b = document.createElement("i"); s5.wave.appendChild(b); s5Bars.push(b); }
@@ -1031,6 +1035,8 @@
     s5.phone.style.transform = `translateY(${((1 - p) * 70).toFixed(1)}px) rotate(${(2.6 - 2.6 * p).toFixed(2)}deg)`;
     pop(s5.m1, t, 0.5, 0.35);
     pop(s5.m2, t, 1.35, 0.4);
+    pop(s5.m3, t, 2.35, 0.35);
+    pop(s5.m4, t, 2.72, 0.4);
     s5Bars.forEach((b, i) => {
       const env = Math.sin(Math.PI * (i / (s5Bars.length - 1)));
       const amp = t > 0.6 && t < 2.2 ? 0.5 + 0.5 * Math.abs(Math.sin(t * 7.5 + i * 0.45)) : 0.16 + 0.1 * Math.abs(Math.sin(t * 2.2 + i * 0.3));
