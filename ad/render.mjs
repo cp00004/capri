@@ -16,12 +16,17 @@ const FPS = 30;
 const DURATION = 32;
 const W = 1920;
 const H = 1080;
-const PORT = 4399;
 
 const args = process.argv.slice(2);
 const stillsArg = args.find((a) => a.startsWith("--stills="));
+const shardArg = args.find((a) => a.startsWith("--shard="));
 const skipAudio = args.includes("--no-audio");
 const encodeOnly = args.includes("--encode-only");
+const [SHARD, SHARDS] = shardArg
+  ? shardArg.split("=")[1].split("/").map(Number)
+  : [0, 1];
+const PORT = 4399 + SHARD;
+const DEBUG_PORT = 9333 + SHARD;
 const chromePath = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const ffmpeg = "C:/Users/TestUser/AppData/Local/CapCut/Apps/9.5.0.4050/ffmpeg.exe";
 
@@ -75,11 +80,11 @@ async function evalJs(ws, expression) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function launchChrome() {
-  const profile = path.join(outDir, "chrome-profile");
+  const profile = path.join(outDir, `chrome-profile${SHARD || ""}`);
   fs.mkdirSync(profile, { recursive: true });
   const proc = spawn(chromePath, [
     "--headless=new",
-    "--remote-debugging-port=9333",
+    `--remote-debugging-port=${DEBUG_PORT}`,
     `--user-data-dir=${profile}`,
     "--no-first-run",
     "--no-default-browser-check",
@@ -97,7 +102,7 @@ function launchChrome() {
 async function connect() {
   for (let i = 0; i < 80; i++) {
     try {
-      const list = await fetch("http://127.0.0.1:9333/json/list").then((r) => r.json());
+      const list = await fetch(`http://127.0.0.1:${DEBUG_PORT}/json/list`).then((r) => r.json());
       const page = list.find((t) => t.type === "page");
       if (page) {
         const ws = new WebSocket(page.webSocketDebuggerUrl);
@@ -155,11 +160,11 @@ async function main() {
       }
     } else {
       const total = FPS * DURATION;
-      for (let f = 0; f < total; f++) {
+      for (let f = SHARD; f < total; f += SHARDS) {
         await evalJs(ws, `window.seek(${(f / FPS).toFixed(4)})`);
         const file = path.join(framesDir, `f-${String(f).padStart(5, "0")}.png`);
         await shot(file);
-        if (f % 60 === 0) console.log(`frame ${f}/${total}`);
+        if (f % 60 === SHARD) console.log(`frame ${f}/${total}`);
       }
       console.log("frames done");
     }
@@ -170,6 +175,7 @@ async function main() {
   }
 
   if (stillsArg) return;
+  if (SHARDS > 1) return;
 
   if (!stillsArg) {
     const video = path.join(outDir, "capri-ad-1080p-v2.mp4");
