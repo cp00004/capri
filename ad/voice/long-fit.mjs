@@ -60,10 +60,23 @@ function schedule(durs) {
   return out;
 }
 
-let durs = Object.fromEntries(ids.map((id) => [id, trimmed[id].dur]));
-let plan = schedule(durs);
-const over = plan[ids[ids.length - 1]].a + durs[ids[ids.length - 1]] - LAST;
-const k = over > 0 ? Math.min(1.45, 1 + over / (LAST - plan[ids[0]].a)) : 1;
+const project = (k) => {
+  const durs = Object.fromEntries(ids.map((id) => [id, trimmed[id].dur / k]));
+  const plan = schedule(durs);
+  const last = ids[ids.length - 1];
+  return { durs, plan, end: plan[last].a + durs[last] };
+};
+// Fit the whole run, not just the last line: anchors push each other, so
+// search for the smallest tempo whose schedule actually lands inside LAST.
+let lo = 1, hi = 1.45, k = 1;
+if (project(1).end > LAST) {
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (project(mid).end > LAST) lo = mid; else hi = mid;
+  }
+  k = hi;
+}
+let durs = project(k).durs;
 
 for (const id of ids) {
   const fit = path.join(dir, `${id}.fit.wav`);
@@ -79,7 +92,7 @@ for (const id of ids) {
     durs[id] = trimmed[id].dur;
   }
 }
-plan = schedule(durs);
+const plan = schedule(durs);
 
 fs.writeFileSync(path.join(here, "..", "timing.json"), JSON.stringify(plan, null, 2));
 fs.writeFileSync(
