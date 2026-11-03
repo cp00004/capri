@@ -150,8 +150,10 @@ async function main() {
     const fonts = await evalJs(ws, "document.fonts ? document.fonts.status : 'n/a'");
     console.log("page ready, fonts:", fonts);
 
-    const shot = async (file) => {
-      const res = await rpc(ws, "Page.captureScreenshot", { format: "png", captureBeyondViewport: false, fromSurface: true });
+    const shot = async (file, jpeg = false) => {
+      const res = await rpc(ws, "Page.captureScreenshot", jpeg
+        ? { format: "jpeg", quality: 94, captureBeyondViewport: false, fromSurface: true }
+        : { format: "png", captureBeyondViewport: false, fromSurface: true });
       fs.writeFileSync(file, Buffer.from(res.data, "base64"));
     };
 
@@ -172,8 +174,8 @@ async function main() {
       const total = FPS * DURATION;
       for (let f = SHARD; f < total; f += SHARDS) {
         await evalJs(ws, `window.seek(${(f / FPS).toFixed(4)})`);
-        const file = path.join(framesDir, `f-${String(f).padStart(5, "0")}.png`);
-        await shot(file);
+        const file = path.join(framesDir, `f-${String(f).padStart(5, "0")}.jpg`);
+        await shot(file, true);
         if (f % 60 === SHARD) console.log(`frame ${f}/${total}`);
       }
       console.log("frames done");
@@ -190,7 +192,7 @@ async function main() {
   if (!stillsArg) {
     const silent = path.join(outDir, LONG ? `capri-ad-${DURATION}s-silent.mp4` : "capri-ad-1080p-silent.mp4");
     execFileSync(ffmpeg, [
-      "-y", "-framerate", String(FPS), "-start_number", "0", "-i", path.join(framesDir, "f-%05d.png"),
+      "-y", "-framerate", String(FPS), "-start_number", "0", "-i", path.join(framesDir, "f-%05d.jpg"),
       "-c:v", "h264_mf", "-rate_control", "quality", "-quality", "90",
       "-b:v", "24M", "-pix_fmt", "yuv420p", "-g", "60",
       "-movflags", "+faststart", silent,
