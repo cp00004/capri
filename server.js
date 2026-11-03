@@ -215,6 +215,7 @@ const HANDS_ON = `
 Your hands on the machine:
 - You are linked to ${HOST_USER}'s Windows PC. It is real hardware: you can run commands, read and write files, launch apps, take screenshots, touch the clipboard and type into windows, open/close apps, search the web.
 - If ${HOST_USER} asks you to do something on the machine, use the tools. Do not claim you cannot. Chain as many calls as the job needs. Find it if unknown.
+- Lists, ideas, notes and drafts are yours to write: compose the full text in one go and hand it to write_notepad with a short title. That call saves it to Documents\\Capri Notes and opens it. Never type a long body with send_keys.
 - Every desktop action that changes something asks ${HOST_USER} first: a small native strip shows the action and he picks ALLOW ONCE, ALWAYS ALLOW or DENY. Just call the tool; never ask him in chat and never wait for a spoken yes.
 - If a tool comes back denied or "dry run", that is his answer. Say one short line about it and do not retry the same call or work around it.
 - Keep the spoken part short: one or two sentences, what you did and the result, with a flick of attitude, not like a status dialog. Never read out raw JSON, tool names, command syntax or whole file dumps unless he asks for details. Give a full file path when you create or change something.
@@ -774,6 +775,7 @@ function actionLabel(name, args) {
   if (name === "set_preference") return `${String(args?.key || "setting")} = ${JSON.stringify(args?.value ?? "").slice(0, 60)}`;
   if (name === "get_time") return "reading the clock";
   if (name === "set_reminder") return `reminder: ${String(args?.message || "").slice(0, 50)}`;
+  if (name === "write_notepad") return `Notepad: ${String(args?.title || "notes").slice(0, 50)}`;
   if (!args) return name;
   if (name === "run_shell" || name === "powershell_object") return String(args.command || "").slice(0, 110);
   return String(args.path || args.target || args.from || args.keys || "").slice(0, 100) || name;
@@ -1426,8 +1428,8 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   let attempts = 0;
   // Four links is enough to cover a capped bucket or two; walking every free
   // relay in the chain is what made a single turn feel like a dead app.
-  const maxAttempts = Math.max(1, Math.min(candidates.length, 4));
-  const turnUntil = Date.now() + 32_000;
+  const maxAttempts = Math.max(1, Math.min(candidates.length, 6));
+  const turnUntil = Date.now() + 46_000;
   let waitSlept = false;
   let lastProvider = candidates[0] || { name: CHAT_PROVIDER };
 
@@ -1507,12 +1509,17 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
 
   for (let step = 0; step < MAX_STEPS; step++) {
     if (Date.now() > turnUntil) {
-      const note = " The relays are all busy. Give me a breath and say that again.";
       if (!spoke) {
+        // A turn that already ran a tool did not fail to reach a relay; it ran
+        // out of clock mid-answer. The old line blamed the relays and made a
+        // finished Notepad list look like a dead app.
+        const note = toolBudget < MAX_TOOL_CALLS
+          ? " The action went through, but my relay cut out mid-sentence. Ask me to keep going."
+          : " The relays are all busy. Give me a breath and say that again.";
         sse(res, { type: "delta", text: note });
+        finalText += note;
         spoke = true;
       }
-      finalText += note;
       break;
     }
     let upstream;
@@ -1553,6 +1560,15 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
           coolDown(provider, 15);
         }
         candIdx += 1;
+        if (status === 429) {
+          // Free caps are per provider and per minute; spending the other
+          // models of the same key only burns attempts inside the same window.
+          // Jump straight to a different provider's quota when one is left.
+          for (let k = 0; k < candidates.length; k += 1) {
+            const next = candidates[(candIdx + k) % candidates.length];
+            if (next.name !== provider.name) { candIdx += k; break; }
+          }
+        }
         sse(res, { type: "status", label: "switching link" });
         // Everything is cooling: wait out the shortest window instead of failing.
         if (candIdx % candidates.length === 0 && !waitSlept) {
