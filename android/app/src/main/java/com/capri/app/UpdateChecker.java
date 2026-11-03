@@ -171,14 +171,15 @@ final class UpdateChecker {
 	}
 
 	// Android itself parses the manifest here. A null result means the package
-	// is broken, and a versionCode that is not newer can never replace this app.
+	// is broken. An equal versionCode is allowed so a repair install can replace
+	// a build whose bundled web client is stale.
 	private static boolean parsesAsCapri(Context context, File file) {
 		try {
 			PackageInfo next = context.getPackageManager().getPackageArchiveInfo(file.getAbsolutePath(), 0);
 			if (next == null) return false;
 			if (!context.getPackageName().equals(next.packageName)) return false;
 			PackageInfo now = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
-			return next.versionCode > now.versionCode;
+			return next.versionCode >= now.versionCode;
 		} catch (Exception err) {
 			return false;
 		}

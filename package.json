@@ -1,6 +1,6 @@
 {
   "name": "capri",
-  "version": "4.6.16",
+  "version": "4.6.17",
   "private": true,
   "type": "module",
   "description": "Capri - a voice-first personality construct with hands on your PC",
@@ -10,6 +10,7 @@
     "cert": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/make-cert.ps1",
     "electron": "electron electron/main.cjs",
     "build:exe": "electron-builder",
+    "build:apk": "npx cap sync android && cd android && gradlew.bat assembleRelease",
     "server": "node server.js"
   },
   "engines": {
