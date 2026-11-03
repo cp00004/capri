@@ -11,9 +11,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const outDir = path.join(here, "out");
-const framesDir = path.join(outDir, "frames");
 const FPS = 30;
-const DURATION = 32;
 const W = 1920;
 const H = 1080;
 
@@ -22,6 +20,18 @@ const stillsArg = args.find((a) => a.startsWith("--stills="));
 const shardArg = args.find((a) => a.startsWith("--shard="));
 const skipAudio = args.includes("--no-audio");
 const encodeOnly = args.includes("--encode-only");
+const pageArg = args.find((a) => a.startsWith("--page="));
+const durArg = args.find((a) => a.startsWith("--duration="));
+const outArg = args.find((a) => a.startsWith("--out="));
+const wavArg = args.find((a) => a.startsWith("--wav="));
+
+const PAGE = pageArg ? pageArg.slice("--page=".length) : "ad/index.html";
+const DURATION = durArg ? Number(durArg.slice("--duration=".length)) : 32;
+const LONG = DURATION > 32;
+const framesDir = path.join(outDir, LONG ? `frames-${DURATION}` : "frames");
+const VIDEO = path.join(outDir, outArg ? outArg.slice("--out=".length) : (LONG ? `capri-ad-1080p-${DURATION}s.mp4` : "capri-ad-1080p-v2.mp4"));
+const WAV = path.join(outDir, wavArg ? wavArg.slice("--wav=".length) : (LONG ? "capri-ad-bed-long.wav" : "capri-ad-bed.wav"));
+
 const [SHARD, SHARDS] = shardArg
   ? shardArg.split("=")[1].split("/").map(Number)
   : [0, 1];
@@ -128,7 +138,7 @@ async function main() {
     await rpc(ws, "Runtime.enable", {});
     await rpc(ws, "Emulation.setDeviceMetricsOverride", { width: W, height: H, deviceScaleFactor: 1, mobile: false });
     await rpc(ws, "Emulation.setVisibleSize", { width: W, height: H }).catch(() => {});
-    await rpc(ws, "Page.navigate", { url: `http://127.0.0.1:${PORT}/ad/index.html` });
+    await rpc(ws, "Page.navigate", { url: `http://127.0.0.1:${PORT}/${PAGE}` });
 
     for (let i = 0; i < 120; i++) {
       const ready = await evalJs(ws, "window.AD_READY").catch(() => false);
@@ -178,8 +188,7 @@ async function main() {
   if (SHARDS > 1) return;
 
   if (!stillsArg) {
-    const video = path.join(outDir, "capri-ad-1080p-v2.mp4");
-    const silent = path.join(outDir, "capri-ad-1080p-silent.mp4");
+    const silent = path.join(outDir, LONG ? `capri-ad-${DURATION}s-silent.mp4` : "capri-ad-1080p-silent.mp4");
     execFileSync(ffmpeg, [
       "-y", "-framerate", String(FPS), "-start_number", "0", "-i", path.join(framesDir, "f-%05d.png"),
       "-c:v", "h264_mf", "-rate_control", "quality", "-quality", "90",
@@ -189,17 +198,16 @@ async function main() {
     console.log("silent video:", silent);
 
     if (!skipAudio) {
-      const wav = path.join(outDir, "capri-ad-bed.wav");
-      if (!fs.existsSync(wav)) {
+      if (!fs.existsSync(WAV)) {
         console.log("building soundtrack...");
-        execFileSync(process.execPath, [path.join(here, "audio.mjs")], { stdio: "inherit" });
+        execFileSync(process.execPath, [path.join(here, "audio.mjs"), ...(LONG ? ["--long"] : [])], { stdio: "inherit" });
       }
       execFileSync(ffmpeg, [
-        "-y", "-i", silent, "-i", wav,
+        "-y", "-i", silent, "-i", WAV,
         "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", "-shortest",
-        "-movflags", "+faststart", video,
+        "-movflags", "+faststart", VIDEO,
       ], { stdio: "inherit" });
-      console.log("video:", video);
+      console.log("video:", VIDEO);
     }
   }
 }

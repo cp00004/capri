@@ -782,6 +782,13 @@
     }
   });
 
+  // Her reply is played by the main window, often while the overlay is the only
+  // thing on screen. Silence the overlay's ear for the line and a beat after.
+  window.capriEye?.onSpeaking((on) => {
+    wakeRec.mutedUntil = on ? Number.POSITIVE_INFINITY : performance.now() + 1600;
+    if (on && wakeRec.speaking) stopWakeChunk();
+  });
+
   window.capriEye?.onPinned((locked) => {
     state.locked = Boolean(locked);
     pin.classList.toggle("on", state.locked);
@@ -800,7 +807,7 @@
   }
 
   const talk = { active: false, chunks: [], recorder: null, stream: null, stopTimer: null, heard: false, ctx: null, analyser: null, raf: null, silenceSince: 0, startedAt: 0 };
-  const wakeRec = { on: false, chunks: [], recorder: null, stream: null, busy: false, ctx: null, analyser: null, raf: 0, speaking: false, startedAt: 0, quietAt: 0, cooldown: 0 };
+  const wakeRec = { on: false, chunks: [], recorder: null, stream: null, busy: false, ctx: null, analyser: null, raf: 0, speaking: false, startedAt: 0, quietAt: 0, cooldown: 0, mutedUntil: 0, lastKey: "", lastAt: 0 };
 
   // One context for the eye, resumed the moment it is made: a parked context
   // hands the analyser flat silence, which reads as a room that never speaks.
@@ -946,7 +953,7 @@
   /* Wake word: one mic held open and cut into clips by her own voice gate, so
      there is no deaf stretch between "Capri" and the order, and no fixed window
      that swallows the first syllable. Only a clip with sound in it goes to STT. */
-  const WAKE_RMS = 0.02;
+  const WAKE_RMS = 0.028;
 
   function wakeRms() {
     if (!wakeRec.analyser) return 1; // no meter: treat the room as talking
@@ -992,8 +999,9 @@
     wakeRec.raf = requestAnimationFrame(wakeLoop);
     // Her own voice, or a tap-to-talk take, owns the mic.
     if (talk.active || wakeRec.busy) { if (wakeRec.speaking) stopWakeChunk(); return; }
-    const rms = wakeRms();
     const now = performance.now();
+    if (now < wakeRec.mutedUntil) { if (wakeRec.speaking) stopWakeChunk(); return; }
+    const rms = wakeRms();
     if (!wakeRec.speaking) {
       if (rms > WAKE_RMS && now > wakeRec.cooldown) beginWakeChunk();
       return;
@@ -1056,7 +1064,13 @@
     const text = await transcribe(blob);
     wakeRec.busy = false;
     if (!wakeRec.on || talk.active) return;
+    if (performance.now() < wakeRec.mutedUntil) return;
     if (text && isWakePhrase(text)) {
+      const key = text.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const again = key && key === wakeRec.lastKey && performance.now() - wakeRec.lastAt < 9000;
+      wakeRec.lastKey = key;
+      wakeRec.lastAt = performance.now();
+      if (again) return;
       const rest = wakeRemainder(text);
       chime();
       if (rest.split(/\s+/).filter(Boolean).length >= 2) { ask(rest); return; }
@@ -1123,21 +1137,6 @@
   ]);
   // Only at the front of the clip: "vieni a Capri" is a lyric, not an order.
   const WAKE_LEAD = new Set(["hey", "ok", "okay", "yo", "hi", "hello", "oh", "um", "uh", "so"]);
-  function editDistance(a, b) {
-    const m = a.length, n = b.length;
-    const row = new Array(n + 1);
-    for (let j = 0; j <= n; j++) row[j] = j;
-    for (let i = 1; i <= m; i++) {
-      let prev = row[0];
-      row[0] = i;
-      for (let j = 1; j <= n; j++) {
-        const tmp = row[j];
-        row[j] = Math.min(row[j] + 1, row[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1));
-        prev = tmp;
-      }
-    }
-    return row[n];
-  }
   function wakeAt(tokens) {
     for (let i = 0; i <= 1 && i < tokens.length; i++) {
       if (i === 1 && !WAKE_LEAD.has(tokens[0])) break;
@@ -1147,9 +1146,6 @@
       if (token === "cap") {
         const next = (tokens[i + 1] || "").replace(/^'+|'+$/g, "");
         if (/^(ri|ree|ry|rie)$/.test(next)) return { index: i, consumed: 2 };
-      }
-      if (token.length >= 4 && token.length <= 7 && token.startsWith("cap") && editDistance(token, "capri") <= 1) {
-        return { index: i, consumed: 1 };
       }
     }
     return null;

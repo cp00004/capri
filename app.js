@@ -7,7 +7,6 @@ const $ = (sel) => document.querySelector(sel);
 const TOKEN_KEY = "capri.token";
 const API_KEY = "capri.api";
 const SESSION_KEY = "capri.session";
-const VOICE_ENGINE_KEY = "capri.voiceEngine";
 const OWN_KEY = "capri.modelKey";
 const SERVER_KEY = "capri.server";
 const PROFILE_MIRROR = "capri.profileMirror";
@@ -26,7 +25,6 @@ const el = {
   kbInput: $("#kbInput"),
   settingsBtn: $("#settingsBtn"),
   settings: $("#settings"),
-  voiceSelect: $("#voiceSelect"),
   voiceBtn: $("#voiceBtn"),
   voiceLabel: $("#voiceLabel"),
   wakeWordBtn: $("#wakeWordBtn"),
@@ -92,8 +90,6 @@ const el = {
   publishNow: $("#publishNow"),
   publishHint: $("#publishHint"),
   ttsEngine: $("#ttsEngine"),
-  voicePreview: $("#voicePreview"),
-  voiceHint: $("#voiceHint"),
   downloadBtn: $("#downloadBtn"),
   downloadSidebar: $("#downloadSidebar"),
   signInPill: $("#signInPill"),
@@ -132,7 +128,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.6.14";
+const APP_VERSION = "4.6.15";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -158,13 +154,6 @@ const state = {
   history: [],
   phase: "idle",
   voiceOn: localStorage.getItem("capri.voiceOn") !== "0",
-  orpheusAvailable: false,
-  orpheusVoice: localStorage.getItem("capri.voice") || "capri",
-  voicePreset: localStorage.getItem("capri.voicePreset") || "capri",
-  // One voice for good: whichever engine answered first keeps answering.
-  voiceEngine: localStorage.getItem(VOICE_ENGINE_KEY) || "",
-  browserVoice: null,
-  orpheusVoices: ["diana", "hannah", "autumn", "tara", "leah", "mia", "zoe"],
   portrait: "assets/capri-portrait.png",
   streaming: false,
   pendingAccessId: null,
@@ -549,6 +538,25 @@ const speech = {
   stopped: false,
   generation: 0,
   onDrain: null,
+  muteUntil: 0,
+  speakingNow: false,
+
+  // Her own voice is the loudest thing in the room. Every ear stands down while
+  // a line plays, and for a beat after, so she cannot wake herself.
+  hold() {
+    this.speakingNow = true;
+    this.muteUntil = Number.POSITIVE_INFINITY;
+    try { window.capriNative?.speaking?.(true); } catch { /* web build */ }
+    if (!nativeOrder && nativeVoice()) {
+      try { window.CapriVoice.stop(); } catch { /* older build */ }
+    }
+  },
+
+  release() {
+    this.speakingNow = false;
+    this.muteUntil = Date.now() + 1600;
+    try { window.capriNative?.speaking?.(false); } catch { /* web build */ }
+  },
 
   enqueue(text) {
     const clean = cleanForSpeech(text);
@@ -570,6 +578,7 @@ const speech = {
     const item = this.queue.shift();
     if (!item) {
       this.onDrain?.();
+      resumeWakeWord();
       return;
     }
     const generation = this.generation;
@@ -579,7 +588,12 @@ const speech = {
       const prepared = await (item.prepared || prepareSpeech(item.text));
       if (generation !== this.generation || this.stopped) return;
       this.prefetchNext();
-      await speakOne(item.text, prepared);
+      this.hold();
+      try {
+        await speakOne(item.text, prepared);
+      } finally {
+        this.release();
+      }
     } finally {
       if (generation === this.generation) {
         this.playing = false;
@@ -593,24 +607,14 @@ const speech = {
     this.queue = [];
     this.stopped = true;
     this.playing = false;
+    this.release();
     stopAudio();
     if (state.voiceOn) setTimeout(() => { this.stopped = false; this.pump(); }, 60);
     if (state.phase === "speaking") setPhase("idle");
   },
 };
 
-function softClipCurve(amount = 0.15) {
-  const n = 1024;
-  const curve = new Float32Array(n);
-  const k = 1 + Math.max(0, Math.min(1, amount)) * 5;
-  for (let i = 0; i < n; i++) {
-    const x = (i * 2) / (n - 1) - 1;
-    curve[i] = Math.tanh(k * x) / Math.tanh(k);
-  }
-  return curve;
-}
-
-function playBlob(blob, { pitch = 0.96, grit = 0.14 } = {}) {
+function playBlob(blob) {
   return new Promise(async (resolve) => {
     const url = URL.createObjectURL(blob);
     let settled = false;
@@ -622,7 +626,8 @@ function playBlob(blob, { pitch = 0.96, grit = 0.14 } = {}) {
       resolve();
     };
 
-    // WebAudio lets us drop the pitch and add a little chrome without changing the words
+    // Played exactly as rendered: no pitch bend, no grit, no shelf. The voice
+    // is the voice.
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (Ctx) {
@@ -632,22 +637,16 @@ function playBlob(blob, { pitch = 0.96, grit = 0.14 } = {}) {
         const buffer = await ctx.decodeAudioData(bytes.slice(0));
         const source = ctx.createBufferSource();
         source.buffer = buffer;
-        source.playbackRate.value = Math.max(0.8, Math.min(1.15, Number(pitch) || 0.96));
-        const shaper = ctx.createWaveShaper();
-        shaper.curve = softClipCurve(grit);
-        shaper.oversample = "2x";
-        const shelf = ctx.createBiquadFilter();
-        shelf.type = "highshelf";
-        shelf.frequency.value = 3400;
-        shelf.gain.value = 2.2;
         const gain = ctx.createGain();
-        gain.gain.value = 0.92;
-        source.connect(shaper).connect(shelf).connect(gain).connect(ctx.destination);
+        gain.gain.value = 0.95;
+        source.connect(gain).connect(ctx.destination);
         source.onended = () => {
           try { ctx.close(); } catch { /* noop */ }
           if (currentCtx === ctx) currentCtx = null;
           done();
         };
+        // A suspended context never ends. Never leave the ear muted waiting.
+        setTimeout(done, (buffer.duration + 1.5) * 1000);
         source.start(0);
         return;
       }
@@ -658,223 +657,48 @@ function playBlob(blob, { pitch = 0.96, grit = 0.14 } = {}) {
     const audio = new Audio(url);
     currentAudio = audio;
     audio.volume = 0.95;
-    audio.preservesPitch = false;
-    audio.mozPreservesPitch = false;
-    audio.webkitPreservesPitch = false;
-    audio.playbackRate = Math.max(0.8, Math.min(1.15, Number(pitch) || 0.96));
     audio.onended = done;
     audio.onerror = done;
     audio.play().catch(done);
+    // Metadata may never arrive on a broken link; release the ear anyway.
+    setTimeout(done, 60000);
   });
 }
 
-async function prepareSpeech(text, attempt = 0) {
-  if (!state.voiceOn || state.voicePreset === "system") return null;
-  if (state.voiceEngine === "browser") return null;
+async function prepareSpeech(text) {
+  if (!state.voiceOn) return null;
   try {
     const res = await api("/api/tts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        text,
-        voice: state.voicePreset,
-        engine: state.voiceEngine || undefined,
-      }),
+      // Leda, spoken as rendered. Nothing else is offered and nothing else is
+      // accepted: one voice across Windows and Android.
+      body: JSON.stringify({ text, voice: "Leda", engine: "gemini" }),
     });
 
     const type = res.headers.get("content-type") || "";
     if (res.ok && type.startsWith("audio")) {
-      const engine = res.headers.get("X-Capri-Engine") || "";
-      if (engine && engine !== state.voiceEngine) {
-        state.voiceEngine = engine;
-        localStorage.setItem(VOICE_ENGINE_KEY, engine);
-      }
-      return {
-        blob: await res.blob(),
-        pitch: Number(res.headers.get("X-Capri-Pitch") || 0.96),
-        grit: Number(res.headers.get("X-Capri-Grit") || 0.14),
-        engine,
-      };
+      return { blob: await res.blob() };
     }
 
     const data = await res.json().catch(() => ({}));
-    if (data.error === "engine_browser") {
-      state.voiceEngine = "browser";
-      localStorage.setItem(VOICE_ENGINE_KEY, "browser");
-      return null;
-    }
-    if (data.error === "tts_failed" && attempt < 2) {
-      // The pinned engine is down. Move her to the next one and stay there —
-      // never one neural sentence followed by a browser sentence.
-      const next = !state.voiceEngine || state.voiceEngine === "gemini" ? "orpheus"
-        : state.voiceEngine === "orpheus" ? "gemini"
-        : "browser";
-      if (next !== "browser") {
-        state.voiceEngine = next;
-        localStorage.setItem(VOICE_ENGINE_KEY, next);
-        return prepareSpeech(text, attempt + 1);
-      }
-      state.voiceEngine = "browser";
-      localStorage.setItem(VOICE_ENGINE_KEY, "browser");
-      return null;
-    }
-    if (data.error === "terms") {
-      showNotice(
-        "Neural voice needs a one-time terms click. On the system voice until then:",
-        data.fix?.match(/https?:\S+/)?.[0] || "https://console.groq.com/playground",
-        "accept Orpheus terms"
-      );
-    } else if (data.error === "tts_busy") {
-      showNotice("Voice quota is resting. System voice is covering this line.", null, null, 3500);
+    if (data.error === "tts_failed" || data.error === "tts_busy") {
+      // A different engine would be a different girl. Stay quiet instead.
+      showNotice("Her voice is resting for a moment. The words are on screen.", null, null, 4000);
     }
   } catch {
-    /* fall through to the system voice */
+    /* no link: the text still arrives */
   }
   return null;
 }
 
 async function speakOne(text, prepared) {
   if (!state.voiceOn) { typer.release(); return; }
-  if (prepared?.blob) {
-    if (el.ttsEngine && prepared.engine) el.ttsEngine.textContent = prepared.engine;
-    typer.release(); // show text as audio starts
-    burstGlitch(1);
-    await playBlob(prepared.blob, prepared);
-    return;
-  }
-  typer.release(); // show text as browser TTS starts
-  await speakBrowser(text);
+  typer.release(); // show text as audio starts
+  if (!prepared?.blob) return; // silence beats another voice
+  burstGlitch(1);
+  await playBlob(prepared.blob);
 }
-
-function speakBrowser(text) {
-  return new Promise((resolve) => {
-    if (!("speechSynthesis" in window)) return resolve();
-    const utter = new SpeechSynthesisUtterance(text);
-    if (!state.browserVoice) {
-      state.browserVoice = pickBrowserVoice(window.speechSynthesis.getVoices());
-    }
-    if (state.browserVoice) utter.voice = state.browserVoice;
-    utter.rate = 0.96;
-    utter.pitch = 0.82;
-    utter.volume = 1;
-    utter.onend = resolve;
-    utter.onerror = resolve;
-    window.speechSynthesis.speak(utter);
-  });
-}
-
-/* ---------------------------------------------------------------- voices */
-
-const BROWSER_PREFERENCE = [
-  /aria.*natural/i, /jenny.*natural/i, /sonia.*natural/i, /libby.*natural/i,
-  /google uk english female/i, /zira/i, /samantha/i, /female/i,
-];
-
-function pickBrowserVoice(voices) {
-  for (const re of BROWSER_PREFERENCE) {
-    const hit = voices.find((v) => re.test(v.name) && /^en/i.test(v.lang));
-    if (hit) return hit;
-  }
-  return voices.find((v) => /^en/i.test(v.lang)) || voices[0] || null;
-}
-
-const FALLBACK_VOICES = [
-  { id: "capri", label: "CAPRI // prime", note: "Young, smoky, playful and dangerous. The one and only." },
-  { id: "mommy", label: "MOMMY // fish audio", note: "A warm, teasing, older voice from Fish Audio. Needs FISH_AUDIO_API_KEY on her server." },
-];
-
-function refreshVoices() {
-  const list = state.voices.length ? state.voices : FALLBACK_VOICES;
-  el.voiceSelect.innerHTML = "";
-  for (const v of list) {
-    const opt = document.createElement("option");
-    opt.value = v.id;
-    opt.textContent = v.label || v.id;
-    opt.title = v.note || "";
-    el.voiceSelect.append(opt);
-  }
-  const sys = document.createElement("option");
-  sys.value = "system";
-  sys.textContent = "SYSTEM // browser voice";
-  el.voiceSelect.append(sys);
-
-  if (![...el.voiceSelect.options].some((o) => o.value === state.voicePreset)) {
-    state.voicePreset = "capri";
-  }
-  el.voiceSelect.value = state.voicePreset;
-  paintVoiceHint();
-}
-
-function paintVoiceHint() {
-  if (!el.voiceHint) return;
-  const v = (state.voices.length ? state.voices : FALLBACK_VOICES).find((x) => x.id === state.voicePreset);
-  el.voiceHint.textContent = state.voicePreset === "system"
-    ? "Uses whatever voice your browser has. Always available, never quite her."
-    : (v?.id === "mommy" && state.config && state.config.hasFish === false
-      ? "MOMMY comes from Fish Audio. Add FISH_AUDIO_API_KEY to her server to hear the real model."
-      : v?.note || "Neural voice with a show-matched edge.");
-  if (el.prefName && state.profile) {
-    const name = state.profile.preferredName || state.profile.settings?.preferredName || "";
-    // Never blank the field: an empty server profile means it lost the file, not
-    // that the user un-set their name.
-    if (name && !el.prefName.matches(":focus")) el.prefName.value = name;
-  }
-  // app banter
-  const ab = state.profile?.settings?.app_banter;
-  if (ab === "off") { localStorage.setItem("capri.appBanter", "0"); window.capriAppBanter = false; }
-  else if (ab === "on") { localStorage.setItem("capri.appBanter", "1"); window.capriAppBanter = true; }
-}
-
-function setVoicePreset(value) {
-  state.voicePreset = value;
-  state.orpheusVoice = value;
-  // Each voice pins its own engine; carrying MOMMY's fish engine over to CAPRI
-  // would make the next line come out of the wrong mouth.
-  state.voiceEngine = "";
-  localStorage.removeItem(VOICE_ENGINE_KEY);
-  localStorage.setItem("capri.voicePreset", value);
-  localStorage.setItem("capri.voice", value);
-  paintVoiceHint();
-  saveProfile({ settings: { voice: value } });
-  speech.stop();
-}
-
-if ("speechSynthesis" in window) {
-  window.speechSynthesis.onvoiceschanged = () => {
-    if (!state.browserVoice) state.browserVoice = pickBrowserVoice(window.speechSynthesis.getVoices());
-  };
-}
-
-el.voiceSelect.addEventListener("change", () => setVoicePreset(el.voiceSelect.value));
-
-el.voicePreview.addEventListener("click", async () => {
-  unlockAudio();
-  speech.stop();
-  const line = "Night City never sleeps, choom. Neither do I.";
-  el.voicePreview.textContent = "…";
-  el.voicePreview.disabled = true;
-  try {
-    const res = await api("/api/tts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: line, voice: state.voicePreset }),
-    });
-    if (res.ok && (res.headers.get("content-type") || "").startsWith("audio")) {
-      burstGlitch(1);
-      await playBlob(await res.blob(), {
-        pitch: Number(res.headers.get("X-Capri-Pitch") || 0.96),
-        grit: Number(res.headers.get("X-Capri-Grit") || 0.14),
-      });
-    } else {
-      showNotice("That voice is not answering. Try another profile.", null, null, 4000);
-    }
-  } catch {
-    showNotice("Voice preview could not reach the PC.", null, null, 4000);
-  } finally {
-    el.voicePreview.textContent = "PREVIEW";
-    el.voicePreview.disabled = false;
-  }
-});
 
 function paintVoiceButton() {
   el.voiceBtn.classList.toggle("is-on", state.voiceOn);
@@ -1481,18 +1305,47 @@ function wakeTokens(text) {
   return clean.split(" ");
 }
 
-function isWakePhrase(text) {
+// Transcribed clips get the strict matcher: only a spelling of the name that is
+// known, at the front, with no near-miss fuzz. Whisper on a TV or a song returns
+// sentences that are one letter from "capri" often enough to wake her for hours.
+function wakeAtStrict(tokens) {
+  for (let i = 0; i <= 1 && i < tokens.length; i += 1) {
+    if (i === 1 && !WAKE_LEAD.has(tokens[0])) break;
+    const token = tokens[i].replace(/^'+|'+$/g, "");
+    if (!token) continue;
+    if (WAKE_WORDS.has(token)) return { index: i, consumed: 1 };
+    if (token === "cap") {
+      const next = (tokens[i + 1] || "").replace(/^'+|'+$/g, "");
+      if (/^(ri|ree|ry|rie)$/.test(next)) return { index: i, consumed: 2 };
+    }
+  }
+  return null;
+}
+
+function isWakePhraseStrict(text) {
   const tokens = wakeTokens(text);
-  return Boolean(tokens && wakeAt(tokens));
+  return Boolean(tokens && wakeAtStrict(tokens));
+}
+
+// The same clip handed over twice (a retry, a duplicated chunk) must not chime
+// twice, and her own reply must never be read back as a new order.
+function wakeRepeat(text) {
+  const key = String(text || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!key) return true;
+  const now = Date.now();
+  const same = wakeWord.lastKey === key && now - (wakeWord.lastAt || 0) < 9000;
+  wakeWord.lastKey = key;
+  wakeWord.lastAt = now;
+  return same;
 }
 
 // Everything spoken after "Capri", so "Capri open youtube" works in one breath.
-function wakeRemainder(text) {
+function wakeRemainder(text, strict = false) {
   const original = String(text || "").trim();
   if (!original) return "";
   const tokens = original.split(/\s+/);
   const low = tokens.map((t) => t.toLowerCase().replace(/^[^a-z0-9']+|[^a-z0-9']+$/g, ""));
-  const hit = wakeAt(low);
+  const hit = (strict ? wakeAtStrict : wakeAt)(low);
   if (!hit) return "";
   return tokens.slice(hit.index + hit.consumed).join(" ").replace(/^[\s,.;:!?-]+/, "").trim();
 }
@@ -1622,7 +1475,7 @@ const micWake = {
   busyWarned: false,
 };
 
-const MIC_WAKE_RMS = 0.018;
+const MIC_WAKE_RMS = 0.028;
 const MIC_WAKE_MIN_MS = 550;
 const MIC_WAKE_MAX_MS = 3000;
 const MIC_WAKE_QUIET_MS = 450;
@@ -1695,7 +1548,7 @@ async function startMicWake() {
     micWake.raf = requestAnimationFrame(tick);
 
     // Her own voice, a take in progress, or a reply owns the mic right now.
-    if (rec.active || rec.starting || cmdRec.active || state.streaming || state.phase === "thinking" || speech.busy || micWake.busy) {
+    if (rec.active || rec.starting || cmdRec.active || state.streaming || state.phase === "thinking" || speech.busy || micWake.busy || Date.now() < (speech.muteUntil || 0)) {
       if (micWake.speaking) endMicClip(); // drop the half-clip instead of leaking it
       return;
     }
@@ -1825,10 +1678,13 @@ async function toWav(blob) {
 
 async function checkWakeClip(blob) {
   if (!wakeWord.enabled) return;
+  if (speech.busy || Date.now() < (speech.muteUntil || 0)) return;
   let text = "";
   try {
     const clip = await toWav(blob);
-    const res = await api("/api/stt?lang=en&prompt=Capri%20is%20the%20assistant%27s%20name.%20The%20user%20says%20Capri.", {
+    // No name in the prompt: priming the transcript with "Capri" made Whisper
+    // hear it in noise, music and her own playback. The clip has to say it.
+    const res = await api("/api/stt?lang=en", {
       method: "POST",
       headers: {
         "Content-Type": clip.type || "audio/webm",
@@ -1857,9 +1713,10 @@ async function checkWakeClip(blob) {
     }
     return;
   }
-  if (!text || !isWakePhrase(text)) return;
+  if (!text || !isWakePhraseStrict(text)) return;
+  if (wakeRepeat(text)) return;
 
-  const rest = wakeRemainder(text);
+  const rest = wakeRemainder(text, true);
   wakeWord.chimed = false;
   playListeningChime();
   if (rest.split(/\s+/).filter(Boolean).length >= 2) {
@@ -2079,6 +1936,12 @@ function startWakeWord() {
     return;
   }
   if (!wakeWord.enabled || document.hidden || eyeLive || wakeWord.active || wakeWord.starting || cmdRec.active || rec.active || rec.starting || state.streaming || state.phase === "thinking" || speech.busy) return;
+  if (Date.now() < (speech.muteUntil || 0)) {
+    // Her own voice is still ringing. Try again the moment the room is quiet;
+    // a plain return here left the ear deaf after every reply.
+    setTimeout(startWakeWord, (speech.muteUntil - Date.now()) + 60);
+    return;
+  }
   if (nativeVoice()) {
     startNativeWake();
     return;
@@ -2118,13 +1981,16 @@ function startWakeWord() {
     }
   };
   recognition.onresult = (event) => {
+    // Anything heard while she is speaking is her own voice coming back.
+    if (speech.busy || Date.now() < (speech.muteUntil || 0)) return;
     // Only what changed, not every sentence since the ear opened: the name has
     // to be the start of this utterance, otherwise a video line wakes her.
     let said = "";
     for (let index = event.resultIndex || 0; index < event.results.length; index += 1) {
       said += ` ${event.results[index][0]?.transcript || ""}`;
     }
-    if (!isWakePhrase(said)) return;
+    if (!isWakePhraseStrict(said)) return;
+    if (wakeRepeat(said)) return;
     const first = !wakeWord.pendingStart;
     wakeWord.pendingStart = true;
     wakeWord.capture = said;
@@ -3501,13 +3367,6 @@ function mirrorPayload(payload, profile) {
 function applyMirror(row) {
   if (!row) return;
   if (row.preferredName && el.prefName && !el.prefName.matches(":focus")) el.prefName.value = row.preferredName;
-  if (row.voice) {
-    state.voicePreset = row.voice;
-    state.orpheusVoice = row.voice;
-    localStorage.setItem("capri.voicePreset", row.voice);
-    localStorage.setItem("capri.voice", row.voice);
-    if (el.voiceSelect) el.voiceSelect.value = row.voice;
-  }
   if (row.glitch) setGlitchLevel(row.glitch);
   if (row.timeFormat && el.timeFormat) el.timeFormat.value = row.timeFormat;
   if (row.app_banter === "on" || row.app_banter === "off") {
@@ -3564,11 +3423,6 @@ async function healProfile(profile, row) {
 
 function pullProfile(profile) {
   const settings = profile.settings || {};
-  if (settings.voice && settings.voice !== state.voicePreset) {
-    state.voicePreset = settings.voice;
-    state.orpheusVoice = settings.voice;
-    localStorage.setItem("capri.voicePreset", settings.voice);
-  }
   if (settings.glitch && settings.glitch !== glitch.level) setGlitchLevel(settings.glitch);
   if (settings.preferredName !== undefined && !el.prefName.matches(":focus")) {
     el.prefName.value = settings.preferredName || profile.preferredName || "";
@@ -3612,12 +3466,11 @@ function applyProfile(profile) {
   const mem = profile.memory || {};
   const memories = (mem.facts || 0) + (mem.favorites || 0) + (mem.music || 0) + (mem.notes || 0);
   el.memoryCount.textContent = `${memories} ${memories === 1 ? "memory" : "memories"} · ${mem.saved || 0} ${mem.saved === 1 ? "turn" : "turns"}`;
-  if (el.ttsEngine && state.config) {
-    el.ttsEngine.textContent = state.config.hasGemini ? "neural" : "fallback";
+  if (el.ttsEngine) {
+    el.ttsEngine.textContent = "Leda";
+    el.ttsEngine.title = "Capri's one voice, on every device.";
   }
-  if (el.ttsEngine && state.config?.ttsModel) el.ttsEngine.title = state.config.ttsModel;
 
-  refreshVoices();
   applyClock();
   renderPublishState(state.config?.publish || {});
 }
@@ -4721,12 +4574,6 @@ async function boot() {
     state.config = cfg;
     state.scope = cfg.scope;
 
-    if (Array.isArray(cfg.orpheusVoices) && cfg.orpheusVoices.length) {
-      state.orpheusVoices = cfg.orpheusVoices;
-    }
-    if (Array.isArray(cfg.voices) && cfg.voices.length) {
-      state.voices = cfg.voices;
-    }
     state.google = cfg.google || null;
     if (cfg.portrait) {
       // The shipped portrait wins over a stale server path, and a fresh query
@@ -4782,8 +4629,6 @@ async function boot() {
     if (cfg.local) pollPending();
   }
 
-  refreshVoices();
-  if ("speechSynthesis" in window) setTimeout(() => refreshVoices(), 400);
 
   setPhase("idle");
 

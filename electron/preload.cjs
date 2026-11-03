@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld("capriNative", {
   }),
   eyeReply: (text) => ipcRenderer.send("capri-eye-reply", String(text || "")),
   addressed: () => ipcRenderer.send("capri-addressed"),
+  // Tells the floating eye when her voice is in the room, so its own ear steps
+  // back instead of hearing Capri say her own name.
+  speaking: (on) => ipcRenderer.send("capri-speaking", Boolean(on)),
   // What she heard, what she opened, why a turn died. One line each in capri.log.
   log: (message) => ipcRenderer.send("capri-log", String(message || "")),
   saveSession: (token) => ipcRenderer.invoke("capri-session-save", String(token || "")),

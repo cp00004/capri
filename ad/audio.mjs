@@ -10,17 +10,43 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const outDir = path.join(here, "out");
 const voiceDir = path.join(outDir, "voice");
 const ffmpeg = "C:/Users/TestUser/AppData/Local/CapCut/Apps/9.5.0.4050/ffmpeg.exe";
+const timingFile = path.join(here, "timing.json");
+const TIMING = fs.existsSync(timingFile) ? JSON.parse(fs.readFileSync(timingFile, "utf8")) : {};
 
+const LONG = process.argv.includes("--long");
 const SR = 48000;
-const DUR = 32;
+const DUR = LONG ? 120 : 32;
 const N = SR * DUR;
 
-const LINES = [
-  { id: "v1", text: "Say my name, good boy.", rate: 0, pitch: -20, at: 4.35 },
-  { id: "v2", text: "Eyes on me.", rate: -1, pitch: -24, at: 9.30 },
-  { id: "v3", text: "Good boy. No peeking.", rate: 0, pitch: -20, at: 22.75 },
-  { id: "v4", text: "Come get me.", rate: -2, pitch: -16, at: 27.75 },
-];
+const LINES = LONG
+  ? [
+    { id: "l01", at: 1.00,  text: "Hey. I'm Capri. Voice-first. On your PC, on your phone, and free." },
+    { id: "l02", at: 10.80, text: "You don't click anything. You just say my name, Capri, and I answer out loud." },
+    { id: "l03", at: 17.20, text: "Ask me anything. Or tell me what to do." },
+    { id: "l04", at: 22.40, text: "One voice, everywhere. This is it: the same tone on Windows and on Android." },
+    { id: "l05", at: 28.60, text: "No settings. No robot menu. Just me." },
+    { id: "l06", at: 34.40, text: "On your PC I'm a real window. I open apps, write your notes, find your files." },
+    { id: "l07", at: 41.40, text: "Every action asks first. And what I can undo, I undo." },
+    { id: "l08", at: 48.60, text: "My eye floats over everything. I watch the tab, the video, the game," },
+    { id: "l09", at: 54.80, text: "and I say something worth hearing. Drag me anywhere." },
+    { id: "l10", at: 60.80, text: "On Android I'm the same girl in your pocket. Wake me with your voice." },
+    { id: "l11", at: 66.80, text: "I drive your phone, and answer in a notification, even with the app closed." },
+    { id: "l12", at: 72.80, text: "I remember. Your name, your projects, the way you like things." },
+    { id: "l13", at: 78.20, text: "Kept to your account, one profile each, and you can make me forget." },
+    { id: "l14", at: 84.60, text: "And if it's November, I guard you. Sites blocked. Tabs blacked out." },
+    { id: "l15", at: 90.40, text: "The app stays locked until December first. You asked. I keep it." },
+    { id: "l16", at: 96.40, text: "Your keys stay on your machine. Your account stays yours. No subscription." },
+    { id: "l17", at: 101.60, text: "I cost nothing. I'm just very good at this." },
+    { id: "l18", at: 106.80, text: "Get me at cp zero zero zero zero four dot github dot io slash capri." },
+    { id: "l19", at: 112.20, text: "Windows. Android. One voice. Say my name." },
+    { id: "l20", at: 116.20, text: "I'm Capri. See you on the other side." },
+  ]
+  : [
+    { id: "v1", text: "Say my name, good boy.", rate: 0, pitch: -20, at: 4.35 },
+    { id: "v2", text: "Eyes on me.", rate: -1, pitch: -24, at: 9.30 },
+    { id: "v3", text: "Good boy. No peeking.", rate: 0, pitch: -20, at: 22.75 },
+    { id: "v4", text: "Come get me.", rate: -2, pitch: -16, at: 27.75 },
+  ];
 
 /* ------------------------------------------------------------------ voice */
 function psQuote(s) { return s.replace(/'/g, "''"); }
@@ -71,6 +97,21 @@ $s.Dispose()
 }
 
 /* ------------------------------------------------------------------- wav */
+function resample(x, from, to) {
+  if (from === to) return x;
+  const n = Math.max(1, Math.floor((x.length * to) / from));
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const p = (i * from) / to;
+    const i0 = Math.floor(p);
+    const f = p - i0;
+    const a = x[i0] || 0;
+    const b = x[Math.min(x.length - 1, i0 + 1)] || a;
+    out[i] = a * (1 - f) + b * f;
+  }
+  return out;
+}
+
 function readWav(file) {
   const buf = fs.readFileSync(file);
   let p = 12;
@@ -95,7 +136,7 @@ function readWav(file) {
         l[i] = buf.readInt16LE(o) / 32768;
         r[i] = ch > 1 ? buf.readInt16LE(o + bits) / 32768 : l[i];
       }
-      return { l, r, rate: fmt.rate };
+      return { l: resample(l, fmt.rate, SR), r: resample(r, fmt.rate, SR), rate: SR };
     }
     p = body + size + (size & 1);
   }
@@ -318,6 +359,7 @@ const CHORDS = [
 ];
 const chordAt = (t) => CHORDS[Math.floor(t / 4) % 4];
 
+if (!LONG) {
 const DROP = 3.0, END = 26.4;
 const BEAT = 0.5;
 
@@ -385,23 +427,86 @@ for (let t = DROP; t < END; t += 0.125) {
 
 // tail shimmer after the last hit
 for (let i = 0; i < 7; i++) chime(30.3 + i * 0.23, 0.4 - i * 0.04);
+} else {
+  // Ten chapters, 120 seconds. Full groove under the intro, the PC and the
+  // phone chapters; half-time space under the quiet personal ones so her
+  // cloned voice stays the loudest thing in the room.
+  const CUTS = [10, 21, 33, 47, 59, 71, 83, 95, 105, 118.4];
+  const FULL = [[10, 21], [33, 47], [59, 71], [83, 95], [105, 118]];
+  const PATTERN = [0, 1, 2, 1, 0, 2, 3, 2];
+  const inFull = (t) => FULL.some(([a, b]) => t >= a && t < b);
+
+  // pads run the whole way; a touch brighter inside the full sections
+  for (let b = 0; b < DUR; b += 4) {
+    const ch = chordAt(b + 0.01);
+    pad(b, 4.05, ch.notes, inFull(b + 0.01) ? 1.05 : 0.82);
+  }
+  // heartbeat under the opening
+  [0.8, 1.7, 2.6, 3.5].forEach((t, i) => kick(t, 0.26 + i * 0.05));
+  // a riser into every chapter cut, then the hit
+  for (const cut of CUTS) {
+    if (cut > 1) riser(cut - 1.6, 1.5, 0.85);
+    impact(cut, cut === 118.4 ? 1.15 : 0.95);
+    chime(cut + 0.05, cut === 118.4 ? 1.1 : 0.8);
+  }
+  // extra soft hits at the midpoints so long chapters still breathe
+  [16, 27, 40, 53, 65, 77, 89, 100, 110].forEach((t) => impact(t, 0.3));
+  chime(118.45, 1.15);
+
+  // groove only inside the busy sections
+  for (const [a, b] of FULL) {
+    for (let t = a; t < b; t += 0.5) kick(t, 1);
+    for (let bar = a; bar < b - 1; bar += 2) {
+      clap(bar + 0.5, 0.6);
+      clap(bar + 1.5, 0.74);
+    }
+    for (let t = a; t < b; t += 0.25) {
+      const eighth = Math.round(t / 0.25) % 2 === 0;
+      if (eighth) hat(t, Math.abs(Math.sin(t * 1.3)) > 0.55 ? 0.5 : 0.3, true);
+      else hat(t, 0.18);
+    }
+    for (let bar = a; bar < b; bar += 2) {
+      const ch = chordAt(bar + 0.01);
+      const pat = [[0, 0.42, 1], [0.5, 0.22, 0.55], [0.75, 0.42, 0.8], [1.5, 0.32, 0.7]];
+      for (const [o, d, amp] of pat) if (bar + o < b) bass(bar + o, d, ch.root, amp * 0.9);
+    }
+    for (let t = a; t < b; t += 0.125) {
+      const ch = chordAt(t);
+      const step = Math.round(t / 0.125) % PATTERN.length;
+      const tones = [...ch.notes, ch.notes[0] * 2].map((f) => f * 2);
+      arp(t, tones[PATTERN[step] % tones.length] * 1.5, 0.55, Math.sin(t * 2.1) * 0.4);
+    }
+  }
+  // tail shimmer after the last hit
+  for (let i = 0; i < 9; i++) chime(118.7 + i * 0.22, 0.4 - i * 0.035);
+}
 
 /* ----------------------------------------------------------------- voice mix */
 const duck = new Float32Array(N).fill(1);
 const voices = [];
 for (const line of LINES) {
-  const file = synthVoice(line);
+  const fit = path.join(here, "voice", "long", `${line.id}.fit.wav`);
+  const file = LONG
+    ? (fs.existsSync(fit) ? fit : path.join(here, "voice", "long", `${line.id}.wav`))
+    : synthVoice(line);
   const v = readWav(file);
-  voices.push({ ...line, ...v });
-  const vGain = 2.2;
-  const s0 = Math.floor(line.at * SR);
+  const at = (LONG && TIMING[line.id]?.a) || line.at;
+  // The clone arrives at whatever level XTTS felt like; match every line by RMS
+  // so a quiet sentence never sinks under the bed.
+  let rms = 0;
+  for (let i = 0; i < v.l.length; i += 4) rms += v.l[i] * v.l[i];
+  rms = Math.sqrt(rms / Math.max(1, v.l.length / 4));
+  const vGain = LONG ? Math.max(0.7, Math.min(2.6, 0.09 / Math.max(1e-4, rms))) : 2.2;
+  voices.push({ ...line, ...v, at, vGain, rms });
+  const s0 = Math.floor(at * SR);
   const len = Math.min(v.l.length, N - s0);
   for (let i = 0; i < len; i++) {
     vL[s0 + i] += v.l[i] * vGain;
     vR[s0 + i] += v.r[i] * vGain;
   }
   // music sits back under her voice
-  const down = 0.34, fadeIn = 0.18 * SR, fadeOut = 0.22 * SR;
+  const down = LONG ? 0.24 : 0.34;
+  const fadeIn = (LONG ? 0.24 : 0.18) * SR, fadeOut = (LONG ? 0.3 : 0.22) * SR;
   for (let i = 0; i < len; i++) {
     const k = s0 + i;
     const g = Math.min(1, i / fadeIn, (len - i) / fadeOut);
@@ -432,7 +537,7 @@ for (let i = 0; i < N; i++) peak = Math.max(peak, Math.abs(outL[i]), Math.abs(ou
 const norm = 0.94 / peak;
 for (let i = 0; i < N; i++) { outL[i] *= norm; outR[i] *= norm; }
 
-const file = path.join(outDir, "capri-ad-bed.wav");
+const file = path.join(outDir, LONG ? "capri-ad-bed-long.wav" : "capri-ad-bed.wav");
 writeWav(file, outL, outR);
 console.log(`audio: ${file} (${DUR}s, ${voices.length} voice lines)`);
-for (const v of voices) console.log(`  ${v.id} @ ${v.at.toFixed(2)}s  ${(v.l.length / SR).toFixed(2)}s  "${v.text}"`);
+for (const v of voices) console.log(`  ${v.id} @ ${v.at.toFixed(2)}s  ${(v.l.length / SR).toFixed(2)}s  ${LONG ? `gain ${v.vGain.toFixed(2)}  ` : ""}"${v.text}"`);

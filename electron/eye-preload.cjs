@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld("capriEye", {
   onConfig: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-config", (_e, c) => cb(c || {})); },
   onLive: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-live", (_e, v) => cb(Boolean(v))); },
   onNnn: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-nnn", (_e, v) => cb(String(v || ""))); },
+  onSpeaking: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-speaking", (_e, v) => cb(Boolean(v))); },
   onMove: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-move", (_e, d) => cb(d || {})); },
   onDragStop: (cb) => { if (typeof cb === "function") ipcRenderer.on("eye-drag-stop", () => cb()); },
   setPinned: (v) => ipcRenderer.send("eye-set-pinned", Boolean(v)),

@@ -2569,6 +2569,12 @@ ipcMain.on("capri-eye-config", (_event, cfg) => {
 // and device calls behave exactly as when the window is in front.
 ipcMain.on("capri-addressed", () => { eyeLastAddressed = Date.now(); });
 
+// A reply playing in the hidden window is still loud in the room. The overlay
+// needs to know so its own wake recorder does not pick up her name from her.
+ipcMain.on("capri-speaking", (_event, on) => {
+  try { eyeWin?.webContents.send("eye-speaking", Boolean(on)); } catch { /* closing */ }
+});
+
 // Orders and their outcomes belong in capri.log: a voice turn that vanishes
 // leaves nothing else behind to look at.
 ipcMain.on("capri-log", (_event, message) => {

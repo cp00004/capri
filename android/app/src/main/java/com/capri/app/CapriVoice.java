@@ -50,6 +50,10 @@ final class CapriVoice {
 	private static String device = "";
 	private static String session = "";
 	private static volatile int lastStatus;
+	// A room with a video in it repeats the same phrase every few seconds. One
+	// transcript chimes once, not once per replay.
+	private static String lastHeard = "";
+	private static long lastHeardAt;
 
 	private CapriVoice() {}
 
@@ -164,6 +168,11 @@ final class CapriVoice {
 			if (wakeMode) {
 				String rest = wakeRemainder(text);
 				if (rest == null) continue;
+				String key = text.toLowerCase(Locale.US).replaceAll("[^a-z0-9]", "");
+				long now = SystemClock.uptimeMillis();
+				if (key.equals(lastHeard) && now - lastHeardAt < 9000) continue;
+				lastHeard = key;
+				lastHeardAt = now;
 				deliver(mine, text, rest);
 				return;
 			}
@@ -189,7 +198,7 @@ final class CapriVoice {
 			if (n < 0) return null;
 			if (n == 0) continue;
 			double rms = rms(buf, n);
-			double gate = Math.min(MAX_GATE, Math.max(MIN_RMS, floor * 2.4));
+			double gate = Math.min(MAX_GATE, Math.max(MIN_RMS, floor * 3.0));
 			boolean loud = rms > gate;
 			if (!speech) {
 				floor = floor * 0.97 + rms * 0.03;
@@ -293,8 +302,8 @@ final class CapriVoice {
 			conn.setRequestProperty("Content-Type", "audio/wav");
 			conn.setRequestProperty("Accept", "application/json");
 			conn.setRequestProperty("User-Agent", "Capri-Android");
-			conn.setRequestProperty("X-Capri-Prompt",
-					"Capri is the assistant's name. The user says Capri.");
+			// No prompt that spells the name: priming Whisper with "Capri" made it
+			// hear the name in music and in her own playback.
 			if (!device.isEmpty()) conn.setRequestProperty("Authorization", "Bearer " + device);
 			if (!session.isEmpty()) conn.setRequestProperty("X-Capri-Profile", session);
 			conn.setFixedLengthStreamingMode(clip.length);
@@ -403,31 +412,7 @@ final class CapriVoice {
 			}
 			return rest.toString().trim();
 		}
-		// A one-word take that Whisper spelled slightly off ("capre", "carpri")
-		// still counts as just the name. Full sentences stay strict so "copy"
-		// in normal speech cannot wake her.
-		if (words.length == 1 && words[0].length() >= 4 && words[0].length() <= 6
-				&& distance(words[0], "capri") <= 1) {
-			return "";
-		}
 		return null;
-	}
-
-	private static int distance(String a, String b) {
-		int[] prev = new int[b.length() + 1];
-		int[] cur = new int[b.length() + 1];
-		for (int j = 0; j <= b.length(); j += 1) prev[j] = j;
-		for (int i = 1; i <= a.length(); i += 1) {
-			cur[0] = i;
-			for (int j = 1; j <= b.length(); j += 1) {
-				int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
-				cur[j] = Math.min(Math.min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost);
-			}
-			int[] swap = prev;
-			prev = cur;
-			cur = swap;
-		}
-		return prev[b.length()];
 	}
 
 	// Whisper's spellings of the name. Common foreign words that differ by a

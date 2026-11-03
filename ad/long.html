@@ -1,0 +1,1282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>CAPRI // TWO MINUTES</title>
+<style>
+  :root {
+    --bg: #07000c;
+    --ink: #eaf6ff;
+    --mint: #4dff9d;
+    --pink: #ff4fd8;
+    --blue: #2b6bff;
+    --red: #ff2b45;
+    --dim: #6d7f93;
+    --mono: "Consolas", "Cascadia Mono", ui-monospace, monospace;
+    --ui: "Segoe UI", "Inter", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; width: 1920px; height: 1080px; overflow: hidden;
+    background: var(--bg); color: var(--ink);
+    font-family: var(--ui);
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: relative; width: 1920px; height: 1080px; overflow: hidden; transform-origin: 50% 50%; }
+  canvas#bg { position: absolute; inset: 0; width: 1920px; height: 1080px; }
+  #noise {
+    position: absolute; inset: -64px; pointer-events: none; opacity: .05;
+    background-repeat: repeat; mix-blend-mode: screen; z-index: 60;
+  }
+  #scan {
+    position: absolute; inset: 0; z-index: 61; pointer-events: none;
+    background: repeating-linear-gradient(180deg, rgba(255,255,255,.035) 0 1px, rgba(0,0,0,0) 1px 3px);
+    opacity: .55;
+  }
+  #vignette {
+    position: absolute; inset: 0; z-index: 59; pointer-events: none;
+    background: radial-gradient(ellipse at 50% 48%, rgba(0,0,0,0) 42%, rgba(0,0,0,.58) 100%);
+  }
+  canvas#fx { position: absolute; inset: 0; z-index: 57; pointer-events: none; }
+  canvas#sparks { position: absolute; inset: 0; z-index: 63; pointer-events: none; mix-blend-mode: screen; }
+
+  .hud { position: absolute; inset: 0; z-index: 55; pointer-events: none; }
+  .hud > div { position: absolute; font: 13px/1 var(--mono); letter-spacing: 3px; color: rgba(234,246,255,.62); }
+  .hud-tl { left: 64px; top: 54px; display: flex; align-items: center; gap: 10px; }
+  .hud-tr { right: 64px; top: 54px; color: rgba(77,255,157,.75); }
+  .hud-bl { left: 64px; bottom: 50px; color: rgba(77,255,157,.7); }
+  .hud-br { right: 64px; bottom: 50px; color: rgba(234,246,255,.45); font-variant-numeric: tabular-nums; }
+  .dot { width: 7px; height: 7px; background: var(--pink); border-radius: 50%; box-shadow: 0 0 10px var(--pink); }
+  .corner { position: absolute; width: 26px; height: 26px; border: 1px solid rgba(77,255,157,.5); }
+  .corner.tl { left: 40px; top: 40px; border-right: 0; border-bottom: 0; }
+  .corner.tr { right: 40px; top: 40px; border-left: 0; border-bottom: 0; }
+  .corner.bl { left: 40px; bottom: 40px; border-right: 0; border-top: 0; }
+  .corner.br { right: 40px; bottom: 40px; border-left: 0; border-top: 0; }
+
+  .chapter { position: absolute; inset: 0; opacity: 0; visibility: hidden; z-index: 10; }
+  .label { font: 14px/1 var(--mono); letter-spacing: 5px; color: var(--mint); display: flex; align-items: center; gap: 12px; }
+  .label::before { content: ""; width: 34px; height: 1px; background: var(--mint); opacity: .7; }
+  .label .live { width: 6px; height: 6px; border-radius: 50%; background: var(--pink); box-shadow: 0 0 8px var(--pink); }
+  .h-xl { font: 800 132px/0.92 var(--ui); letter-spacing: -0.035em; }
+  .h-lg { font: 800 96px/0.95 var(--ui); letter-spacing: -0.028em; }
+  .h-md { font: 700 44px/1.1 var(--ui); letter-spacing: -0.01em; }
+  .mono { font-family: var(--mono); }
+  .mint { color: var(--mint); }
+  .pink { color: var(--pink); }
+  .dim { color: var(--dim); }
+  .chip {
+    display: inline-block; font: 14px/1 var(--mono); letter-spacing: 3px; color: rgba(234,246,255,.82);
+    border: 1px solid rgba(77,255,157,.42); padding: 11px 16px 10px; background: rgba(7,0,12,.55);
+  }
+  .chip.hot { color: #07000c; background: var(--mint); border-color: var(--mint); }
+  .chip.warn { color: var(--red); border-color: rgba(255,43,69,.55); background: rgba(255,43,69,.06); }
+
+  /* ------------------------------------------------------------ 01 title */
+  #c1 { display: flex; flex-direction: column; justify-content: center; }
+  #c1 .portrait {
+    position: absolute; right: 30px; top: -90px; width: 780px; height: 1290px;
+    background: url("/public/assets/capri-portrait.jpg") center 30% / cover no-repeat;
+    filter: saturate(1.15) contrast(1.05);
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 38%, #000 100%);
+    mask-image: linear-gradient(90deg, transparent 0%, #000 38%, #000 100%);
+  }
+  #c1 .portraitFade {
+    position: absolute; right: 30px; top: -90px; width: 780px; height: 1290px;
+    background: linear-gradient(180deg, var(--bg) 0%, rgba(7,0,12,0) 16%, rgba(7,0,12,0) 76%, var(--bg) 100%);
+  }
+  #c1 .tint {
+    position: absolute; right: 0; top: 0; width: 980px; height: 1080px;
+    background: linear-gradient(90deg, rgba(7,0,12,0) 0%, rgba(7,0,12,.34) 38%, rgba(255,79,216,.14) 76%, rgba(7,0,12,.86) 100%);
+  }
+  #c1 .stack { position: relative; z-index: 3; padding-left: 120px; }
+  #c1 .word {
+    position: relative; display: flex; gap: 0.02em;
+    font: 800 248px/0.88 var(--ui); letter-spacing: 0.02em;
+    text-shadow: 4px 0 rgba(255,79,216,.45), -4px 0 rgba(43,107,255,.45), 0 0 70px rgba(77,255,157,.18);
+  }
+  #c1 .word span { display: inline-block; }
+  #c1 .kicker { margin-top: 18px; display: flex; align-items: center; gap: 26px; }
+  #c1 .kicker .rule { width: 132px; height: 2px; background: var(--mint); box-shadow: 0 0 16px var(--mint); }
+  #c1 .kicker .pc { font: 500 26px/1 var(--mono); letter-spacing: 13px; color: var(--mint); }
+  #c1 .tagline { margin-top: 40px; font: 500 30px/1.5 var(--mono); letter-spacing: 2px; color: rgba(234,246,255,.78); max-width: 780px; min-height: 46px; }
+  #c1 .stamp { position: absolute; left: 120px; bottom: 126px; display: flex; gap: 16px; }
+
+  /* ------------------------------------------------------------- 02 wake */
+  #c2 .left { position: absolute; left: 120px; top: 208px; width: 900px; }
+  #c2 .say { margin-top: 26px; }
+  #c2 .l1 { font: 800 112px/0.94 var(--ui); letter-spacing: -0.03em; }
+  #c2 .l2 { margin-top: 10px; font: 800 68px/1 var(--ui); letter-spacing: -0.02em; color: var(--mint); text-shadow: 0 0 40px rgba(77,255,157,.34); }
+  #c2 .chips { margin-top: 46px; display: flex; gap: 14px; }
+  #c2 .right { position: absolute; right: 130px; top: 96px; width: 720px; height: 850px; }
+  .orb { position: absolute; left: 220px; top: 20px; width: 300px; height: 300px; }
+  .orb .core {
+    position: absolute; inset: 76px; border-radius: 50%;
+    background: radial-gradient(circle at 42% 38%, #d8ffe9 0%, var(--mint) 26%, rgba(77,255,157,.18) 62%, rgba(77,255,157,0) 72%);
+    box-shadow: 0 0 60px rgba(77,255,157,.55), 0 0 160px rgba(77,255,157,.22);
+  }
+  .orb .ring { position: absolute; inset: 20px; border: 1px dashed rgba(77,255,157,.55); border-radius: 50%; }
+  .orb .ring.r2 { inset: 0; border-style: solid; border-color: rgba(255,79,216,.32); }
+  .orb .ring.r3 { inset: 48px; border-color: rgba(43,107,255,.35); border-style: dotted; }
+  #c2 .cap { position: absolute; left: 220px; top: 336px; font: 14px/1 var(--mono); letter-spacing: 6px; color: var(--mint); display: flex; gap: 10px; align-items: center; }
+  #c2 .wave { position: absolute; left: 10px; top: 392px; width: 700px; height: 120px; display: flex; align-items: center; gap: 8px; }
+  #c2 .wave i { flex: 1; background: linear-gradient(180deg, var(--mint), rgba(77,255,157,.12)); border-radius: 2px; box-shadow: 0 0 12px rgba(77,255,157,.28); }
+  .bubble {
+    position: absolute; background: rgba(7,0,12,.92);
+    border: 1px solid rgba(77,255,157,.5); border-left: 3px solid var(--pink);
+    padding: 16px 20px; font: 500 25px/1.35 var(--ui); color: var(--ink);
+    box-shadow: 0 0 28px rgba(77,255,157,.14);
+  }
+  .bubble .who { display: block; font: 10px/1 var(--mono); letter-spacing: 4px; color: var(--mint); margin-bottom: 8px; }
+  .bubble.user { border-left-color: var(--blue); border-color: rgba(43,107,255,.5); }
+  .bubble.user .who { color: #7da6ff; }
+  #c2 .b-user { left: 30px; top: 540px; width: 600px; }
+  #c2 .b-cap { left: 150px; top: 648px; width: 560px; }
+
+  /* ------------------------------------------------------------ 03 voice */
+  #c3 .center { position: absolute; left: 0; right: 0; top: 132px; text-align: center; }
+  #c3 .big { font: 800 148px/0.9 var(--ui); letter-spacing: -0.04em; }
+  #c3 .big span { color: var(--mint); text-shadow: 0 0 70px rgba(77,255,157,.35); }
+  #c3 .subline { margin-top: 22px; font: 500 26px/1 var(--mono); letter-spacing: 7px; color: rgba(234,246,255,.66); }
+  #c3 canvas#voiceCanvas { position: absolute; left: 360px; top: 380px; width: 1200px; height: 360px; }
+  #c3 .devices { position: absolute; left: 0; right: 0; bottom: 224px; display: flex; justify-content: center; gap: 18px; }
+  #c3 .dev { font: 500 18px/1 var(--mono); letter-spacing: 4px; color: rgba(234,246,255,.8); border: 1px solid rgba(77,255,157,.35); padding: 15px 22px; background: rgba(7,0,12,.6); }
+  #c3 .dev b { color: var(--mint); font-weight: 500; }
+  #c3 .eq { position: absolute; left: 0; right: 0; bottom: 168px; display: flex; justify-content: center; gap: 5px; height: 32px; }
+  #c3 .eq i { width: 4px; border-radius: 2px; background: var(--mint); box-shadow: 0 0 10px rgba(77,255,157,.5); }
+
+  /* --------------------------------------------------------------- 04 pc */
+  #c4 .copy { position: absolute; left: 110px; top: 250px; width: 470px; }
+  #c4 .copy p { margin: 24px 0 0; font: 400 22px/1.6 var(--mono); color: rgba(234,246,255,.7); }
+  #c4 .copy .chips { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 10px; }
+  #c4 .winWrap { position: absolute; left: 640px; top: 168px; width: 1160px; perspective: 1600px; }
+  .win {
+    width: 1160px; height: 690px; background: #0a0410;
+    border: 1px solid rgba(77,255,157,.35);
+    box-shadow: 0 40px 120px rgba(0,0,0,.65), 0 0 60px rgba(77,255,157,.12), inset 0 0 0 1px rgba(255,255,255,.03);
+    transform-origin: 50% 50%;
+  }
+  .win-bar { height: 52px; display: flex; align-items: center; gap: 14px; padding: 0 18px; border-bottom: 1px solid rgba(77,255,157,.22); background: linear-gradient(180deg, rgba(77,255,157,.08), rgba(77,255,157,0)); }
+  .traffic { display: flex; gap: 8px; }
+  .traffic i { width: 10px; height: 10px; border-radius: 50%; background: rgba(234,246,255,.22); }
+  .traffic i:first-child { background: var(--pink); box-shadow: 0 0 10px rgba(255,79,216,.7); }
+  .traffic i:nth-child(2) { background: var(--mint); }
+  .win-title { flex: 1; text-align: center; font: 11px/1 var(--mono); letter-spacing: 4px; color: rgba(234,246,255,.55); }
+  .win-body { display: grid; grid-template-columns: 210px 1fr; height: 638px; }
+  .win-side { border-right: 1px solid rgba(77,255,157,.16); padding: 24px 18px; display: flex; flex-direction: column; gap: 8px; }
+  .side-ava { width: 54px; height: 54px; margin-bottom: 16px; border: 1px solid rgba(255,79,216,.55); background: url("/public/assets/capri-portrait.jpg") center 22% / cover; box-shadow: 0 0 20px rgba(255,79,216,.25); }
+  .side-item { font: 11px/1 var(--mono); letter-spacing: 3px; color: rgba(234,246,255,.45); padding: 12px; border-left: 2px solid transparent; }
+  .side-item.on { color: var(--mint); border-left-color: var(--mint); background: rgba(77,255,157,.07); }
+  .side-foot { margin-top: auto; font: 10px/1 var(--mono); letter-spacing: 3px; color: var(--mint); display: flex; align-items: center; gap: 7px; }
+  .side-foot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 8px var(--mint); }
+  .win-chat { position: relative; padding: 30px 34px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+  .msg { max-width: 620px; padding: 13px 17px; font: 400 20px/1.45 var(--ui); border-radius: 2px; }
+  .msg.user { align-self: flex-end; background: rgba(43,107,255,.14); border: 1px solid rgba(43,107,255,.4); color: #dbe7ff; }
+  .msg.capri { align-self: flex-start; background: rgba(77,255,157,.08); border: 1px solid rgba(77,255,157,.42); border-left: 3px solid var(--pink); color: var(--ink); }
+  .task {
+    position: absolute; right: 26px; width: 292px; display: flex; align-items: center; gap: 12px;
+    border: 1px solid rgba(77,255,157,.28); background: rgba(7,0,12,.72); padding: 13px 15px;
+  }
+  .task .tick { width: 22px; height: 22px; border: 1px solid rgba(77,255,157,.5); display: grid; place-items: center; font: 13px/1 var(--mono); color: var(--mint); }
+  .task .tx { font: 500 15px/1.3 var(--mono); letter-spacing: 1px; color: rgba(234,246,255,.86); }
+  .task.done { border-color: rgba(77,255,157,.7); box-shadow: 0 0 20px rgba(77,255,157,.14); }
+  .composer { margin-top: auto; height: 62px; display: flex; align-items: center; gap: 16px; border: 1px solid rgba(77,255,157,.28); background: rgba(77,255,157,.03); padding: 0 10px 0 20px; }
+  .composer .ph { flex: 1; font: 400 18px/1 var(--mono); color: rgba(234,246,255,.35); letter-spacing: 1px; }
+  .composer .mic { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; border: 1px solid var(--mint); color: var(--mint); font: 18px/1 var(--mono); }
+  #c4 .cursor { position: absolute; left: 0; top: 0; width: 26px; height: 32px; z-index: 20; }
+  #c4 .cursor svg { filter: drop-shadow(0 2px 4px rgba(0,0,0,.8)); }
+  #c4 .ring2 { position: absolute; left: 0; top: 0; width: 90px; height: 90px; border: 2px solid var(--mint); border-radius: 50%; opacity: 0; }
+
+  /* -------------------------------------------------------------- 05 eye */
+  #c5 canvas#eyeCanvas { position: absolute; left: 70px; top: 168px; width: 940px; height: 626px; filter: drop-shadow(0 0 26px rgba(77,255,157,.32)) drop-shadow(0 0 70px rgba(255,79,216,.16)); }
+  #c5 .b-eye { left: 168px; top: 788px; width: 700px; min-height: 58px; font: 500 27px/1.3 var(--ui); }
+  #c5 .right { position: absolute; right: 118px; top: 260px; width: 580px; }
+  #c5 .rows { margin-top: 30px; }
+  #c5 .row { display: grid; grid-template-columns: 62px 1fr; align-items: center; padding: 22px 0; border-top: 1px solid rgba(234,246,255,.12); }
+  #c5 .row:last-child { border-bottom: 1px solid rgba(234,246,255,.12); }
+  #c5 .row .n { font: 500 15px/1 var(--mono); color: var(--pink); letter-spacing: 2px; }
+  #c5 .row .t { font: 700 30px/1.2 var(--ui); letter-spacing: -0.01em; }
+  #c5 .row .s { display: block; margin-top: 5px; font: 400 16px/1.4 var(--mono); color: var(--dim); letter-spacing: .5px; }
+  #c5 .drag { position: absolute; left: 74px; top: 806px; width: 930px; height: 4px; }
+
+  /* ----------------------------------------------------------- 06 android */
+  #c6 .copy { position: absolute; left: 110px; top: 268px; width: 560px; }
+  #c6 .copy p { margin: 24px 0 0; font: 400 22px/1.6 var(--mono); color: rgba(234,246,255,.7); }
+  #c6 .rows { margin-top: 30px; display: flex; flex-direction: column; gap: 4px; }
+  #c6 .row { font: 500 20px/1 var(--mono); letter-spacing: 1px; color: rgba(234,246,255,.82); padding: 10px 0; display: flex; gap: 12px; align-items: center; }
+  #c6 .row::before { content: "▸"; color: var(--mint); }
+  #c6 .chips { margin-top: 28px; display: flex; gap: 12px; }
+  .phone {
+    position: absolute; left: 1130px; top: 112px; width: 440px; height: 892px;
+    border-radius: 56px; padding: 12px;
+    background: linear-gradient(160deg, #22162b, #0a0410 45%, #1a0f22);
+    border: 1px solid rgba(77,255,157,.35);
+    box-shadow: 0 40px 120px rgba(0,0,0,.7), 0 0 70px rgba(255,79,216,.18);
+  }
+  .phone::before { content: ""; position: absolute; left: 50%; top: 22px; transform: translateX(-50%); width: 118px; height: 26px; border-radius: 14px; background: #05000a; z-index: 5; border: 1px solid rgba(255,255,255,.06); }
+  .phone-screen { position: relative; width: 100%; height: 100%; border-radius: 46px; overflow: hidden; background: radial-gradient(circle at 78% 0%, rgba(255,79,216,.18), rgba(7,0,12,0) 55%), #08020e; border: 1px solid rgba(255,255,255,.05); display: flex; flex-direction: column; }
+  .ph-status { display: flex; justify-content: space-between; padding: 20px 26px 0; font: 11px/1 var(--mono); letter-spacing: 1px; color: rgba(234,246,255,.7); }
+  .ph-head { margin: 22px 18px 0; height: 218px; position: relative; border: 1px solid rgba(77,255,157,.3); overflow: hidden; }
+  .ph-head img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 26%; filter: saturate(1.1); }
+  .ph-head .shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(7,0,12,0) 30%, rgba(7,0,12,.92) 100%); }
+  .ph-name { position: absolute; left: 16px; bottom: 12px; font: 700 26px/1 var(--ui); letter-spacing: 3px; }
+  .ph-name em { font: 10px/1 var(--mono); font-style: normal; color: var(--mint); letter-spacing: 3px; margin-left: 10px; }
+  .ph-chat { padding: 16px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+  .ph-chat .msg { max-width: 320px; font-size: 16px; padding: 10px 13px; line-height: 1.4; }
+  .ph-wave { display: flex; align-items: center; gap: 4px; height: 44px; margin-top: 4px; padding: 0 4px; }
+  .ph-wave i { flex: 1; background: linear-gradient(180deg, var(--mint), rgba(77,255,157,.1)); border-radius: 2px; }
+  .ph-bar { margin-top: auto; height: 76px; display: flex; align-items: center; justify-content: space-around; border-top: 1px solid rgba(77,255,157,.2); font: 11px/1 var(--mono); letter-spacing: 2px; color: rgba(234,246,255,.65); background: rgba(7,0,12,.6); }
+  .ph-bar span.on { color: var(--mint); text-shadow: 0 0 12px rgba(77,255,157,.6); }
+  #c6 .notif { position: absolute; left: 1060px; top: 64px; width: 480px; z-index: 30; background: rgba(10,4,16,.97); border: 1px solid rgba(77,255,157,.45); border-left: 3px solid var(--pink); padding: 16px 18px; font: 700 17px/1.2 var(--ui); letter-spacing: 2px; box-shadow: 0 18px 50px rgba(0,0,0,.6), 0 0 30px rgba(77,255,157,.16); }
+  #c6 .notif small { display: block; margin-top: 6px; font: 400 13px/1.4 var(--mono); letter-spacing: .5px; color: rgba(234,246,255,.72); }
+  #c6 .closed { position: absolute; right: 118px; bottom: 74px; font: 500 15px/1 var(--mono); letter-spacing: 4px; color: var(--mint); }
+
+  /* ------------------------------------------------------------ 07 memory */
+  #c7 .copy { position: absolute; left: 110px; top: 236px; width: 620px; }
+  #c7 .copy p { margin: 24px 0 0; font: 400 22px/1.6 var(--mono); color: rgba(234,246,255,.7); }
+  #c7 .chips { margin-top: 30px; display: flex; gap: 10px; }
+  #c7 .vault { position: absolute; right: 104px; top: 188px; width: 760px; }
+  .search {
+    height: 66px; display: flex; align-items: center; gap: 14px; padding: 0 20px;
+    border: 1px solid rgba(77,255,157,.4); background: rgba(77,255,157,.04);
+    font: 400 20px/1 var(--mono); color: var(--ink); letter-spacing: 1px;
+  }
+  .search .cur { width: 2px; height: 24px; background: var(--mint); }
+  .search .ico { color: var(--mint); font-size: 18px; }
+  .card {
+    margin-top: 14px; padding: 18px 20px; border: 1px solid rgba(77,255,157,.3);
+    background: rgba(7,0,12,.72); display: flex; align-items: center; gap: 16px;
+  }
+  .card .k { font: 500 12px/1 var(--mono); letter-spacing: 3px; color: var(--mint); width: 116px; }
+  .card .v { font: 500 21px/1.3 var(--ui); color: rgba(234,246,255,.92); }
+  .card .v small { display: block; margin-top: 5px; font: 400 13px/1.3 var(--mono); color: var(--dim); letter-spacing: .5px; }
+  .card.hit { border-color: rgba(255,79,216,.55); box-shadow: 0 0 26px rgba(255,79,216,.12); }
+  #c7 .foot { margin-top: 22px; display: flex; gap: 12px; }
+
+  /* --------------------------------------------------------------- 08 nnn */
+  #c8 .redwash { position: absolute; right: -180px; top: -120px; width: 1150px; height: 1150px; background: radial-gradient(circle at 50% 50%, rgba(255,43,69,.22), rgba(255,43,69,0) 62%); }
+  #c8 .inner { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 132px; }
+  #c8 .date { font: 500 28px/1 var(--mono); letter-spacing: 10px; color: var(--red); display: flex; align-items: center; gap: 18px; }
+  #c8 .date .bar { width: 56px; height: 2px; background: var(--red); box-shadow: 0 0 14px var(--red); }
+  #c8 .nnn { margin-top: 20px; display: flex; align-items: baseline; gap: 26px; font: 800 172px/0.84 var(--ui); letter-spacing: -0.035em; }
+  #c8 .nnn .l1 { color: var(--red); text-shadow: 0 0 80px rgba(255,43,69,.5); }
+  #c8 .nnn .l2 { text-shadow: 0 0 60px rgba(234,246,255,.18); }
+  #c8 .nns { margin-top: 12px; font: 500 44px/1 var(--mono); letter-spacing: 10px; color: rgba(234,246,255,.9); }
+  #c8 .guarantee { margin-top: 30px; width: 760px; height: 88px; display: flex; transform: rotate(-1.6deg); border: 2px solid var(--red); background: rgba(255,43,69,.08); box-shadow: 0 0 44px rgba(255,43,69,.2), inset 0 0 44px rgba(255,43,69,.09); }
+  #c8 .guarantee .pct { width: 172px; display: grid; place-items: center; background: var(--red); color: #14000a; font: 800 44px/1 var(--ui); letter-spacing: -1px; }
+  #c8 .guarantee .txt { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 24px; }
+  #c8 .guarantee .txt b { font: 800 28px/1 var(--ui); letter-spacing: 3px; }
+  #c8 .guarantee .txt span { margin-top: 11px; font: 500 21px/1 var(--mono); letter-spacing: 7px; color: var(--red); }
+  #c8 .cards { margin-top: 32px; display: flex; gap: 13px; }
+  .lockcard { width: 292px; border: 1px solid rgba(255,43,69,.35); background: rgba(255,43,69,.05); padding: 18px 20px 17px; font: 500 15px/1.35 var(--mono); letter-spacing: 1.5px; color: rgba(234,246,255,.88); }
+  .lockcard b { display: block; font: 800 32px/1 var(--ui); color: var(--red); margin-bottom: 10px; letter-spacing: 0; }
+  #c8 .ticker { position: absolute; left: 0; right: 0; top: 100px; height: 42px; overflow: hidden; border-top: 1px solid rgba(255,43,69,.35); border-bottom: 1px solid rgba(255,43,69,.35); background: rgba(255,43,69,.06); }
+  #c8 .ticker .run { position: absolute; left: 0; top: 0; height: 100%; display: flex; align-items: center; gap: 44px; white-space: nowrap; font: 600 17px/1 var(--mono); letter-spacing: 6px; color: rgba(255,120,135,.9); }
+  #c8 .calendar { position: absolute; right: 140px; top: 288px; width: 500px; }
+  #c8 .cal-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  #c8 .cell { height: 50px; border: 1px solid rgba(234,246,255,.14); display: grid; place-items: center; font: 14px/1 var(--mono); color: rgba(234,246,255,.45); }
+  #c8 .cell.today { border-color: var(--mint); color: #07000c; background: var(--mint); box-shadow: 0 0 26px rgba(77,255,157,.5); }
+  #c8 .cal-cap { margin-top: 18px; display: flex; justify-content: space-between; font: 11px/1 var(--mono); letter-spacing: 3px; color: rgba(234,246,255,.5); }
+
+  /* ------------------------------------------------------------ 09 price */
+  #c9 .head { position: absolute; left: 0; right: 0; top: 168px; text-align: center; }
+  #c9 .head .big { font: 800 112px/0.94 var(--ui); letter-spacing: -0.035em; }
+  #c9 .cards { position: absolute; left: 0; right: 0; top: 404px; display: flex; justify-content: center; gap: 24px; }
+  .panel {
+    width: 520px; min-height: 380px; border: 1px solid rgba(77,255,157,.35); background: rgba(7,0,12,.7);
+    padding: 34px 36px; position: relative; overflow: hidden;
+  }
+  .panel .k { font: 500 13px/1 var(--mono); letter-spacing: 5px; color: var(--mint); }
+  .panel .v { margin-top: 22px; font: 800 86px/0.9 var(--ui); letter-spacing: -0.04em; }
+  .panel .v small { font: 500 20px/1 var(--mono); letter-spacing: 5px; color: var(--dim); display: block; margin-top: 16px; }
+  .panel ul { margin: 24px 0 0; padding: 0; list-style: none; }
+  .panel li { font: 400 18px/1.9 var(--mono); color: rgba(234,246,255,.78); display: flex; gap: 12px; }
+  .panel li::before { content: "▸"; color: var(--mint); }
+  .panel.free { border-color: var(--mint); box-shadow: 0 0 60px rgba(77,255,157,.14); }
+  .panel.free .v { color: var(--mint); text-shadow: 0 0 50px rgba(77,255,157,.4); }
+  #c9 .foot { position: absolute; left: 0; right: 0; bottom: 150px; text-align: center; font: 500 22px/1 var(--mono); letter-spacing: 6px; color: rgba(234,246,255,.55); }
+
+  /* -------------------------------------------------------------- 10 cta */
+  #c10 { display: flex; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 120px; }
+  #c10 .mk { width: 400px; height: 268px; }
+  #c10 canvas#mkCanvas { width: 400px; height: 268px; filter: drop-shadow(0 0 30px rgba(77,255,157,.4)) drop-shadow(0 0 80px rgba(255,79,216,.18)); }
+  #c10 .get { margin-top: 18px; font: 800 118px/0.95 var(--ui); letter-spacing: -0.03em; }
+  #c10 .get span { color: var(--mint); text-shadow: 0 0 60px rgba(77,255,157,.35); }
+  #c10 .cards { margin-top: 34px; display: flex; gap: 20px; }
+  .dl { position: relative; overflow: hidden; width: 430px; border: 1px solid rgba(77,255,157,.42); background: rgba(77,255,157,.05); padding: 20px 22px; display: flex; align-items: center; gap: 18px; }
+  .dl .shine { position: absolute; top: -60%; left: 0; width: 120px; height: 220%; background: linear-gradient(90deg, rgba(77,255,157,0) 0%, rgba(77,255,157,.22) 50%, rgba(77,255,157,0) 100%); transform: translateX(-200px) rotate(14deg); pointer-events: none; }
+  .dl .glyph { width: 50px; height: 50px; border: 1px solid rgba(77,255,157,.55); display: grid; place-items: center; font: 18px/1 var(--mono); color: var(--mint); }
+  .dl .t { font: 700 24px/1 var(--ui); letter-spacing: 2px; }
+  .dl .s { margin-top: 8px; font: 400 13px/1 var(--mono); letter-spacing: 2px; color: var(--dim); }
+  #c10 .url { margin-top: 36px; font: 500 32px/1 var(--mono); letter-spacing: 3px; color: var(--mint); text-shadow: 0 0 34px rgba(77,255,157,.35); }
+  #c10 .foot { margin-top: 16px; font: 400 14px/1 var(--mono); letter-spacing: 4px; color: rgba(234,246,255,.45); }
+
+  /* --------------------------------------------------------------- subs */
+  #subs {
+    position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); z-index: 70;
+    display: none; align-items: center; gap: 18px; padding: 12px 24px 13px;
+    background: rgba(7,0,12,.86); border: 1px solid rgba(77,255,157,.3); border-left: 3px solid var(--pink);
+    box-shadow: 0 14px 50px rgba(0,0,0,.6), 0 0 46px rgba(77,255,157,.1);
+  }
+  #subs .tag { font: 11px/1 var(--mono); letter-spacing: 4px; color: var(--mint); white-space: nowrap; }
+  #subs .tx { font: 600 29px/1 var(--ui); letter-spacing: .4px; white-space: nowrap; }
+  #subs .line { display: none; }
+  #subs .line.on { display: inline; }
+  #subs .w { color: rgba(234,246,255,.22); }
+  #subs .w.on { color: var(--ink); text-shadow: 0 0 24px rgba(77,255,157,.3); }
+  #subs .w.hit.on { color: var(--mint); text-shadow: 0 0 30px rgba(77,255,157,.7); }
+  #subs .eq { display: flex; gap: 3px; align-items: center; height: 26px; }
+  #subs .eq i { width: 3px; border-radius: 2px; background: var(--mint); box-shadow: 0 0 9px rgba(77,255,157,.55); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="bg" width="1920" height="1080"></canvas>
+  <div id="noise"></div>
+  <div id="scan"></div>
+  <canvas id="fx" width="1920" height="1080"></canvas>
+  <div id="vignette"></div>
+  <canvas id="sparks" width="1920" height="1080"></canvas>
+
+  <div id="subs">
+    <span class="tag">CAPRI</span>
+    <span class="tx" id="subsTx"></span>
+    <span class="eq" id="subsEq"></span>
+  </div>
+
+  <div class="hud">
+    <div class="hud-tl"><span class="dot"></span><span>CAPRI // TWO MINUTES</span></div>
+    <div class="hud-tr">PC + ANDROID</div>
+    <div class="hud-bl" id="hudScene">01 / 10</div>
+    <div class="hud-br" id="hudTc">00:00:00</div>
+    <div class="corner tl"></div><div class="corner tr"></div>
+    <div class="corner bl"></div><div class="corner br"></div>
+  </div>
+
+  <!-- 01 -->
+  <section class="chapter" id="c1">
+    <div class="portrait"></div>
+    <div class="portraitFade"></div>
+    <div class="tint"></div>
+    <div class="stack">
+      <div class="word" id="c1word"><span>C</span><span>A</span><span>P</span><span>R</span><span>I</span></div>
+      <div class="kicker"><div class="rule" id="c1rule"></div><div class="pc" id="c1pc">PROJECT CAPRICORN</div></div>
+      <div class="tagline" id="c1tag"></div>
+    </div>
+    <div class="stamp" id="c1stamp">
+      <div class="chip hot">VOICE FIRST</div>
+      <div class="chip">PC + ANDROID</div>
+      <div class="chip">FREE</div>
+    </div>
+  </section>
+
+  <!-- 02 -->
+  <section class="chapter" id="c2">
+    <div class="left">
+      <div class="label" id="c2label">WAKE WORD <span class="live"></span> LISTENING</div>
+      <div class="say"><div class="l1" id="c2l1">SAY HER NAME.</div><div class="l2" id="c2l2">she takes it from there.</div></div>
+      <div class="chips" id="c2chips">
+        <div class="chip">NO KEYBOARD</div>
+        <div class="chip">ANSWERS OUT LOUD</div>
+        <div class="chip">ALWAYS ON</div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="orb"><div class="ring r1" id="c2r1"></div><div class="ring r2" id="c2r2"></div><div class="ring r3" id="c2r3"></div><div class="core" id="c2core"></div></div>
+      <div class="cap"><span class="live"></span><span id="c2cap">LISTENING</span></div>
+      <div class="wave" id="c2wave"></div>
+      <div class="bubble user b-user" id="c2bu"><span class="who">YOU</span><span id="c2but"></span></div>
+      <div class="bubble b-cap" id="c2bc"><span class="who">CAPRI</span><span id="c2bct"></span></div>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section class="chapter" id="c3">
+    <div class="center">
+      <div class="h-xl">ONE <span class="mint">VOICE.</span></div>
+      <div class="subline">THE ONLY ONE SHE USES</div>
+    </div>
+    <canvas id="voiceCanvas" width="1200" height="360"></canvas>
+    <div class="devices">
+      <div class="dev">WINDOWS <b>ON</b></div>
+      <div class="dev">ANDROID <b>ON</b></div>
+      <div class="dev">WEB <b>ON</b></div>
+    </div>
+    <div class="eq" id="c3eq"></div>
+  </section>
+
+  <!-- 04 -->
+  <section class="chapter" id="c4">
+    <div class="copy">
+      <div class="label">WINDOWS</div>
+      <div class="h-lg">HER OWN<br>WINDOW.</div>
+      <p>voice, hands and memory —<br>one shell that keeps working<br>after you close it.</p>
+      <div class="chips"><div class="chip hot">WINDOWS 10 / 11</div><div class="chip">SETUP.EXE</div></div>
+    </div>
+    <div class="winWrap" id="c4winWrap">
+      <div class="win" id="c4win">
+        <div class="win-bar"><div class="traffic"><i></i><i></i><i></i></div><div class="win-title">CAPRI // PROJECT CAPRICORN</div></div>
+        <div class="win-body">
+          <aside class="win-side">
+            <div class="side-ava"></div>
+            <div class="side-item on">CHAT</div><div class="side-item">MEMORY</div><div class="side-item">NNN</div><div class="side-item">HANDS</div>
+            <div class="side-foot">ONLINE</div>
+          </aside>
+          <main class="win-chat">
+            <div class="msg user" id="c4m1">capri, open youtube and find lofi.</div>
+            <div class="msg capri" id="c4m2">opening it. lofi girl again? predictable.</div>
+            <div class="msg user" id="c4m3">and write my notes down.</div>
+            <div class="msg capri" id="c4m4">saved. one window, clean.</div>
+            <div class="task" id="c4t1" style="top: 300px"><span class="tick">✓</span><span class="tx">OPEN APP · youtube</span></div>
+            <div class="task" id="c4t2" style="top: 372px"><span class="tick">✓</span><span class="tx">WRITE NOTE · nov-02.txt</span></div>
+            <div class="task" id="c4t3" style="top: 444px"><span class="tick">✓</span><span class="tx">FIND FILE · sketch.psd</span></div>
+            <div class="composer"><div class="ph">Say “Capri…” or type</div><div class="mic" id="c4mic">◉</div></div>
+          </main>
+        </div>
+      </div>
+      <div class="cursor" id="c4cursor"><svg width="26" height="32" viewBox="0 0 26 32"><path d="M2 1 L2 25 L8.5 19 L13 30 L18 28 L13.5 17.5 L22 17.5 Z" fill="#eaf6ff" stroke="#07000c" stroke-width="1.6"/></svg></div>
+      <div class="ring2" id="c4ring"></div>
+    </div>
+  </section>
+
+  <!-- 05 -->
+  <section class="chapter" id="c5">
+    <canvas id="eyeCanvas" width="940" height="626"></canvas>
+    <div class="bubble b-eye" id="c5bubble"><span class="who">CAPRI // EYE <i>●</i></span><span id="c5line"></span></div>
+    <div class="drag" id="c5drag"></div>
+    <div class="right">
+      <div class="label">EYE SPY <span class="live"></span> ON</div>
+      <div class="rows">
+        <div class="row" id="c5r1"><div class="n">01</div><div class="t">DRAGS ANYWHERE<span class="s">across every screen you use</span></div></div>
+        <div class="row" id="c5r2"><div class="n">02</div><div class="t">TALKS BACK<span class="s">she reads what you're looking at</span></div></div>
+        <div class="row" id="c5r3"><div class="n">03</div><div class="t">STEPS ASIDE<span class="s">gone the moment you're back in her window</span></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 -->
+  <section class="chapter" id="c6">
+    <div class="copy">
+      <div class="label">ANDROID</div>
+      <div class="h-lg">SAME GIRL.<br><span class="pink">POCKET.</span></div>
+      <p>the whole voice, the phone control,<br>the guard — in an apk.</p>
+      <div class="rows">
+        <div class="row">voice wake, screen off</div>
+        <div class="row">opens and drives your apps</div>
+        <div class="row">answers in a notification</div>
+      </div>
+      <div class="chips"><div class="chip hot">CAPRI-V4.APK</div><div class="chip">ANDROID 7+</div></div>
+    </div>
+    <div class="notif" id="c6notif">CAPRI<small>opened spotify. your playlist, obviously.</small></div>
+    <div class="phone" id="c6phone">
+      <div class="phone-screen">
+        <div class="ph-status"><span>9:41</span><span>▮▮▮ 100%</span></div>
+        <div class="ph-head"><img src="/public/assets/capri-portrait.jpg" alt="" /><div class="shade"></div><div class="ph-name">CAPRI<em>ONLINE</em></div></div>
+        <div class="ph-chat">
+          <div class="msg user" id="c6m1">capri, open youtube.</div>
+          <div class="msg capri" id="c6m2">done. lofi, as usual.</div>
+          <div class="ph-wave" id="c6wave"></div>
+          <div class="msg user" id="c6m3">does it run without the app open?</div>
+          <div class="msg capri" id="c6m4">it never closed. i'm the app.</div>
+        </div>
+        <div class="ph-bar"><span class="on">◉ TALK</span><span>EYE</span><span>NNN</span></div>
+      </div>
+    </div>
+    <div class="closed" id="c6closed">/* APP CLOSED · STILL LISTENING */</div>
+  </section>
+
+  <!-- 07 -->
+  <section class="chapter" id="c7">
+    <div class="copy">
+      <div class="label">MEMORY</div>
+      <div class="h-lg">SHE<br>REMEMBERS.</div>
+      <p>your name, your projects, the way<br>you like things — per profile,<br>searchable, and forgettable.</p>
+      <div class="chips"><div class="chip">SEARCH</div><div class="chip">FORGET</div><div class="chip">EXPORT</div></div>
+    </div>
+    <div class="vault">
+      <div class="search"><span class="ico">⌕</span><span id="c7query">youtube lofi</span><span class="cur" id="c7cur"></span></div>
+      <div class="card hit" id="c7c1"><span class="k">PROJECT</span><span class="v">lofi stream<small>saved oct 30 · pinned to profile</small></span></div>
+      <div class="card" id="c7c2"><span class="k">PREFERENCE</span><span class="v">lofi, not rain<small>learned nov 1 · one tap to forget</small></span></div>
+      <div class="card" id="c7c3"><span class="k">PERSON</span><span class="v">calls you “choom”<small>set by you · never leaves the account</small></span></div>
+      <div class="foot"><div class="chip">1 PROFILE EACH</div><div class="chip">YOUR ACCOUNT</div></div>
+    </div>
+  </section>
+
+  <!-- 08 -->
+  <section class="chapter" id="c8">
+    <div class="redwash"></div>
+    <div class="ticker"><div class="run" id="c8tick"></div></div>
+    <div class="inner">
+      <div class="date" id="c8date"><span class="bar"></span><span>NOV 1 — DEC 1 · ARMED</span></div>
+      <div class="nnn"><span class="l1" id="c8l1">NNN</span><span class="l2" id="c8l2">MODE</span></div>
+      <div class="nns" id="c8nns">(NO NUT NOVEMBER)</div>
+      <div class="guarantee" id="c8g"><div class="pct">100%</div><div class="txt"><b>GUARANTEE</b><span>NO CUMMING</span></div></div>
+      <div class="cards">
+        <div class="lockcard" id="c8c1"><b>✕</b>SITES BLOCKED</div>
+        <div class="lockcard" id="c8c2"><b>✕</b>UNINSTALL REFUSED</div>
+        <div class="lockcard" id="c8c3"><b>—</b>PAUSE: NONE</div>
+      </div>
+    </div>
+    <div class="calendar">
+      <div class="cal-grid" id="c8cal"></div>
+      <div class="cal-cap"><span>NOV 2026</span><span id="c8count">01 / 30</span></div>
+    </div>
+  </section>
+
+  <!-- 09 -->
+  <section class="chapter" id="c9">
+    <div class="head">
+      <div class="big">NO CATCH<span class="mint">.</span></div>
+    </div>
+    <div class="cards">
+      <div class="panel">
+        <div class="k">YOUR KEYS</div>
+        <div class="v">YOURS<small>STAY ON YOUR MACHINE</small></div>
+        <ul><li>own api keys, own quota</li><li>one profile per account</li><li>forget anything, any time</li></ul>
+      </div>
+      <div class="panel free">
+        <div class="k">PRICE</div>
+        <div class="v">0<small>NO SUBSCRIPTION. NO CARD.</small></div>
+        <ul><li>windows setup, no admin</li><li>android apk, direct</li><li>updates install themselves</li></ul>
+      </div>
+    </div>
+    <div class="foot">FREE ON PC + ANDROID · BUILT IN PUBLIC</div>
+  </section>
+
+  <!-- 10 -->
+  <section class="chapter" id="c10">
+    <div class="mk"><canvas id="mkCanvas" width="800" height="536"></canvas></div>
+    <div class="get" id="c10get">GET <span>CAPRI</span></div>
+    <div class="cards">
+      <div class="dl" id="c10d1"><span class="shine" id="c10sh1"></span><div class="glyph">⊞</div><div><div class="t">WINDOWS</div><div class="s">CAPRI-V4-SETUP.EXE</div></div></div>
+      <div class="dl" id="c10d2"><span class="shine" id="c10sh2"></span><div class="glyph">▤</div><div><div class="t">ANDROID</div><div class="s">CAPRI-V4.APK</div></div></div>
+    </div>
+    <div class="url" id="c10url">cp00004.github.io/capri</div>
+    <div class="foot" id="c10foot">PC + ANDROID · SAY HER NAME</div>
+  </section>
+</div>
+
+<script src="timing.js"></script>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+  const ramp = (t, a, b) => clamp01((t - a) / (b - a));
+  const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+  const easeInOut = (x) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
+  const hash = (n) => {
+    let x = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b);
+    x ^= x >>> 13;
+    x = Math.imul(x, 0xc2b2ae35);
+    x ^= x >>> 16;
+    return (x >>> 0) / 4294967296;
+  };
+  const noise1 = (t, seed) => hash(Math.floor(t * 24) * 7919 + seed);
+  const W = 1920, H = 1080;
+
+  /* Narration: [start, end]. End times come from the rendered bed. */
+  const LINES = [
+    { a: 1.00,  b: 9.30,  words: ["Hey.", "I'm", "Capri.", "Voice-first.", "On", "your", "PC,", "on", "your", "phone", "—", "and", "free."], hit: [2, 12] },
+    { a: 10.80, b: 16.60, words: ["You", "don't", "click", "anything.", "You", "just", "say", "my", "name", "—", "Capri", "—", "and", "I", "answer", "out", "loud."], hit: [10] },
+    { a: 17.20, b: 20.40, words: ["Ask", "me", "anything.", "Or", "tell", "me", "what", "to", "do."], hit: [] },
+    { a: 22.40, b: 28.20, words: ["One", "voice,", "everywhere.", "This", "is", "it", "—", "the", "same", "tone", "on", "Windows", "and", "on", "Android."], hit: [0, 1, 2] },
+    { a: 28.60, b: 31.80, words: ["No", "settings.", "No", "robot", "menu.", "Just", "me."], hit: [6] },
+    { a: 34.40, b: 40.90, words: ["On", "your", "PC", "I'm", "a", "real", "window.", "I", "open", "apps,", "write", "your", "notes,", "find", "your", "files."], hit: [] },
+    { a: 41.40, b: 46.20, words: ["Every", "action", "asks", "first.", "And", "what", "I", "can", "undo,", "I", "undo."], hit: [3] },
+    { a: 48.60, b: 54.20, words: ["My", "eye", "floats", "over", "everything.", "I", "watch", "the", "tab,", "the", "video,", "the", "game", "—"], hit: [1] },
+    { a: 54.80, b: 58.40, words: ["and", "I", "say", "something", "worth", "hearing.", "Drag", "me", "anywhere."], hit: [] },
+    { a: 60.80, b: 66.20, words: ["On", "Android", "I'm", "the", "same", "girl", "in", "your", "pocket.", "Wake", "me", "with", "your", "voice."], hit: [] },
+    { a: 66.80, b: 70.60, words: ["I", "drive", "your", "phone,", "and", "answer", "in", "a", "notification", "—", "even", "with", "the", "app", "closed."], hit: [9] },
+    { a: 72.80, b: 77.60, words: ["I", "remember.", "Your", "name,", "your", "projects,", "the", "way", "you", "like", "things."], hit: [0] },
+    { a: 78.20, b: 82.60, words: ["Kept", "to", "your", "account,", "one", "profile", "each", "—", "and", "you", "can", "make", "me", "forget."], hit: [] },
+    { a: 84.60, b: 90.00, words: ["And", "if", "it's", "November,", "I", "guard", "you.", "Sites", "blocked.", "Tabs", "blacked", "out."], hit: [3, 7, 8] },
+    { a: 90.40, b: 94.60, words: ["The", "app", "stays", "locked", "until", "December", "first.", "You", "asked.", "I", "keep", "it."], hit: [8, 9, 10] },
+    { a: 96.40, b: 101.20, words: ["Your", "keys", "stay", "on", "your", "machine.", "Your", "account", "stays", "yours.", "No", "subscription."], hit: [] },
+    { a: 101.60, b: 105.60, words: ["I", "cost", "nothing.", "I'm", "just", "very", "good", "at", "this."], hit: [2] },
+    { a: 106.80, b: 111.80, words: ["Get", "me", "at", "cp00004", "dot", "github", "dot", "io", "slash", "capri."], hit: [] },
+    { a: 112.20, b: 116.00, words: ["Windows.", "Android.", "One", "voice.", "Say", "my", "name."], hit: [0, 1] },
+    { a: 116.20, b: 119.40, words: ["I'm", "Capri.", "See", "you", "on", "the", "other", "side."], hit: [1] },
+  ];
+
+  // Measured from the rendered clone, generated by voice/long-fit.mjs. Keeps
+  // the captions and the soundtrack on the same clock.
+  const TIMING = window.CAPRI_LONG_TIMING || {};
+  LINES.forEach((v, i) => {
+    const id = "l" + String(i + 1).padStart(2, "0");
+    if (TIMING[id]) { v.a = TIMING[id].a; v.b = TIMING[id].b; }
+  });
+
+  const CHAPTERS = [
+    { id: "c1",  a: 0,    b: 10  },
+    { id: "c2",  a: 10,   b: 21  },
+    { id: "c3",  a: 21,   b: 33  },
+    { id: "c4",  a: 33,   b: 47  },
+    { id: "c5",  a: 47,   b: 59  },
+    { id: "c6",  a: 59,   b: 71  },
+    { id: "c7",  a: 71,   b: 83  },
+    { id: "c8",  a: 83,   b: 95  },
+    { id: "c9",  a: 95,   b: 105 },
+    { id: "c10", a: 105,  b: 120 },
+  ];
+  const DURATION = 120;
+  const BEAT = 0.5, BEAT0 = 10.0;
+  const beat = (t) => {
+    if (t < BEAT0 || t > 118) return 0;
+    const b = (t - BEAT0) / BEAT;
+    return Math.exp(-(b - Math.floor(b)) * 5.5);
+  };
+  const IMPACTS = CHAPTERS.slice(1).map((c) => c.a).concat([118.4]);
+
+  function typeInto(el, str, t, start, cps, keepCaret) {
+    if (t < start) { el.textContent = ""; return; }
+    const n = Math.min(str.length, Math.floor((t - start) * cps));
+    el.textContent = str.slice(0, n) + (keepCaret && n < str.length ? "▌" : "");
+  }
+  function reveal(el, t, start, dur = 0.55, dy = 26) {
+    const p = easeOut(ramp(t, start, start + dur));
+    el.style.opacity = String(p);
+    el.style.transform = `translateY(${((1 - p) * dy).toFixed(2)}px)`;
+  }
+  function pop(el, t, start, dur = 0.4) {
+    const p = easeOut(ramp(t, start, start + dur));
+    el.style.opacity = String(p);
+    el.style.transform = `translateY(${((1 - p) * 16).toFixed(1)}px) scale(${(0.94 + p * 0.06).toFixed(3)})`;
+  }
+
+  /* ------------------------------------------------------------ backdrop */
+  const bg = $("bg"), bctx = bg.getContext("2d");
+  const bgGlowA = bctx.createRadialGradient(1560, -120, 40, 1560, -120, 900);
+  bgGlowA.addColorStop(0, "rgba(77,255,157,.12)"); bgGlowA.addColorStop(1, "rgba(77,255,157,0)");
+  const bgGlowB = bctx.createRadialGradient(120, 1180, 60, 120, 1180, 1000);
+  bgGlowB.addColorStop(0, "rgba(255,79,216,.12)"); bgGlowB.addColorStop(1, "rgba(255,79,216,0)");
+  const bgGlowR = bctx.createRadialGradient(1500, 540, 40, 1500, 540, 860);
+  bgGlowR.addColorStop(0, "rgba(255,43,69,.12)"); bgGlowR.addColorStop(1, "rgba(255,43,69,0)");
+
+  function drawBg(t) {
+    bctx.fillStyle = "#07000c";
+    bctx.fillRect(0, 0, W, H);
+    bctx.globalAlpha = 0.7 + 0.3 * Math.sin(t * 0.7);
+    bctx.fillStyle = bgGlowA; bctx.fillRect(0, 0, W, H);
+    bctx.fillStyle = bgGlowB; bctx.fillRect(0, 0, W, H);
+    if (t > 83 && t < 95) { bctx.globalAlpha = 0.9; bctx.fillStyle = bgGlowR; bctx.fillRect(0, 0, W, H); }
+    bctx.globalAlpha = 1;
+
+    bctx.strokeStyle = "rgba(120,180,255,.055)";
+    bctx.lineWidth = 1;
+    bctx.beginPath();
+    const drift = (t * 9) % 96;
+    for (let x = -96 + drift; x < W + 96; x += 96) { bctx.moveTo(x + 0.5, 0); bctx.lineTo(x + 0.5, H); }
+    for (let y = 0; y < H; y += 96) { bctx.moveTo(0, y + 0.5); bctx.lineTo(W, y + 0.5); }
+    bctx.stroke();
+
+    for (let i = 0; i < 3; i++) {
+      const r = noise1(t, 101 + i);
+      if (r < 0.86) continue;
+      const y = Math.floor(noise1(t, 201 + i) * H);
+      const h = 1 + Math.floor(noise1(t, 301 + i) * 2);
+      bctx.fillStyle = i === 0 ? "rgba(255,79,216,.16)" : i === 1 ? "rgba(43,107,255,.16)" : "rgba(77,255,157,.12)";
+      bctx.fillRect(0, y, W, h);
+      bctx.fillStyle = "rgba(234,246,255,.12)";
+      bctx.fillRect(0, y, W, 1);
+    }
+  }
+
+  (() => {
+    const c = document.createElement("canvas");
+    c.width = 256; c.height = 256;
+    const x = c.getContext("2d");
+    const img = x.createImageData(256, 256);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = Math.floor(hash(i * 2654435761) * 255);
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 42;
+    }
+    x.putImageData(img, 0, 0);
+    $("noise").style.backgroundImage = `url(${c.toDataURL()})`;
+  })();
+
+  /* ----------------------------------------------------------------- hud */
+  const hudScene = $("hudScene"), hudTc = $("hudTc");
+  function pad(n, w = 2) { return String(n).padStart(w, "0"); }
+  function drawHud(t) {
+    let idx = 1;
+    for (let i = 0; i < CHAPTERS.length; i++) if (t >= CHAPTERS[i].a) idx = i + 1;
+    hudScene.textContent = `${pad(idx)} / 10`;
+    hudTc.textContent = `00:${pad(Math.floor(t))}:${pad(Math.floor((t % 1) * 30))}`;
+    const n = $("noise");
+    n.style.transform = `translate(${Math.floor(noise1(t, 7) * 64)}px, ${Math.floor(noise1(t, 11) * 64)}px)`;
+  }
+
+  /* ---------------------------------------------------------------- c1 */
+  const c1 = {
+    el: $("c1"), letters: [...$("c1word").children], rule: $("c1rule"),
+    pc: $("c1pc"), tag: $("c1tag"), stamp: $("c1stamp"),
+  };
+  const GLITCHES = [[0.5, 0.62], [1.7, 1.82], [8.9, 9.1]];
+  function c1Draw(t) {
+    const gl = GLITCHES.some(([a, b]) => t >= a && t <= b) ? 1 : 0;
+    const jit = gl ? (noise1(t, 3) - 0.5) * 18 : 0;
+    c1.letters.forEach((el, i) => {
+      const p = easeOut(ramp(t, 0.1 + i * 0.07, 0.5 + i * 0.07));
+      el.style.opacity = String(p);
+      el.style.transform = `translateY(${((1 - p) * 40).toFixed(1)}px)`;
+    });
+    const word = $("c1word");
+    word.style.transform = `translateX(${jit.toFixed(1)}px)`;
+    word.style.textShadow = gl
+      ? `${8 + jit}px 0 rgba(255,79,216,.75), ${-8 + jit}px 0 rgba(43,107,255,.75), 0 0 70px rgba(77,255,157,.2)`
+      : "4px 0 rgba(255,79,216,.45), -4px 0 rgba(43,107,255,.45), 0 0 70px rgba(77,255,157,.18)";
+    const pr = easeInOut(ramp(t, 0, 1.5));
+    const por = document.querySelector("#c1 .portrait");
+    por.style.opacity = String(0.16 + pr * 0.5);
+    por.style.transform = `scale(${(1.08 - pr * 0.08).toFixed(3)}) translateY(${((1 - pr) * 26).toFixed(1)}px)`;
+    const rp = easeOut(ramp(t, 0.9, 1.7));
+    c1.rule.style.width = `${(132 * rp).toFixed(1)}px`;
+    c1.rule.style.opacity = String(rp);
+    reveal(c1.pc, t, 1.0, 0.6, 16);
+    typeInto(c1.tag, "a voice-first cyberpunk for pc + android.", t, 1.5, 30, true);
+    c1.tag.style.opacity = t >= 1.5 ? "1" : "0";
+    reveal(c1.stamp, t, 2.2, 0.6, 14);
+  }
+
+  /* ---------------------------------------------------------------- c2 */
+  const c2 = {
+    label: $("c2label"), l1: $("c2l1"), l2: $("c2l2"), chips: $("c2chips"),
+    r1: $("c2r1"), r2: $("c2r2"), r3: $("c2r3"), core: $("c2core"),
+    wave: $("c2wave"), cap: $("c2cap"), bu: $("c2bu"), but: $("c2but"), bc: $("c2bc"), bct: $("c2bct"),
+  };
+  const c2Bars = [];
+  for (let i = 0; i < 44; i++) { const b = document.createElement("i"); c2.wave.appendChild(b); c2Bars.push(b); }
+  function c2Draw(t) {
+    reveal(c2.label, t, 0.05, 0.5, 14);
+    reveal(c2.l1, t, 0.18, 0.6, 30);
+    reveal(c2.l2, t, 0.62, 0.6, 30);
+    reveal(c2.chips, t, 1.05, 0.6, 18);
+    c2.r1.style.transform = `rotate(${(t * 26).toFixed(1)}deg)`;
+    c2.r2.style.transform = `rotate(${(-t * 18).toFixed(1)}deg)`;
+    c2.r3.style.transform = `rotate(${(t * 40).toFixed(1)}deg)`;
+    const bp = beat(ABS);
+    c2.core.style.transform = `scale(${(1 + 0.1 * bp).toFixed(3)})`;
+    c2.core.style.boxShadow = `0 0 ${(60 + 90 * bp).toFixed(0)}px rgba(77,255,157,${(0.55 + 0.3 * bp).toFixed(2)}), 0 0 ${(160 + 160 * bp).toFixed(0)}px rgba(77,255,157,${(0.22 + 0.2 * bp).toFixed(2)})`;
+    const speaking = t > 0.9 && t < 6.2;
+    const energy = speaking ? 0.55 + 0.45 * Math.sin(t * 7.5) : 0.18;
+    c2Bars.forEach((b, i) => {
+      const env = Math.sin(Math.PI * (i / (c2Bars.length - 1)));
+      const wob = 0.35 + 0.65 * Math.abs(Math.sin(t * 6.2 + i * 0.52) * Math.cos(t * 2.7 + i * 0.21));
+      b.style.height = `${(5 + env * wob * (18 + energy * 78)).toFixed(1)}px`;
+      b.style.opacity = String(0.35 + env * 0.65);
+    });
+    c2.cap.textContent = t < 1.0 ? "LISTENING" : t < 4.1 ? "HEARING YOU" : "ANSWERED";
+    pop(c2.bu, t, 1.15, 0.35);
+    typeInto(c2.but, "capri, find me something to listen to.", t, 1.3, 26, true);
+    pop(c2.bc, t, 3.9, 0.35);
+    typeInto(c2.bct, "on it. something loud, probably.", t, 4.05, 30, true);
+  }
+
+  /* ---------------------------------------------------------------- c3 */
+  const vc = $("voiceCanvas"), vctx = vc.getContext("2d");
+  const c3Bars = [];
+  for (let i = 0; i < 64; i++) { const b = document.createElement("i"); $("c3eq").appendChild(b); c3Bars.push(b); }
+  function c3Draw(t) {
+    const cw = 1200, ch = 360, cx = cw / 2, cy = ch / 2;
+    vctx.clearRect(0, 0, cw, ch);
+    const speaking = t > 0.4 && t < 11.2;
+    // radial voiceprint: two stacked rings of bars
+    for (let ring = 0; ring < 2; ring++) {
+      const r0 = ring === 0 ? 108 : 150;
+      const n = 96;
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + t * (ring ? -0.3 : 0.22);
+        const wob = Math.abs(Math.sin(t * 5.1 + i * 0.37) * Math.cos(t * 2.3 + i * 0.13));
+        const amp = speaking ? 0.25 + 0.75 * wob : 0.12;
+        const len = (ring ? 24 : 50) * amp + 3;
+        const x0 = cx + Math.cos(a) * r0, y0 = cy + Math.sin(a) * r0;
+        const x1 = cx + Math.cos(a) * (r0 + len), y1 = cy + Math.sin(a) * (r0 + len);
+        vctx.strokeStyle = ring ? `rgba(255,79,216,${(0.18 + amp * 0.5).toFixed(3)})` : `rgba(77,255,157,${(0.22 + amp * 0.65).toFixed(3)})`;
+        vctx.lineWidth = ring ? 2 : 3;
+        vctx.beginPath(); vctx.moveTo(x0, y0); vctx.lineTo(x1, y1); vctx.stroke();
+      }
+    }
+    const glow = vctx.createRadialGradient(cx, cy, 4, cx, cy, 190);
+    glow.addColorStop(0, `rgba(77,255,157,${(speaking ? 0.22 : 0.1).toFixed(3)})`);
+    glow.addColorStop(1, "rgba(77,255,157,0)");
+    vctx.fillStyle = glow;
+    vctx.fillRect(cx - 190, cy - 190, 380, 380);
+    vctx.fillStyle = "#eaf6ff";
+    vctx.font = "700 34px Segoe UI, sans-serif";
+    vctx.textAlign = "center";
+    vctx.textBaseline = "middle";
+    vctx.fillText("CAPRI", cx, cy);
+    c3Bars.forEach((b, i) => {
+      const h = 5 + 26 * Math.abs(Math.sin(t * 9 + i * 0.7) * Math.cos(t * 3.4 + i * 0.2));
+      b.style.height = `${h.toFixed(1)}px`;
+      b.style.opacity = String(0.4 + 0.6 * Math.abs(Math.sin(t * 6 + i)));
+    });
+  }
+
+  /* ---------------------------------------------------------------- c4 */
+  const c4 = {
+    copy: document.querySelector("#c4 .copy"), wrap: $("c4winWrap"), win: $("c4win"),
+    m1: $("c4m1"), m2: $("c4m2"), m3: $("c4m3"), m4: $("c4m4"),
+    t1: $("c4t1"), t2: $("c4t2"), t3: $("c4t3"), mic: $("c4mic"),
+    cursor: $("c4cursor"), ring: $("c4ring"),
+  };
+  function c4Draw(t) {
+    reveal(c4.copy, t, 0.1, 0.6, 24);
+    const p = easeOut(ramp(t, 0, 0.9));
+    c4.wrap.style.opacity = String(p);
+    c4.wrap.style.transform = `translateY(${((1 - p) * 46).toFixed(1)}px)`;
+    const turn = -8 + 5 * easeInOut(ramp(t, 0, 6));
+    c4.win.style.transform = `rotateY(${turn.toFixed(2)}deg) rotateX(${(2.6 - 1.3 * p).toFixed(2)}deg) scale(${(0.975 + 0.025 * p).toFixed(3)})`;
+    pop(c4.m1, t, 0.5, 0.35);
+    pop(c4.m2, t, 2.1, 0.35);
+    pop(c4.m3, t, 4.4, 0.35);
+    pop(c4.m4, t, 6.6, 0.35);
+    const tasks = [[c4.t1, 3.0], [c4.t2, 5.3], [c4.t3, 7.4]];
+    tasks.forEach(([el, at], i) => {
+      const q = easeOut(ramp(t, at, at + 0.45));
+      el.style.opacity = String(q * 0.9);
+      el.style.transform = `translateX(${((1 - q) * 40).toFixed(1)}px)`;
+      el.classList.toggle("done", t >= at + 0.25);
+    });
+    const cp = easeInOut(ramp(t, 8.1, 9.1));
+    const x = 300 + cp * 700;
+    const y = 560 - Math.sin(cp * Math.PI) * 60;
+    c4.cursor.style.opacity = String(ramp(t, 7.9, 8.1) * (1 - ramp(t, 10.4, 11.0)));
+    c4.cursor.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+    const clickT = 9.1;
+    const cp2 = clamp01((t - clickT) / 0.5);
+    c4.ring.style.opacity = String(t >= clickT ? (1 - cp2) : 0);
+    c4.ring.style.transform = `translate(${(x - 32).toFixed(1)}px, ${(y - 32).toFixed(1)}px) scale(${(0.4 + cp2 * 1.4).toFixed(2)})`;
+    const pulse = t > clickT && t < clickT + 0.9 ? 1 + 0.16 * Math.sin((t - clickT) * 18) : 1;
+    c4.mic.style.transform = `scale(${pulse.toFixed(3)})`;
+    c4.mic.style.boxShadow = t > clickT ? `0 0 ${(24 * (1 - cp2) + 6).toFixed(0)}px rgba(77,255,157,.85)` : "none";
+  }
+
+  /* ---------------------------------------------------------------- c5 */
+  const eyeCanvas = $("eyeCanvas"), ectx = eyeCanvas.getContext("2d");
+  const EW = 940, EH = 626;
+  const eye = { ready: false, cut: null, cx: 0, cy: 0, r: 0 };
+  function buildEye(img) {
+    const scale = Math.min(1, 1536 / img.naturalWidth);
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const work = document.createElement("canvas");
+    work.width = w; work.height = h;
+    const c = work.getContext("2d");
+    c.drawImage(img, 0, 0, w, h);
+    const frame = c.getImageData(0, 0, w, h);
+    const px = frame.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const low = Math.min(px[i], px[i + 1], px[i + 2]);
+      const k = Math.min(1, Math.max(0, (low - 150) / 45));
+      if (k > 0) px[i + 3] = Math.round(px[i + 3] * (1 - k));
+    }
+    c.putImageData(frame, 0, 0);
+    let x0 = w, y0 = h, x1 = -1, y1 = -1;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        if (px[(y * w + x) * 4 + 3] > 12) {
+          if (x < x0) x0 = x; if (x > x1) x1 = x;
+          if (y < y0) y0 = y; if (y > y1) y1 = y;
+        }
+      }
+    }
+    const pad = 4;
+    x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad);
+    x1 = Math.min(w - 1, x1 + pad); y1 = Math.min(h - 1, y1 + pad);
+    const cut = document.createElement("canvas");
+    cut.width = x1 - x0 + 1; cut.height = y1 - y0 + 1;
+    cut.getContext("2d").drawImage(work, x0, y0, cut.width, cut.height, 0, 0, cut.width, cut.height);
+    eye.cut = cut;
+
+    const cd = cut.getContext("2d").getImageData(0, 0, cut.width, cut.height).data;
+    const bw = cut.width, bh = cut.height;
+    const isBlue = (i) => cd[i + 2] > 150 && cd[i + 2] - cd[i] > 70 && cd[i + 2] - cd[i + 1] > 30;
+    const seen = new Uint8Array(bw * bh);
+    let best = null;
+    for (let yy = 0; yy < bh; yy++) {
+      for (let xx = 0; xx < bw; xx++) {
+        const start = yy * bw + xx;
+        if (seen[start] || !isBlue(start * 4)) continue;
+        const stack = [start];
+        seen[start] = 1;
+        const pts = [];
+        while (stack.length) {
+          const q = stack.pop();
+          pts.push(q);
+          const qx = q % bw, qy = (q - qx) / bw;
+          const around = [qx > 0 ? q - 1 : -1, qx < bw - 1 ? q + 1 : -1, qy > 0 ? q - bw : -1, qy < bh - 1 ? q + bw : -1];
+          for (const r of around) {
+            if (r < 0 || seen[r] || !isBlue(r * 4)) continue;
+            seen[r] = 1; stack.push(r);
+          }
+        }
+        if (!best || pts.length > best.length) best = pts;
+      }
+    }
+    if (best && best.length > 400) {
+      let sx = 0, sy = 0;
+      for (const q of best) { sx += q % bw; sy += (q - (q % bw)) / bw; }
+      eye.cxRaw = sx / best.length; eye.cyRaw = sy / best.length;
+      const dists = best.map((q) => Math.hypot((q % bw) - eye.cxRaw, (q - (q % bw)) / bw - eye.cyRaw));
+      dists.sort((a, b) => a - b);
+      eye.rRaw = dists[Math.floor(dists.length * 0.98)] || 100;
+    } else {
+      eye.cxRaw = 0.4817 * cut.width; eye.cyRaw = 0.621 * cut.height; eye.rRaw = 0.0978 * cut.width;
+    }
+    eye.ready = true;
+    layoutEye();
+  }
+  function layoutEye() {
+    const cut = eye.cut;
+    if (!cut) return;
+    eye.scale = Math.min(EW / cut.width, EH / cut.height) * 0.94;
+    eye.dw = cut.width * eye.scale; eye.dh = cut.height * eye.scale;
+    eye.ox = (EW - eye.dw) / 2; eye.oy = (EH - eye.dh) / 2;
+    eye.cx = eye.ox + eye.cxRaw * eye.scale; eye.cy = eye.oy + eye.cyRaw * eye.scale;
+    eye.r = eye.rRaw * eye.scale;
+  }
+  function drawEye(t) {
+    if (!eye.ready) return;
+    ectx.clearRect(0, 0, EW, EH);
+    ectx.drawImage(eye.cut, eye.ox, eye.oy, eye.dw, eye.dh);
+    const amp = eye.r * 0.28;
+    const gx = (Math.sin(t * 1.55) * 0.85 + Math.sin(t * 0.53 + 1.2) * 0.45) * amp;
+    const gy = (Math.cos(t * 1.13 + 0.4) * 0.7 + Math.sin(t * 0.71) * 0.3) * amp;
+    const cx = eye.cx, cy = eye.cy;
+    const bp = beat(ABS);
+    const r = eye.r * (1 + 0.045 * bp);
+    const socket = ectx.createRadialGradient(cx, cy, r * 0.05, cx, cy, r);
+    socket.addColorStop(0, "rgba(10,0,12,.98)");
+    socket.addColorStop(0.82, "rgba(8,0,10,.97)");
+    socket.addColorStop(0.94, "rgba(6,0,10,.8)");
+    socket.addColorStop(1, "rgba(6,0,10,0)");
+    ectx.fillStyle = socket;
+    ectx.beginPath(); ectx.arc(cx, cy, r, 0, Math.PI * 2); ectx.fill();
+    ectx.save();
+    ectx.beginPath(); ectx.arc(cx, cy, r * 0.94, 0, Math.PI * 2); ectx.clip();
+    ectx.drawImage(eye.cut, eye.ox + gx, eye.oy + gy, eye.dw, eye.dh);
+    const rim = ectx.createRadialGradient(cx, cy, r * 0.5, cx, cy, r * 0.96);
+    rim.addColorStop(0, "rgba(0,0,0,0)");
+    rim.addColorStop(1, "rgba(3,0,8,.5)");
+    ectx.fillStyle = rim;
+    ectx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    const sy = cy - r + ((t * 120) % (r * 2));
+    const band = ectx.createLinearGradient(0, sy - 14, 0, sy + 14);
+    band.addColorStop(0, "rgba(77,255,157,0)");
+    band.addColorStop(0.5, "rgba(77,255,157,.25)");
+    band.addColorStop(1, "rgba(77,255,157,0)");
+    ectx.fillStyle = band;
+    ectx.fillRect(cx - r, sy - 14, r * 2, 28);
+    ectx.restore();
+    const g = r * 0.4;
+    const gl = ectx.createRadialGradient(cx - r * 0.3, cy - r * 0.34, 1, cx - r * 0.3, cy - r * 0.34, g);
+    gl.addColorStop(0, "rgba(255,255,255,.85)");
+    gl.addColorStop(0.5, "rgba(200,255,232,.28)");
+    gl.addColorStop(1, "rgba(200,255,232,0)");
+    ectx.fillStyle = gl;
+    ectx.beginPath(); ectx.arc(cx - r * 0.3, cy - r * 0.34, g, 0, Math.PI * 2); ectx.fill();
+    if (bp > 0.02) {
+      ectx.strokeStyle = `rgba(77,255,157,${(bp * 0.32).toFixed(3)})`;
+      ectx.lineWidth = 1 + bp * 3;
+      ectx.beginPath(); ectx.arc(cx, cy, r * (1.18 + 0.16 * (1 - bp)), 0, Math.PI * 2); ectx.stroke();
+    }
+  }
+  const c5 = { bubble: $("c5bubble"), line: $("c5line"), r1: $("c5r1"), r2: $("c5r2"), r3: $("c5r3"), drag: $("c5drag") };
+  function c5Draw(t) {
+    drawEye(t);
+    pop(c5.bubble, t, 0.5, 0.4);
+    if (t < 4.2) typeInto(c5.line, "you've been on this tab for forty-two minutes.", t, 0.7, 34, true);
+    else typeInto(c5.line, "i'm not judging. i'm narrating.", t, 4.35, 38, true);
+    reveal(c5.r1, t, 0.9, 0.5, 18);
+    reveal(c5.r2, t, 1.25, 0.5, 18);
+    reveal(c5.r3, t, 1.6, 0.5, 18);
+    const p = ramp(t, 7.6, 9.8);
+    c5.drag.style.opacity = String(p > 0 ? 0.85 : 0);
+    c5.drag.style.transform = `scaleX(${(p).toFixed(3)})`;
+    c5.drag.style.transformOrigin = "0 50%";
+    c5.drag.style.background = `linear-gradient(90deg, rgba(77,255,157,0), rgba(77,255,157,.85), rgba(255,79,216,0))`;
+  }
+
+  /* ---------------------------------------------------------------- c6 */
+  const c6 = {
+    copy: document.querySelector("#c6 .copy"), phone: $("c6phone"), notif: $("c6notif"),
+    m1: $("c6m1"), m2: $("c6m2"), m3: $("c6m3"), m4: $("c6m4"), wave: $("c6wave"), closed: $("c6closed"),
+  };
+  const c6Bars = [];
+  for (let i = 0; i < 34; i++) { const b = document.createElement("i"); c6.wave.appendChild(b); c6Bars.push(b); }
+  function c6Draw(t) {
+    reveal(c6.copy, t, 0.1, 0.6, 24);
+    const p = easeOut(ramp(t, 0, 0.85));
+    c6.phone.style.opacity = String(p);
+    c6.phone.style.transform = `translateY(${((1 - p) * 70).toFixed(1)}px) rotate(${(2.6 - 2.6 * p).toFixed(2)}deg)`;
+    pop(c6.m1, t, 0.5, 0.35);
+    pop(c6.m2, t, 1.5, 0.4);
+    pop(c6.m3, t, 3.3, 0.35);
+    pop(c6.m4, t, 4.5, 0.4);
+    c6Bars.forEach((b, i) => {
+      const env = Math.sin(Math.PI * (i / (c6Bars.length - 1)));
+      const amp = t > 0.6 && t < 2.4 ? 0.5 + 0.5 * Math.abs(Math.sin(t * 7.5 + i * 0.45)) : 0.16 + 0.1 * Math.abs(Math.sin(t * 2.2 + i * 0.3));
+      b.style.height = `${(3 + env * amp * 38).toFixed(1)}px`;
+      b.style.opacity = String(0.3 + env * 0.7);
+    });
+    const np = easeOut(ramp(t, 0.8, 1.3));
+    c6.notif.style.opacity = String(np);
+    c6.notif.style.transform = `translateY(${((1 - np) * -34).toFixed(1)}px)`;
+    reveal(c6.closed, t, 5.4, 0.6, 12);
+  }
+
+  /* ---------------------------------------------------------------- c7 */
+  const c7 = { query: $("c7query"), cur: $("c7cur"), c1: $("c7c1"), c2: $("c7c2"), c3: $("c7c3") };
+  function c7Draw(t) {
+    reveal(document.querySelector("#c7 .copy"), t, 0.1, 0.6, 24);
+    typeInto(c7.query, "youtube lofi", t, 0.9, 18, false);
+    c7.cur.style.opacity = String(Math.floor(t * 2) % 2 ? 1 : 0.15);
+    pop(c7.c1, t, 2.0, 0.4);
+    pop(c7.c2, t, 2.7, 0.4);
+    pop(c7.c3, t, 3.4, 0.4);
+    const hit = t > 2.2 && t < 6.5 ? 1 : 0;
+    c7.c1.style.borderColor = hit ? "rgba(255,79,216,.55)" : "rgba(77,255,157,.3)";
+    c7.c1.style.boxShadow = hit ? "0 0 26px rgba(255,79,216,.12)" : "none";
+  }
+
+  /* ---------------------------------------------------------------- c8 */
+  const c8 = {
+    date: $("c8date"), l1: $("c8l1"), l2: $("c8l2"), nns: $("c8nns"), g: $("c8g"),
+    c1: $("c8c1"), c2: $("c8c2"), c3: $("c8c3"), cal: $("c8cal"), count: $("c8count"), tick: $("c8tick"),
+  };
+  c8.tick.innerHTML = ('<span>NNN MODE</span><span>///</span><span>NO NUT NOVEMBER</span><span>///</span><span>100% GUARANTEE</span><span>///</span><span>NO CUMMING</span><span>///</span>').repeat(6);
+  (() => {
+    for (let i = 1; i <= 30; i++) {
+      const d = document.createElement("div");
+      d.className = "cell";
+      d.textContent = String(i).padStart(2, "0");
+      if (i === 1) d.classList.add("today");
+      c8.cal.appendChild(d);
+    }
+  })();
+  function c8Draw(t) {
+    reveal(c8.date, t, 0.05, 0.5, 18);
+    reveal(c8.l1, t, 0.18, 0.5, 30);
+    reveal(c8.l2, t, 0.3, 0.5, 30);
+    reveal(c8.nns, t, 0.62, 0.5, 22);
+    const gp = easeOut(ramp(t, 1.0, 1.4));
+    c8.g.style.opacity = String(gp);
+    c8.g.style.transform = `rotate(-1.6deg) scale(${(1.14 - 0.14 * gp + 0.014 * beat(ABS)).toFixed(3)})`;
+    reveal(c8.c1, t, 1.46, 0.45, 18);
+    reveal(c8.c2, t, 1.62, 0.45, 18);
+    reveal(c8.c3, t, 1.78, 0.45, 18);
+    c8.tick.style.transform = `translateX(${(-((t * 115) % 1420)).toFixed(0)}px)`;
+    const cells = c8.cal.children;
+    const b = beat(ABS);
+    for (let i = 1; i < cells.length; i++) {
+      const fl = b * (0.1 + 0.14 * hash(i * 7 + Math.floor(ABS * 5)));
+      cells[i].style.borderColor = `rgba(255,43,69,${(0.14 + fl).toFixed(3)})`;
+    }
+  }
+
+  /* ---------------------------------------------------------------- c9 */
+  function c9Draw(t) {
+    reveal(document.querySelector("#c9 .head"), t, 0.05, 0.6, 22);
+    const cards = document.querySelectorAll("#c9 .panel");
+    cards.forEach((el, i) => reveal(el, t, 0.4 + i * 0.18, 0.6, 30));
+    reveal(document.querySelector("#c9 .foot"), t, 1.6, 0.6, 14);
+  }
+
+  /* --------------------------------------------------------------- c10 */
+  const mkCtx = $("mkCanvas").getContext("2d");
+  const c10 = {
+    mk: document.querySelector("#c10 .mk"), get: $("c10get"), d1: $("c10d1"), d2: $("c10d2"),
+    url: $("c10url"), foot: $("c10foot"), sh1: $("c10sh1"), sh2: $("c10sh2"),
+  };
+  function drawMark() {
+    if (!eye.cut) return;
+    const cw = 800, ch = 536;
+    const k = Math.min(cw / eye.cut.width, ch / eye.cut.height) * 0.98;
+    const w = eye.cut.width * k, h = eye.cut.height * k;
+    mkCtx.clearRect(0, 0, cw, ch);
+    mkCtx.drawImage(eye.cut, (cw - w) / 2, (ch - h) / 2, w, h);
+  }
+  function c10Draw(t) {
+    drawMark();
+    const p = easeOut(ramp(t, 0.05, 0.7));
+    c10.mk.style.opacity = String(p);
+    c10.mk.style.transform = `scale(${(0.9 + p * 0.1 + 0.02 * beat(ABS)).toFixed(3)})`;
+    reveal(c10.get, t, 0.25, 0.6, 28);
+    reveal(c10.d1, t, 0.75, 0.5, 20);
+    reveal(c10.d2, t, 0.9, 0.5, 20);
+    reveal(c10.url, t, 1.25, 0.5, 16);
+    reveal(c10.foot, t, 1.45, 0.5, 12);
+    const b = beat(ABS);
+    const glow = 0.42 + 0.42 * b;
+    c10.d1.style.borderColor = `rgba(77,255,157,${glow.toFixed(3)})`;
+    c10.d2.style.borderColor = `rgba(77,255,157,${glow.toFixed(3)})`;
+    const sweep = (v) => -220 + (((v % 2.6) / 2.6) * 720);
+    c10.sh1.style.transform = `translateX(${sweep(t * 1.15).toFixed(0)}px) rotate(14deg)`;
+    c10.sh2.style.transform = `translateX(${sweep(t * 1.15 + 1.3).toFixed(0)}px) rotate(14deg)`;
+  }
+
+  /* ----------------------------------------------------------- vfx + cam */
+  let ABS = 0;
+  const stage = $("stage");
+  const fctx = $("fx").getContext("2d");
+  const sctx = $("sparks").getContext("2d");
+  const SPARKS = Array.from({ length: 96 }, (_, i) => ({
+    x: hash(i * 3 + 1), y: hash(i * 7 + 5), v: 14 + hash(i * 5 + 9) * 88,
+    s: 0.7 + hash(i * 11 + 3) * 2.4, ph: hash(i * 13 + 2) * 6.283,
+    c: ["77,255,157", "255,79,216", "234,246,255"][i % 3],
+  }));
+  function drawSparks(t) {
+    sctx.clearRect(0, 0, W, H);
+    const b = beat(t);
+    for (const p of SPARKS) {
+      const y = ((p.y * H - t * p.v) % H + H) % H;
+      const x = p.x * W + Math.sin(t * 0.5 + p.ph) * 46;
+      const a = (0.1 + 0.42 * Math.abs(Math.sin(t * 1.9 + p.ph))) * (0.6 + b * 0.8);
+      sctx.fillStyle = `rgba(${p.c},${a.toFixed(3)})`;
+      sctx.fillRect(x, y, p.s, p.s * 2.2);
+    }
+    for (const ti of IMPACTS) {
+      const d = t - ti;
+      if (d < 0 || d > 0.22) continue;
+      const k = 1 - d / 0.22;
+      for (let i = 0; i < 16; i++) {
+        const y = noise1(ti, 900 + i) * H;
+        const len = 80 + noise1(ti, 940 + i) * 420;
+        sctx.fillStyle = `rgba(234,246,255,${(k * 0.18).toFixed(3)})`;
+        sctx.fillRect(noise1(ti, 980 + i) * W, y, len, 1);
+      }
+    }
+  }
+  function drawFx(t) {
+    fctx.clearRect(0, 0, W, H);
+    const b = beat(t);
+    if (b > 0.03) {
+      const g = fctx.createRadialGradient(W / 2, H + 150, 60, W / 2, H + 150, 1150);
+      g.addColorStop(0, `rgba(77,255,157,${(b * 0.065).toFixed(3)})`);
+      g.addColorStop(1, "rgba(77,255,157,0)");
+      fctx.fillStyle = g;
+      fctx.fillRect(0, 0, W, H);
+    }
+    for (const ti of IMPACTS) {
+      const d = t - ti;
+      if (d < 0 || d > 0.85) continue;
+      const p = d / 0.85;
+      const r = 70 + p * 1000;
+      fctx.lineWidth = 2 + (1 - p) * 3;
+      fctx.strokeStyle = `rgba(77,255,157,${((1 - p) * 0.3).toFixed(3)})`;
+      fctx.beginPath(); fctx.arc(W * 0.5, H * 0.5, r, 0, Math.PI * 2); fctx.stroke();
+      fctx.strokeStyle = `rgba(255,79,216,${((1 - p) * 0.2).toFixed(3)})`;
+      fctx.beginPath(); fctx.arc(W * 0.5, H * 0.5, r * 0.74, 0, Math.PI * 2); fctx.stroke();
+    }
+    for (const ti of IMPACTS) {
+      const d = t - ti;
+      if (d < 0 || d > 0.26) continue;
+      const k = 1 - d / 0.26;
+      for (let i = 0; i < 5; i++) {
+        const y = Math.floor(noise1(ti * 2, 400 + i) * H);
+        const h = 2 + Math.floor(noise1(ti * 2, 500 + i) * 26);
+        const w = 140 + noise1(ti * 2, 600 + i) * 900;
+        const x = noise1(ti * 2, 700 + i) * (W - w);
+        fctx.fillStyle = i % 2 ? `rgba(255,79,216,${(0.14 * k).toFixed(3)})` : `rgba(43,107,255,${(0.14 * k).toFixed(3)})`;
+        fctx.fillRect(x, y, w, h);
+        fctx.fillStyle = `rgba(234,246,255,${(0.18 * k).toFixed(3)})`;
+        fctx.fillRect(x, y, w, 1);
+      }
+    }
+    const per = 6.2;
+    const ph = (t % per) / per;
+    if (ph < 0.5) {
+      const p = ph / 0.5;
+      const x = -1300 + p * 4200;
+      const lg = fctx.createLinearGradient(x - 300, 0, x + 300, 0);
+      lg.addColorStop(0, "rgba(77,255,157,0)");
+      lg.addColorStop(0.5, `rgba(77,255,157,${(0.075 * Math.sin(p * Math.PI)).toFixed(3)})`);
+      lg.addColorStop(1, "rgba(77,255,157,0)");
+      fctx.save();
+      fctx.translate(W / 2, H / 2);
+      fctx.rotate(-0.36);
+      fctx.fillStyle = lg;
+      fctx.fillRect(x - 320, -H, 640, H * 2);
+      fctx.restore();
+    }
+  }
+  function camera(t) {
+    let sc = CHAPTERS[0];
+    for (const s of CHAPTERS) if (t >= s.a) sc = s;
+    const p = clamp01((t - sc.a) / (sc.b - sc.a));
+    const since = t - sc.a;
+    const whip = sc.a > 0 && since < 0.2 ? 1 - since / 0.2 : 0;
+    stage.style.transform = `translate(${(Math.sin(t * 0.62) * 1.2).toFixed(2)}px, 0) scale(${(1.012 + 0.02 * p + whip * 0.02).toFixed(4)})`;
+    stage.style.filter = whip > 0.03 ? `blur(${(whip * 9).toFixed(1)}px)` : "none";
+  }
+
+  /* --------------------------------------------------------------- subs */
+  const subsEl = $("subs"), subsTx = $("subsTx"), subsEq = $("subsEq");
+  const EQ = [];
+  for (let i = 0; i < 6; i++) { const bar = document.createElement("i"); subsEq.appendChild(bar); EQ.push(bar); }
+  const subLines = LINES.map((v) => {
+    const line = document.createElement("span");
+    line.className = "line";
+    const spans = v.words.map((w, i) => {
+      const sp = document.createElement("span");
+      sp.className = "w" + (v.hit.includes(i) ? " hit" : "");
+      sp.textContent = w + (i < v.words.length - 1 ? " " : "");
+      line.appendChild(sp);
+      return sp;
+    });
+    subsTx.appendChild(line);
+    const weights = v.words.map((w) => w.length + 2.5);
+    const total = weights.reduce((a, b) => a + b, 0);
+    let acc = 0;
+    const at = weights.map((w) => { const t0 = v.a + 0.1 + (v.b - v.a - 0.4) * (acc / total); acc += w; return t0; });
+    return { ...v, line, spans, at };
+  });
+  function drawSubs(t) {
+    let active = null;
+    for (const v of subLines) {
+      const on = t >= v.a && t <= v.b;
+      v.line.classList.toggle("on", on);
+      if (on) active = v;
+    }
+    subsEl.style.display = active ? "flex" : "none";
+    if (!active) return;
+    active.spans.forEach((sp, i) => sp.classList.toggle("on", t >= active.at[i]));
+    EQ.forEach((bar, i) => {
+      const h = 5 + 17 * Math.abs(Math.sin(t * 12 + i * 1.1) * Math.cos(t * 5.3 + i * 0.7));
+      bar.style.height = `${h.toFixed(1)}px`;
+      bar.style.opacity = String(0.45 + 0.55 * Math.abs(Math.sin(t * 9 + i)));
+    });
+  }
+
+  /* --------------------------------------------------------------- seek */
+  const drawFns = { c1: c1Draw, c2: c2Draw, c3: c3Draw, c4: c4Draw, c5: c5Draw, c6: c6Draw, c7: c7Draw, c8: c8Draw, c9: c9Draw, c10: c10Draw };
+  window.seek = (t) => {
+    t = Math.max(0, Math.min(DURATION - 1e-4, Number(t) || 0));
+    ABS = t;
+    drawBg(t);
+    drawFx(t);
+    drawSparks(t);
+    drawHud(t);
+    camera(t);
+    drawSubs(t);
+    for (const sc of CHAPTERS) {
+      const el = $(sc.id);
+      const op = Math.min(ramp(t, sc.a, sc.a + 0.34), 1 - ramp(t, sc.b - 0.26, sc.b));
+      el.style.opacity = op.toFixed(3);
+      el.style.visibility = op > 0.002 ? "visible" : "hidden";
+      if (op > 0.002) drawFns[sc.id](t - sc.a);
+    }
+    return true;
+  };
+
+  window.AD_READY = false;
+  const img = new Image();
+  img.onload = () => { buildEye(img); window.AD_READY = true; window.seek(0); };
+  img.onerror = () => { window.AD_READY = "no-eye-art"; window.seek(0); };
+  img.src = "/public/assets/eye-spy.png";
+})();
+</script>
+</body>
+</html>

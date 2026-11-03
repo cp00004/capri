@@ -30,3 +30,16 @@ build-out*/
 
 # ad render output (frames, chrome profile, stills)
 ad/out/
+
+# voice cloning models + generated narration (too large for GitHub)
+ad/voice/checkpoints_v2/
+ad/voice/long/
+ad/voice/*.wav
+ad/voice/*.npy
+ad/voice/*.log
+ad/*.log
+
+# Android build output
+android/app/build/
+ad/voice/*.pth
+ad/voice/*.mp3
