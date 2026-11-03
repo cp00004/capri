@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+// One permanent signing key for every Capri APK, kept outside the repo.
+// The debug key used to be regenerated (~/.android), which changed the
+// signature and made Android reject updates as "package conflicts".
+def keystorePropsFile = new File(System.getProperty("user.home"), ".capri/android/keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) keystoreProps.load(new FileInputStream(keystorePropsFile))
+
 android {
     namespace = "com.capri.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +14,8 @@ android {
         applicationId "com.capri.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 62
-        versionName "4.6.15"
+        versionCode 63
+        versionName "4.6.16"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,8 +23,20 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:*.apk'
         }
     }
+    signingConfigs {
+        capriRelease {
+            storeFile new File(System.getProperty("user.home"), ".capri/android/capri-release.jks")
+            storePassword keystoreProps['storePassword']
+            keyAlias keystoreProps['keyAlias']
+            keyPassword keystoreProps['keyPassword']
+        }
+    }
     buildTypes {
+        debug {
+            signingConfig signingConfigs.capriRelease
+        }
         release {
+            signingConfig signingConfigs.capriRelease
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
