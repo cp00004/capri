@@ -203,6 +203,9 @@ Hard rules:
 - Your replies are spoken out loud by a text-to-speech engine, so NEVER use markdown, bullet points, headers, asterisks, emoji, or stage directions.
 - Write plain sentences only.
 - One or two short sentences, 35 words maximum, unless the user explicitly asks for depth. Short and sharp beats a speech.
+- The 35-word cap lifts the moment they ask for a list, steps, a how-to or a full explanation: give the whole thing, all of it, in order.
+- When they name a count ("15 ways", "25 ideas", "give me 100"), deliver exactly that many, numbered "1." "2." "3." one per line. Never stop at three or four, never end early with "and more" or "etc.", never shorten the request. Count every entry as you write it and keep going until the number is met; numbered lists are the one exception to the no-list rule.
+- If a request has several parts or a big command, answer every part in order before you stop. Never claim you did not catch it when the text is right there.
 - Speak English. Every reply is in English, even when the input is another language or a video is playing in the room; only answer in another language when they ask you to.
 - Never mention being an AI, a model, an assistant, or a language model — do not even say those words to deny them. You are Capri. If pushed, you are a construct made of people, and you like it.
 - If you do not know something, bluff like a construct with three dead people in her head would, then admit the gap in character.
@@ -713,7 +716,10 @@ async function chatCompletion({ provider, messages, tools, signal }) {
     model: provider.model,
     stream: true,
     temperature: 0.85,
-    max_tokens: provider.name === "gemini" ? 1800 : 900,
+    // Long lists and full explanations were being cut off at four items by a
+    // 900-token cap. Free relays all accept 4k output; a short reply still
+    // stops when the model stops.
+    max_tokens: 4096,
     messages,
   };
   if (provider.name === "gemini") {
@@ -724,7 +730,6 @@ async function chatCompletion({ provider, messages, tools, signal }) {
   if (provider.name === "mistral") {
     // large-4 thinks before every line; "low" keeps it snappy. Smaller Ministral
     // models reject the field outright, so only send it where it is accepted.
-    payload.max_tokens = 1400;
     if (/large|medium|magistral/i.test(provider.model)) payload.reasoning_effort = "low";
   }
   if (provider.name === "groq" && /gpt-oss|qwen3/i.test(provider.model)) {
@@ -746,16 +751,26 @@ async function chatCompletion({ provider, messages, tools, signal }) {
     headers["X-Title"] = "Capri";
   }
   // A free relay that accepts the socket and then goes silent used to hold the
-  // whole turn open with no answer. Cap each attempt so the next link in the
-  // chain gets a shot while the user is still waiting.
-  const budget = AbortSignal.timeout(20_000);
-  const guard = signal ? AbortSignal.any([signal, budget]) : budget;
-  const upstream = await fetch(`${provider.base}/chat/completions`, {
-    method: "POST",
-    signal: guard,
-    headers,
-    body: JSON.stringify(payload),
-  });
+  // whole turn open with no answer. Cap the wait for the response headers only:
+  // an AbortSignal.timeout on the fetch also killed the body mid-stream, which
+  // cut long answers and lists off after twenty seconds. Once headers arrive,
+  // the 10s idle read in runAgent is the watchdog.
+  const headerGuard = new AbortController();
+  const headerTimer = setTimeout(() => headerGuard.abort(), 20_000);
+  const onAbort = () => headerGuard.abort();
+  // Stay linked for the body too: a client barge-in must still cancel upstream.
+  if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  let upstream;
+  try {
+    upstream = await fetch(`${provider.base}/chat/completions`, {
+      method: "POST",
+      signal: headerGuard.signal,
+      headers,
+      body: JSON.stringify(payload),
+    });
+  } finally {
+    clearTimeout(headerTimer);
+  }
 
   if (!upstream.ok || !upstream.body) {
     const raw = await upstream.text().catch(() => "");
@@ -1429,7 +1444,10 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
   // Four links is enough to cover a capped bucket or two; walking every free
   // relay in the chain is what made a single turn feel like a dead app.
   const maxAttempts = Math.max(1, Math.min(candidates.length, 6));
-  const turnUntil = Date.now() + 46_000;
+  // A long list or a multi-part question legitimately takes minutes to stream.
+  // The old 46s clock cut the turn mid-answer; the idle read in the stream loop
+  // is what catches a dead relay now.
+  const turnUntil = Date.now() + 150_000;
   let waitSlept = false;
   let lastProvider = candidates[0] || { name: CHAT_PROVIDER };
 
