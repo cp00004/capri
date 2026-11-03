@@ -4903,41 +4903,29 @@ function initUpdates() {
     .then((res) => (res.ok ? res.json() : null))
     .then((feed) => {
       if (!feed?.version || !newerVersion(feed.version, APP_VERSION)) return;
+      const bridge = window.CapriDevice?.installUpdate && feed.apk ? window.CapriDevice : null;
       showUpdateScreen({
         kicker: `CAPRI v${feed.version} IS OUT`,
-        title: "NEW BUILD READY",
-        note: "Download the APK and install it over this one - your sign-in and memory stay.",
+        title: bridge ? "UPDATING CAPRI" : "NEW BUILD READY",
+        note: bridge
+          ? "Capri is fetching it now. Android asks once to allow installs; after that she updates herself."
+          : "Download the APK and install it over this one - your sign-in and memory stay.",
         percent: -1,
-        action: { label: "DOWNLOAD APK" },
+        action: bridge ? null : { label: "DOWNLOAD APK" },
       });
+      if (bridge) {
+        // No download button on Android: ask the shell once and it downloads,
+        // verifies and opens the installer on its own.
+        localStorage.setItem(`capri.apk.auto.${feed.version}`, "1");
+        const reply = String(bridge.installUpdate(feed.apk) || "");
+        if (reply && reply !== "ok") showNotice("Allow Capri to install apps, then tap update again.", null, null, 10000);
+        return;
+      }
       el.updateAction.onclick = () => {
         const url = feed.apk || feed.page || STORE_URL;
-        if (window.CapriDevice?.installUpdate && feed.apk) {
-          const reply = String(window.CapriDevice.installUpdate(feed.apk) || "");
-          showNotice(
-            reply === "ok"
-              ? "Downloading the update. Android will open the installer when it lands."
-              : "Allow Capri to install apps, then tap update again.",
-            null, null, 10000,
-          );
-        } else if (window.CapriDevice?.open) window.CapriDevice.open(url);
+        if (window.CapriDevice?.open) window.CapriDevice.open(url);
         else window.open(url, "_system");
       };
-      // The PC installs its own updates, so the phone does too: fetch the APK
-      // straight into the system installer, once per new version.
-      if (window.CapriDevice?.installUpdate && feed.apk) {
-        const seen = `capri.apk.auto.${feed.version}`;
-        if (!localStorage.getItem(seen)) {
-          localStorage.setItem(seen, "1");
-          showUpdateScreen({
-            kicker: `CAPRI v${feed.version} IS OUT`,
-            title: "UPDATING CAPRI",
-            note: "Downloading the new APK. Android will ask you to install it; your sign-in and memory stay.",
-            percent: -1,
-          });
-          window.CapriDevice.installUpdate(feed.apk);
-        }
-      }
     })
     .catch(() => { /* offline: try again next launch */ });
 }

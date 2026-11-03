@@ -106,6 +106,9 @@ public class MainActivity extends BridgeActivity {
 		requestRuntime(false);
 		NnnReceiver.schedule(this);
 		UpdateScheduler.schedule(this);
+		// Check right away instead of waiting for the first six-hour alarm, so a
+		// long-closed build notices it is stale the moment it opens.
+		new Thread(() -> UpdateChecker.check(this), "capri-update-check").start();
 	}
 
 	// Everything the phone has to hand over before she can actually watch: mic,
@@ -326,52 +329,21 @@ public class MainActivity extends BridgeActivity {
 		}
 
 		// APK updates land the same way the PC's do: the app fetches the build,
-		// then hands the system installer the package. No browser detour.
+		// checks it, then hands the system installer the package. No browser
+		// detour and no download button - the page only ever asks for the update.
 		@JavascriptInterface
 		public String installUpdate(String url) {
 			final String link = String.valueOf(url == null ? "" : url).trim();
 			if (!link.startsWith("https://")) return "err:url";
-			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !getPackageManager().canRequestPackageInstalls()) {
-				runOnUiThread(() -> {
-					try {
-						startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-								Uri.parse("package:" + getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-					} catch (Exception err) { /* no settings page */ }
-				});
-				Alerts.show(MainActivity.this, "Capri update", "Allow Capri to install apps, then tap update again.");
-				return "err:permission";
-			}
-			Alerts.show(MainActivity.this, "Capri update", "Downloading the new build...");
-			new Thread(() -> {
-				HttpURLConnection conn = null;
+			runOnUiThread(() -> {
 				try {
-					conn = (HttpURLConnection) new URL(link).openConnection();
-					conn.setConnectTimeout(15000);
-					conn.setReadTimeout(60000);
-					conn.setInstanceFollowRedirects(true);
-					if (conn.getResponseCode() != 200) throw new Exception("status " + conn.getResponseCode());
-					File out = new File(getCacheDir(), "capri-update.apk");
-					InputStream in = conn.getInputStream();
-					FileOutputStream os = new FileOutputStream(out);
-					byte[] buf = new byte[65536];
-					int n;
-					while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
-					os.close();
-					in.close();
-					Uri apk = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", out);
-					Intent it = new Intent(Intent.ACTION_VIEW)
-							.setDataAndType(apk, "application/vnd.android.package-archive")
-							.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-					runOnUiThread(() -> {
-						try { startActivity(it); }
-						catch (Exception err) { Alerts.show(MainActivity.this, "Capri update", "Could not open the installer."); }
-					});
+					startActivity(new Intent(MainActivity.this, UpdateInstallActivity.class)
+							.putExtra("apk", link)
+							.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
 				} catch (Exception err) {
-					Alerts.show(MainActivity.this, "Capri update", "Update download failed. Try once from the download panel.");
-				} finally {
-					if (conn != null) conn.disconnect();
+					Alerts.show(MainActivity.this, "Capri update", "Could not open the installer.");
 				}
-			}).start();
+			});
 			return "ok";
 		}
 	}

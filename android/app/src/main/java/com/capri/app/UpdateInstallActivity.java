@@ -17,6 +17,8 @@ public class UpdateInstallActivity extends Activity {
 		Intent intent = getIntent();
 		final String apk = intent.getStringExtra("apk");
 		final String version = intent.getStringExtra("version") == null ? "" : intent.getStringExtra("version");
+		final String sha = intent.getStringExtra("sha") == null ? "" : intent.getStringExtra("sha");
+		final long size = intent.getLongExtra("size", 0);
 		if (apk == null || !apk.startsWith("https://")) {
 			finish();
 			return;
@@ -35,7 +37,7 @@ public class UpdateInstallActivity extends Activity {
 
 		final android.content.Context app = getApplicationContext();
 		new Thread(() -> {
-			boolean ok = UpdateChecker.downloadAndInstall(app, apk, version);
+			boolean ok = UpdateChecker.downloadAndInstall(app, apk, version, sha, size);
 			if (!ok) {
 				UpdateChecker.notifyFailed(app, version.isEmpty() ? "the new build" : version);
 				runOnUiThread(() -> Toast.makeText(app, "Capri update download failed. It will retry automatically.", Toast.LENGTH_LONG).show());
