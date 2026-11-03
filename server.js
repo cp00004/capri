@@ -1681,7 +1681,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
     let wentQuiet = false;
     try {
       while (true) {
-        const { value, done } = await readChunk(reader, 10_000);
+        const { value, done } = await readChunk(reader, 20_000);
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         let idx;

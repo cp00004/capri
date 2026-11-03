@@ -3152,12 +3152,19 @@ async function respond(userText) {
 
   activeAbort = new AbortController();
   // Backstop: if nothing at all came back, stop pretending to think and ask
-  // for the line again instead of leaving the UI stuck on "thinking".
-  const watchdog = setTimeout(() => {
-    if (answered) return;
-    timedOut = true;
-    try { activeAbort?.abort(); } catch { /* already done */ }
-  }, 40_000);
+  // for the line again instead of leaving the UI stuck on "thinking". A long
+  // list can stream for minutes, so this is an inactivity clock that every
+  // server event re-arms, not a total time limit.
+  let watchdog = null;
+  const armWatchdog = () => {
+    clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      if (answered) return;
+      timedOut = true;
+      try { activeAbort?.abort(); } catch { /* already done */ }
+    }, 100_000);
+  };
+  armWatchdog();
 
   speech.stopped = false;
   speech.onDrain = () => {
@@ -3208,6 +3215,7 @@ async function respond(userText) {
 
           let evt;
           try { evt = JSON.parse(raw); } catch { continue; }
+          armWatchdog();
 
           if (evt.type === "delta" && evt.text) {
             answered = true;
