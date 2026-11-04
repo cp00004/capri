@@ -900,9 +900,11 @@ function createWindow() {
 
   win.on("minimize", () => syncEye());
   win.on("restore", () => syncEye());
-  // Closing the window is the moment the eye takes over, so a dismissal from
-  // an earlier session must not keep her away.
-  win.on("hide", () => { eyeDismissed = false; syncEye(); });
+  // Closing the window is the moment the eye takes over - unless the X on the
+  // eye dismissed her. Clearing the dismissal here is what brought her back
+  // after every close for someone who had just asked her to go away. The tray
+  // has an explicit "Show eye" for the way back.
+  win.on("hide", () => syncEye());
   win.on("show", () => syncEye());
 
   // Clicking away to the browser counts as stepping away too: the eye comes out
@@ -930,7 +932,9 @@ function createWindow() {
 // A frameless, always-on-top eye that appears when Capri is out of the way. It
 // follows the cursor, drags anywhere, and cuts in with a comment once you have
 // been parked on the same window long enough.
-const EYE_W = 300;
+// Wide enough that the drift and the drag scale never push the lashes past the
+// window edge, which is what used to clip her outline on Windows.
+const EYE_W = 320;
 const EYE_H = 292;
 let eyeWin = null;
 let eyeEnabled = true;
@@ -976,6 +980,25 @@ function eyeClamp(bounds, point) {
   return { x: Math.round(x), y: Math.round(y), width: EYE_W, height: EYE_H };
 }
 
+// Undocking, RDP, sleeping a display or changing resolution fires these. A spot
+// that was on screen a second ago can now be on a monitor that no longer exists,
+// which is how she ended up running with nothing visible anywhere.
+function rehomeEye() {
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  const [x, y] = eyeWin.getPosition();
+  const next = eyeClamp({ x, y });
+  if (next.x !== x || next.y !== y) {
+    eyeWin.setBounds(next);
+    writeEyeState({ x: next.x, y: next.y });
+  }
+  if (eyeWin.isVisible()) {
+    try { eyeWin.setAlwaysOnTop(true, "screen-saver"); eyeWin.moveTop(); } catch { /* old electron */ }
+  }
+}
+for (const ev of ["display-added", "display-removed", "display-metrics-changed"]) {
+  try { screen.on(ev, rehomeEye); } catch { /* older electron */ }
+}
+
 function createEye() {
   if (eyeWin && !eyeWin.isDestroyed()) return eyeWin;
   eyeWin = new BrowserWindow({
@@ -996,6 +1019,10 @@ function createEye() {
     show: false,
     title: "Capri",
     icon: EYE_ICON,
+    // A tool window is the only way to keep an always-on-top overlay out of the
+    // Windows task switcher; skipTaskbar alone still lists her in Alt+Tab.
+    type: "toolbar",
+    roundedCorners: false,
     webPreferences: {
       preload: path.join(__dirname, "eye-preload.cjs"),
       contextIsolation: true,
@@ -1008,7 +1035,8 @@ function createEye() {
   try { eyeWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true }); } catch { /* ignore */ }
   // Only the drawn eye and its buttons swallow a click. Everything else in the
   // window is see-through to whatever is underneath.
-  try { eyeWin.setIgnoreMouseEvents(true, { forward: true }); } catch { /* older electron */ }
+  resetEyeInput();
+  eyeIgnoreMouse(true);
   eyeWin.loadFile(path.join(__dirname, "eye.html")).catch((err) => logLine(`eye page failed: ${err.message}`));
   eyeWin.webContents.on("console-message", (_event, level, message) => {
     if (level >= 2) logLine(`eye console: ${message}`);
@@ -1039,14 +1067,36 @@ function createEye() {
 // Chromium drops the press (mousedown) on a window that cannot take focus, so a
 // non-focusable eye looks alive but can never be dragged and her buttons never
 // fire. She becomes focusable only while the pointer is actually on her.
+// Both flags are cached: the page re-asserts its hit verdict on a timer, and
+// re-toggling WS_EX_NOACTIVATE every second is what dropped clicks on Windows.
+let eyeFocusOn = null;
 function eyeFocusable(on) {
   if (!eyeWin || eyeWin.isDestroyed()) return;
-  if (on) {
+  const wanted = Boolean(on);
+  if (eyeFocusOn === wanted) return;
+  eyeFocusOn = wanted;
+  if (wanted) {
     try { eyeWin.setFocusable(true); } catch { /* older electron */ }
     return;
   }
   try { if (eyeWin.isFocused()) eyeWin.blur(); } catch { /* older electron */ }
   try { eyeWin.setFocusable(false); } catch { /* older electron */ }
+}
+
+let eyeIgnoreOn = null;
+function eyeIgnoreMouse(through) {
+  if (!eyeWin || eyeWin.isDestroyed()) return;
+  const wanted = Boolean(through);
+  if (eyeIgnoreOn === wanted) return;
+  eyeIgnoreOn = wanted;
+  try { eyeWin.setIgnoreMouseEvents(wanted, { forward: true }); } catch { /* older electron */ }
+}
+
+// hide/show can make Windows forget the topmost and no-activate bits, so the
+// cache is thrown away whenever she is put back on screen.
+function resetEyeInput() {
+  eyeFocusOn = null;
+  eyeIgnoreOn = null;
 }
 
 function showEye() {
@@ -1064,7 +1114,8 @@ function showEye() {
     return;
   }
   eye.setBounds(eyeBounds());
-  try { eye.setIgnoreMouseEvents(true, { forward: true }); } catch { /* older electron */ }
+  resetEyeInput();
+  eyeIgnoreMouse(true);
   // showInactive() does not restore the topmost band on Windows and the flag can
   // drop across a hide/show cycle, which buried her behind whatever was clicked
   // last. Re-assert it every time she comes back on screen.
@@ -1088,7 +1139,8 @@ function hideEye() {
   eyeFocusable(false);
   if (!eyeWin.isVisible()) { stopEyeTimers(); return; }
   eyeWin.hide();
-  try { eyeWin.setIgnoreMouseEvents(true, { forward: true }); } catch { /* older electron */ }
+  resetEyeInput();
+  eyeIgnoreMouse(true);
   stopEyeTimers();
   logLine("eye: hidden");
 }
@@ -2608,7 +2660,7 @@ function startEyeDrag() {
   // A fresh grab must find a window that takes clicks, whatever it was doing
   // before the last hide/show cycle.
   eyeFocusable(true);
-  try { eyeWin.setIgnoreMouseEvents(false, { forward: true }); } catch { /* older electron */ }
+  eyeIgnoreMouse(false);
   const point = screen.getCursorScreenPoint();
   const [x, y] = eyeWin.getPosition();
   eyeDrag = {
@@ -2671,7 +2723,7 @@ ipcMain.on("eye-click-through", (_event, ignore) => {
   if (!eyeWin || eyeWin.isDestroyed()) return;
   const through = Boolean(ignore);
   eyeFocusable(!through);
-  try { eyeWin.setIgnoreMouseEvents(through, { forward: true }); } catch { /* older electron */ }
+  eyeIgnoreMouse(through);
 });
 
 // Leave a glitch burst where she was, then set her down somewhere else.
@@ -2737,6 +2789,20 @@ function createTray() {
 
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: "Open Capri", click: showWindow },
+    { type:  "separator" },
+    // X hides the eye for good until something brings it back; without this the
+    // only way back was to turn Eye Spy off and on again in Settings.
+    { label: "Show eye", click: () => {
+      eyeDismissed = false;
+      if (!eyeEnabled) {
+        eyeEnabled = true;
+        writeEyeState({ enabled: true });
+        try { win?.webContents.send("capri-eye-set", true); } catch { /* window gone */ }
+      }
+      if (win && !win.isDestroyed() && win.isFocused()) hideEye();
+      else showEye();
+    } },
+    { label: "Hide eye", click: () => { eyeDismissed = true; hideEye(); } },
     { type:  "separator" },
     { label: "Quit",       click: quitApp },
   ]));

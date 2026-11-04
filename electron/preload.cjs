@@ -48,6 +48,11 @@ contextBridge.exposeInMainWorld("capriNative", {
   onEyeLive: (cb) => {
     if (typeof cb === "function") ipcRenderer.on("capri-eye-live", (_event, live) => cb(Boolean(live)));
   },
+  // The tray can switch Eye Spy back on; the page owns the setting, so it has
+  // to mirror the change or the toggle would lie until the next reload.
+  onEyeSet: (cb) => {
+    if (typeof cb === "function") ipcRenderer.on("capri-eye-set", (_event, on) => cb(Boolean(on)));
+  },
   onUpdate:   (cb) => {
     if (typeof cb !== "function") return;
     ipcRenderer.on("capri-update", (_event, data) => cb(data || {}));

@@ -480,8 +480,9 @@
 
     // A slow lissajous drift: she visibly floats up, down and around instead of
     // sitting still between gaze targets. Dragging pins her to the cursor.
+    // PINNED is a real pin: no wander at all, so the button does what it says.
     // Kept tighter than the iris travel so the glance stays the loudest motion.
-    const drift = state.dragging ? 0.2 : 1;
+    const drift = state.dragging ? 0.2 : state.locked ? 0 : 1;
     const driftX = (Math.sin(now * 0.00092) * 5 + Math.sin(now * 0.00041 + 1.7) * 2.5) * drift;
     const driftY = (Math.cos(now * 0.00113) * 6 + Math.cos(now * 0.00037 + 0.9) * 3) * drift;
 
@@ -811,13 +812,47 @@
 
   // One context for the eye, resumed the moment it is made: a parked context
   // hands the analyser flat silence, which reads as a room that never speaks.
+  // A Windows audio device change (headset unplugged, output disabled, driver
+  // reset) can interrupt it; it is rebuilt instead of staying deaf for good.
   let eyeCtx = null;
   function eyeAudioCtx() {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return null;
-    if (!eyeCtx || eyeCtx.state === "closed") eyeCtx = new Ctx();
-    if (eyeCtx.state === "suspended") eyeCtx.resume().catch(() => {});
+    if (!eyeCtx || eyeCtx.state === "closed") {
+      try { eyeCtx = new Ctx(); } catch { eyeCtx = null; return null; }
+      const mine = eyeCtx;
+      mine.addEventListener?.("statechange", () => {
+        if (eyeCtx !== mine) return;
+        if (mine.state === "closed") { eyeCtx = null; return; }
+        if (mine.state === "suspended" || mine.state === "interrupted") {
+          setTimeout(() => { if (eyeCtx === mine) mine.resume().catch(() => {}); }, 250);
+        }
+      });
+    }
+    if (eyeCtx.state !== "running") eyeCtx.resume().catch(() => {});
     return eyeCtx;
+  }
+
+  // The ear's analyser is bound to one context for the life of the mic stream.
+  // If that context closes under it, every reading is zero and she never hears
+  // the wake word again, so rebuild the meter on the live stream.
+  let earRebuiltAt = 0;
+  function healEarMeter() {
+    if (!wakeRec.stream || !wakeRec.on) return;
+    if (wakeRec.ctx && wakeRec.ctx.state !== "closed") return;
+    const now = performance.now();
+    if (now - earRebuiltAt < 4000) return;
+    earRebuiltAt = now;
+    try {
+      const ctx = eyeAudioCtx();
+      if (!ctx) return;
+      const src = ctx.createMediaStreamSource(wakeRec.stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      src.connect(analyser);
+      wakeRec.ctx = ctx;
+      wakeRec.analyser = analyser;
+    } catch { wakeRec.analyser = wakeRec.analyser || null; }
   }
 
   function micApi() {
@@ -1001,6 +1036,7 @@
     if (talk.active || wakeRec.busy) { if (wakeRec.speaking) stopWakeChunk(); return; }
     const now = performance.now();
     if (now < wakeRec.mutedUntil) { if (wakeRec.speaking) stopWakeChunk(); return; }
+    healEarMeter();
     const rms = wakeRms();
     if (!wakeRec.speaking) {
       if (rms > WAKE_RMS && now > wakeRec.cooldown) beginWakeChunk();
