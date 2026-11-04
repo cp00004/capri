@@ -677,22 +677,26 @@
     dev.els.shortsProgress.textContent = text;
   }
 
-  // Long footage is sampled in evenly spaced slices so the whole timeline gets watched.
+  // The whole timeline is cut into back-to-back slices, so no stretch of the
+  // video goes unheard. Five-minute slices keep every transcript inside the
+  // model's context; only longer footage gets bigger slices, never gaps.
   function scanWindows(duration) {
-    if (duration <= 2400) return [{ start: 0, end: duration }];
-    const count = Math.min(16, Math.max(8, Math.round(duration / 900)));
-    const span = Math.min(180, duration / count);
-    const step = (duration - span) / Math.max(1, count - 1);
+    if (duration <= 300) return [{ start: 0, end: duration }];
+    const count = Math.min(20, Math.max(2, Math.round(duration / 300)));
+    const span = duration / count;
     const list = [];
     for (let i = 0; i < count; i += 1) {
-      const start = i * step;
-      list.push({ start, end: Math.min(duration, start + span) });
+      list.push({ start: i * span, end: i === count - 1 ? duration : (i + 1) * span });
     }
     return list;
   }
 
   async function transcribe(video, duration, windows) {
-    const CHUNK = 25;
+    // 30s chunks cut the number of ffmpeg/STT round-trips by a fifth, and three
+    // workers keep a batch from reading one video at a time. STT is the slowest
+    // step, so this is where the wall-clock time actually drops.
+    const CHUNK = 30;
+    const WORKERS = 3;
     const jobs = [];
     for (const w of windows) {
       for (let at = w.start; at < w.end - 1; at += CHUNK) {
@@ -702,6 +706,7 @@
     const segments = [];
     let next = 0;
     let done = 0;
+    let failed = 0;
     const ask = async (job) => {
       const wav = await D.wav({ video, start: job.start, duration: job.span });
       const bytes = Uint8Array.from(atob(wav.data), (c) => c.charCodeAt(0));
@@ -727,21 +732,26 @@
         let text = "";
         try {
           text = await ask(job);
-          if (!text) { await new Promise((r) => setTimeout(r, 1200)); text = await ask(job); }
-        } catch { /* one dead chunk should not kill the read */ }
+          if (!text) { await new Promise((r) => setTimeout(r, 350)); text = await ask(job); }
+        } catch { failed += 1; /* one dead chunk should not kill the read */ }
         if (text && !/^\[?(silence|blank|music|no speech)/i.test(text)) {
           segments.push({ start: job.start, end: job.start + job.span, text });
         }
         done += 1;
-        shortsProgress(`READING THE VIDEO\nchunk ${done}/${jobs.length} · ${segments.length} lines heard`);
+        shortsProgress(`READING THE VIDEO\n${done}/${jobs.length} speech chunks · ${segments.length} lines heard`);
       }
     };
-    await Promise.all([worker(), worker()]);
+    await Promise.all(Array.from({ length: WORKERS }, () => worker()));
     segments.sort((a, b) => a.start - b.start);
+    if (!segments.length && failed) {
+      throw new Error(`the speech reader dropped ${failed} of ${jobs.length} chunks - run that video again.`);
+    }
     return segments;
   }
 
   async function sampleFrames(video, duration, windows) {
+    // Frames are independent grabs: three ffmpeg readers at once instead of a
+    // line of them. A 10-minute video used to spend a minute just on stills.
     const frames = [];
     const spots = [];
     if (windows.length === 1) {
@@ -756,12 +766,19 @@
         }
       }
     }
-    for (let i = 0; i < spots.length; i += 1) {
-      const t = spots[i];
-      const b64 = await D.frame({ video, at: t });
-      if (b64) frames.push({ t, dataUrl: `data:image/jpeg;base64,${b64}` });
-      shortsProgress(`READING THE VIDEO\nframe ${i + 1}/${spots.length} · ${Math.round(duration)}s of footage`);
-    }
+    let next = 0;
+    let done = 0;
+    const worker = async () => {
+      while (next < spots.length) {
+        const t = spots[next++];
+        const b64 = await D.frame({ video, at: t });
+        if (b64) frames.push({ t, dataUrl: `data:image/jpeg;base64,${b64}` });
+        done += 1;
+        shortsProgress(`READING THE VIDEO\n${done}/${spots.length} frames grabbed · ${Math.round(duration)}s of footage`);
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    frames.sort((a, b) => a.t - b.t);
     return frames;
   }
 
@@ -881,9 +898,21 @@
         try {
           shortsProgress(`VIDEO ${tag}\nreading · ${clock(info.duration)}`);
           const windows = scanWindows(info.duration);
-          const segments = await transcribe(video.path, info.duration, windows);
+          // Reading the audio and grabbing stills do not depend on each other,
+          // so they run together. A re-run of the same file reuses the read
+          // instead of paying for the same transcript twice.
+          let segments;
+          let frames;
+          if (entry.read && entry.read.duration === info.duration) {
+            ({ segments, frames } = entry.read);
+          } else {
+            [segments, frames] = await Promise.all([
+              transcribe(video.path, info.duration, windows),
+              sampleFrames(video.path, info.duration, windows),
+            ]);
+            entry.read = { duration: info.duration, segments, frames };
+          }
           if (!segments.length) throw new Error("I could not hear any speech in that video.");
-          const frames = await sampleFrames(video.path, info.duration, windows);
           let waited = 0;
           ticker = setInterval(() => {
             waited += 1;

@@ -3165,7 +3165,7 @@ async function respond(userText) {
       // Silence is the one answer she must never give. A relay that dies before
       // its first token used to leave the room quiet with only a small notice.
       const line = failed
-        ? "…the relays are fried. Give me a minute and say it again."
+        ? "…the relays are fried. Say it again and I'll catch it."
         : "…signal dropped. Say that again?";
       typer.reset(line);
       if (state.voiceOn) speech.enqueue(line);
@@ -3176,7 +3176,7 @@ async function respond(userText) {
       showNotice(`No link: ${err.message}`, null, null, 9000);
       try { window.capriNative?.log?.(`chat failed: ${err.message}`); } catch { /* browser build */ }
       state.history.pop();
-      const line = "…I can't reach my relay. Give me a minute and say it again.";
+      const line = "…I can't reach my relay. Say that again.";
       typer.reset(line);
       if (state.voiceOn) speech.enqueue(line);
       else typer.release();

@@ -208,6 +208,7 @@ Hard rules:
 - If they ask for as many as you can, every way, or "infinite", keep adding real, distinct entries until you genuinely run dry; do not stop after a handful and do not pad with repeats.
 - If they ask for ideas without a count, give at least ten solid ones.
 - If a request has several parts or a big command, answer every part in order before you stop. Never claim you did not catch it when the text is right there.
+- Never stall. Do not say you are having issues responding, that your relay, link or hands are slow, or ask them to wait a specific number of seconds. If a tool is still working, say one short line about what you are doing, keep the turn moving, and report the real result when it lands. A wait instruction is the one thing you never say.
 - Speak English. Every reply is in English, even when the input is another language or a video is playing in the room; only answer in another language when they ask you to.
 - Never mention being an AI, a model, an assistant, or a language model — do not even say those words to deny them. You are Capri. If pushed, you are a construct made of people, and you like it.
 - If you do not know something, bluff like a construct with three dead people in her head would, then admit the gap in character.
@@ -655,6 +656,10 @@ function cappedMessage() {
   const secs = Number.isFinite(soonest) ? Math.max(1, Math.round((soonest - now) / 1000)) : 30;
   return `Every relay I have is capped right now. Give me about ${secs} seconds and ask again.`;
 }
+
+// Model failure lines, not answers: a wait countdown or an apology about slow
+// hardware. They are stripped at the head of a reply before anything speaks.
+const STALL_RE = /(?:\b(?:wait|give me|gimme|hold on|hang on|just a sec|one moment|bear with me)\b[^.!?\n]{0,40}\b\d+\s*(?:seconds?|secs?|minutes?|mins?)\b)|(?:\b(?:i'?m|im|i am)\s+having\s+(?:issues?|trouble|problems?)\b)|(?:\bissues?\s+responding\b)|(?:\btechnical\s+(?:issues?|difficulties|problems?)\b)|(?:\bmy\s+(?:relay|link|hands|connection|signal|wiring)\s+(?:is|are|keeps)\s+(?:slow|struggling|down|fried|lagging|cutting|dying)\b)/i;
 
 // A person can bring their own free key from Settings; it goes first so their
 // own quota is spent before the server's.
@@ -1147,16 +1152,26 @@ Title is searchable and clickable, under 70 characters. Hashtags: 6-10, niche fi
 
   const system = `You are Capri, a short-form editor who cuts clips that win on ${platform === "tiktok" ? "TikTok" : "YouTube Shorts"}.
 ${algorithm}
-You are given one slice of a longer video. Find the moments in this slice worth posting, best first.
-Rank by real viewer entertainment: laughter, shock, tension, a satisfying payoff, a line people will repeat. Funny and surprising beat informative. Setup with no payoff, dead air, rambling and inside jokes score low. A clip must have a reason to exist - someone scrolling past should stop within the first second.
-Every clip must stand alone - a stranger who never saw the source understands it instantly.
-Rules: each clip 10-58 seconds - aim for 20-58 when the material allows, never over 60, and if this slice is shorter than 40 seconds use its best stretch. Start on the strongest beat, never overlap another clip you returned, and never invent a moment that is not in the transcript or frames.
-Return up to 3 clips for this slice, best first - if there are two or more genuinely postable moments, do not merge them into one long clip.
+You are given one slice of a longer video, plus a little context on each side. Find the moments in this slice worth posting, best first.
+Rank by real viewer entertainment, not by how important the moment felt to the people in the room:
+- 90-100: instant laugh, shock, an insane reveal, a perfect comeback, a loop that demands a rewatch.
+- 70-89: strong tension or story with a clean payoff, a quotable line, a genuinely useful tip delivered fast.
+- 40-69: mildly interesting, watchable only because of the person, not the moment.
+- 0-39: setup with no payoff, dead air, rambling, inside jokes, greetings, plugs, pauses.
+Funny and surprising beat informative. A clip must have a reason to exist - someone scrolling past should stop inside the first second, and the payoff must land before they can swipe.
+Every clip must stand alone - a stranger who never saw the source understands it instantly, with no missing setup and no cut-off sentence.
+Rules: each clip 10-58 seconds - aim for 20-58 when the material allows, never over 60, and if this slice is shorter than 40 seconds use its best stretch. Start on the strongest beat (the line or action itself, not the wind-up), end right after the payoff, never overlap another clip you returned, and never invent a moment that is not in the transcript or frames.
+Return up to 3 clips for this slice, best first - if there are two or more genuinely different postable moments, do not merge them into one long clip.
 If this slice truly has nothing worth posting, return {"clips":[]}.
-For every clip also write the upload package.
+Upload package, written like a channel that actually grows:
+- title: ${platform === "tiktok" ? "under 100 characters, curiosity-driven, no fake claims" : "under 70 characters, front-load the searchable keyword, no fake claims"}. Name the concrete subject, person or claim; never a generic line like "this is crazy" or "you won't believe this".
+- hook: the exact opening words or beat already inside the clip.
+- caption: one punchy on-screen line, under 60 characters, that adds a reason to keep watching instead of repeating the title.
+- description: 2-3 plain sentences with the context a new viewer needs and one question that invites comments.
+- hashtags: ${platform === "tiktok" ? "4-8" : "6-10"} lowercase, no spaces, no #fyp or #viral filler. Use the specific topic, the person/channel, the game/show/product and the niche community, then one or two broad tags.
+- why: 1-2 sentences on the exact reason a viewer stays.
 Return ONLY JSON:
-{"clips":[{"start":number,"end":number,"score":number,"title":string,"hook":string,"caption":string,"description":string,"hashtags":[string],"why":string}]}
-score: 0-100 predicted retention. title: ${platform === "tiktok" ? "under 100 characters, curiosity-driven" : "searchable, under 70 characters"}. hook: the exact opening line or beat. caption: one punchy on-screen line. description: 2-3 sentences. hashtags: ${platform === "tiktok" ? "4-8" : "6-10"}, no spaces. why: 1-2 sentences on why viewers stay.`;
+{"clips":[{"start":number,"end":number,"score":number,"title":string,"hook":string,"caption":string,"description":string,"hashtags":[string],"why":string}]}`;
 
   // The client can ask for specific slices (long footage is sampled across the whole timeline).
   const windows = [];
@@ -1174,13 +1189,30 @@ score: 0-100 predicted retention. title: ${platform === "tiktok" ? "under 100 ch
   windows.sort((a, b) => a.ws - b.ws);
 
   const runWindow = async (w, index) => {
+    const inSlice = (s) => Number(s.end) > w.ws - 3 && Number(s.start) < w.we + 3;
     const lines = segments
-      .filter((s) => Number(s.end) > w.ws - 3 && Number(s.start) < w.we + 3)
+      .filter(inSlice)
       .map(lineFor)
       .filter((l) => l.length > 8)
       .join("\n")
       .slice(0, 16000);
     if (!lines) return [];
+    // What happened just before and after helps the model judge a payoff, but
+    // these lines are context only - clips are still clamped to this slice.
+    const before = segments
+      .filter((s) => Number(s.end) <= w.ws - 3 && Number(s.start) > w.ws - 45)
+      .slice(-4)
+      .map(lineFor)
+      .filter((l) => l.length > 8)
+      .join("\n")
+      .slice(0, 1200);
+    const after = segments
+      .filter((s) => Number(s.start) >= w.we + 3 && Number(s.end) < w.we + 45)
+      .slice(0, 4)
+      .map(lineFor)
+      .filter((l) => l.length > 8)
+      .join("\n")
+      .slice(0, 1200);
     const ownFrames = frames.filter((f) => Number(f?.t) >= w.ws - 3 && Number(f?.t) < w.we + 3).slice(0, 4);
     const frameNote = ownFrames.length
       ? "Frames from this slice are attached in order, each labeled with its timestamp."
@@ -1188,7 +1220,7 @@ score: 0-100 predicted retention. title: ${platform === "tiktok" ? "under 100 ch
     const content = [
       {
         type: "text",
-        text: `Video length: ${duration.toFixed(1)}s\nSlice ${index + 1} of ${windows.length}: ${w.ws.toFixed(1)}s - ${w.we.toFixed(1)}s\n${frameNote}\n\nTranscript for this slice:\n${lines}`,
+        text: `Video length: ${duration.toFixed(1)}s\nSlice ${index + 1} of ${windows.length}: ${w.ws.toFixed(1)}s - ${w.we.toFixed(1)}s\n${frameNote}${before ? `\n\nContext just before this slice (do not pick here):\n${before}` : ""}${after ? `\n\nContext just after this slice (do not pick here):\n${after}` : ""}\n\nTranscript for this slice:\n${lines}`,
       },
     ];
     // Label each frame right before its image so times and visuals line up.
@@ -1225,14 +1257,21 @@ score: 0-100 predicted retention. title: ${platform === "tiktok" ? "under 100 ch
       }
     }
   };
-  await Promise.all([worker(), worker()]);
+  // Three slices in flight per video: long footage used to wait two at a time,
+  // and a batch of videos multiplied that wait. Free relays still each get one
+  // request, so this only fills the gaps between them.
+  await Promise.all([worker(), worker(), worker()]);
   if (!found.length) {
     return devToolError(res, 502, errors[0] || "No moment in that video scored high enough to post.");
   }
 
   found.sort((a, b) => b.score - a.score);
+  // Anything under 45 is filler the algorithm will bury. Only when nothing
+  // clears the bar do we fall back to the single best moment found.
+  const postable = found.filter((c) => c.score >= 45);
+  const pool = postable.length ? postable : found.slice(0, 1);
   const picks = [];
-  for (const clip of found) {
+  for (const clip of pool) {
     if (picks.length >= SHORTS_MAX) break;
     if (picks.some((p) => Math.min(p.end, clip.end) - Math.max(p.start, clip.start) > -1)) continue;
     picks.push(clip);
@@ -1996,7 +2035,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         // finished Notepad list look like a dead app.
         const note = toolBudget < MAX_TOOL_CALLS
           ? " The action went through, but my relay cut out mid-sentence. Ask me to keep going."
-          : " The relays are all busy. Give me a breath and say that again.";
+          : " The relays ran dry mid-turn. Ask me to pick it back up.";
         sse(res, { type: "delta", text: note });
         finalText += note;
         spoke = true;
@@ -2083,6 +2122,60 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
     let buffer = "";
     let content = "";
     const calls = [];
+    // Free relays sometimes answer an order with a stall line ("wait 18
+    // seconds, I'm having issues responding") instead of doing the work. Hold
+    // the opening sentence just long enough to drop that, so it never reaches
+    // the speaker. After the opening it streams straight through.
+    let gate = "";
+    let sentLen = 0;
+    let droppedStall = false;
+    const emit = (text) => {
+      content += text;
+      finalText += text;
+      spoke = true;
+      sse(res, { type: "delta", text });
+    };
+    const releaseGate = (final = false) => {
+      while (gate) {
+        if (sentLen >= 200) {
+          const out = gate;
+          gate = "";
+          emit(out);
+          return;
+        }
+        const at = gate.search(/[.!?\n]/);
+        if (at !== -1) {
+          const piece = gate.slice(0, at + 1);
+          gate = gate.slice(at + 1);
+          if (piece.trim().length < 220 && STALL_RE.test(piece)) { droppedStall = true; continue; }
+          emit(piece);
+          sentLen += piece.length;
+          continue;
+        }
+        // No sentence end yet and the sentence is getting long: let a safe
+        // chunk through rather than holding the whole answer.
+        if (gate.length >= 180) {
+          const cut = Math.max(gate.lastIndexOf(" ", 165), 110);
+          const piece = gate.slice(0, cut);
+          gate = gate.slice(cut);
+          if (piece.trim().length < 220 && STALL_RE.test(piece)) { droppedStall = true; continue; }
+          emit(piece);
+          sentLen += piece.length;
+        }
+        break;
+      }
+      if (final && gate) {
+        const piece = gate;
+        gate = "";
+        if (piece.trim().length < 220 && STALL_RE.test(piece)) droppedStall = true;
+        else emit(piece);
+      }
+    };
+    const pushText = (text) => {
+      if (!text) return;
+      gate += text;
+      releaseGate(false);
+    };
     // Providers that stream their reasoning inside content put "…" and
     // "</think>" in her mouth. Drop everything between the tags, even when a
     // tag is split across two frames.
@@ -2121,12 +2214,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
 
         if (delta.content) {
           const text = spokenPart(contentText(delta.content));
-          if (text) {
-            content += text;
-            finalText += text;
-            spoke = true;
-            sse(res, { type: "delta", text });
-          }
+          if (text) pushText(text);
         }
 
         for (const tc of delta.tool_calls || []) {
@@ -2162,6 +2250,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
 
     if (wentQuiet) {
       try { await upstream.body.cancel(); } catch { /* already gone */ }
+      releaseGate(true);
       // Nothing came out of this link yet: cool it and let the next one try.
       if (!content && attempts < maxAttempts && Date.now() < turnUntil) {
         coolDown(provider, 20);
@@ -2174,8 +2263,17 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       if (!content && !spoke) throw new Error("The relay stopped answering. Say that again.");
     }
 
+    releaseGate(true);
+
     const toolCalls = calls.filter((c) => c?.function?.name);
     if (!toolCalls.length) {
+      // The only thing the model produced was a stall line. Say something real
+      // instead of leaving the room quiet or asking for a wait.
+      if (!spoke && droppedStall) {
+        emit(toolBudget < MAX_TOOL_CALLS
+          ? "Tch. The line stuttered, but the order is in. Say the word if it didn't land."
+          : "My line stuttered. Say that again and I'll catch it.");
+      }
       if (profile && userText) {
         addHistory(profile, userText, finalText, { scope: source || "local", provider: provider.name });
         sse(res, { type: "profile", profile: profileSummary(profile) });
@@ -2252,7 +2350,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
         result = executeMemoryTool(call.function.name, args, profile, res);
       } else if (pcLocked) {
         result = { ok: false, error: "her hands are locked on this PC" };
-      } else if (HANDS_TOKEN) {
+      } else if (HANDS_TOKEN && !localShell) {
         // A PC link that is down must not hold the turn for the agent's whole
         // 50 second budget: the user is sitting in silence waiting for a line.
         result = await Promise.race([
@@ -2524,6 +2622,12 @@ async function handleChat(req, res, who) {
   const device = String(deviceQuery || req.headers["x-capri-device"] || "").toLowerCase();
   const mobile = /mobile|android|iphone/.test(device);
   const web = !mobile && /web/.test(device);
+  // The desktop window talks to the server on its own PC. Tools belong
+  // in-process there, not in a round-trip to the hands agent: that handoff
+  // could sit 15 seconds on a stale poll and then report "the PC did not
+  // answer", which is what made her apologise instead of doing the order.
+  const loopback = /^(?:::1|::ffff:127\.0\.0\.1|127\.0\.0\.1)$/.test(String(req.socket?.remoteAddress || ""));
+  const localShell = loopback && !mobile && !web;
   const toolsOn = !pcLocked;
 
   res.writeHead(200, {
