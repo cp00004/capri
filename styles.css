@@ -1100,3 +1100,175 @@ body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 
 }
 .vault-text { margin: 0; font-size: 13px; line-height: 1.45; color: var(--white); }
 .vault-item .pill { align-self: start; }
+
+/* ============================================================
+   DEVELOPER MODE - hidden workspace. Voice only.
+   ============================================================ */
+.dev-screen {
+  position: fixed; inset: 0; z-index: 1300;
+  display: flex; flex-direction: column;
+  background:
+    radial-gradient(1200px 600px at 75% -10%, rgba(255, 11, 82, 0.13), transparent 60%),
+    radial-gradient(900px 500px at 0% 110%, rgba(109, 255, 190, 0.07), transparent 55%),
+    #05010a;
+  color: var(--ink); font-family: var(--font);
+}
+.dev-screen::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0 1px, transparent 1px 3px);
+  opacity: 0.35;
+}
+.dev-screen > * { position: relative; z-index: 1; }
+.dev-top {
+  display: flex; align-items: center; gap: 14px; height: 48px; padding: 0 14px;
+  border-bottom: 1px solid var(--line-2); background: rgba(10, 2, 16, 0.92);
+  backdrop-filter: blur(8px);
+}
+.dev-brand {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; letter-spacing: 2px; font-weight: 700; white-space: nowrap;
+}
+.dev-brand b { color: var(--pink); font-weight: 700; }
+.dev-brand em {
+  margin-left: 10px; font-style: normal; font-family: var(--mono); font-size: 11px;
+  letter-spacing: 0.4px; color: var(--ink-faint); text-transform: none;
+  max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.dev-pulse {
+  width: 8px; height: 8px; background: var(--mint); border-radius: 50%;
+  box-shadow: 0 0 10px var(--mint); animation: devPulse 2.4s ease-in-out infinite;
+}
+@keyframes devPulse { 50% { opacity: 0.25; } }
+.dev-top-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.dev-btn {
+  font-family: var(--font); font-weight: 700; font-size: 11px; letter-spacing: 1.4px;
+  color: var(--white); background: rgba(255,255,255,0.03);
+  border: 1px solid var(--line-2); border-radius: 3px; padding: 7px 12px; cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.dev-btn:hover { border-color: var(--pink); color: #fff; background: rgba(255, 11, 82, 0.12); }
+.dev-btn.accent { border-color: var(--pink); background: rgba(255, 11, 82, 0.16); }
+.dev-btn.accent:hover { background: rgba(255, 11, 82, 0.3); }
+.dev-btn.ghost { border-color: transparent; background: transparent; font-size: 16px; padding: 2px 9px; }
+.dev-btn.ghost:hover { color: var(--pink); background: transparent; }
+.dev-btn.wide { width: 100%; margin-top: 8px; }
+.dev-btn:disabled { opacity: 0.35; cursor: default; }
+.dev-body { flex: 1; display: flex; min-height: 0; }
+.dev-rail {
+  width: 272px; min-width: 272px; display: flex; flex-direction: column;
+  border-right: 1px solid var(--line); background: rgba(9, 1, 14, 0.72);
+}
+.dev-tabs, .dev-viewtabs { display: flex; border-bottom: 1px solid var(--line); }
+.dev-tab, .dev-viewtab {
+  flex: 1; font-family: var(--font); font-weight: 700; font-size: 10.5px; letter-spacing: 1.6px;
+  color: var(--ink-faint); background: transparent; border: 0; padding: 11px 4px; cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.dev-tab.active, .dev-viewtab.active { color: var(--white); border-bottom-color: var(--pink); }
+.dev-viewtabs { justify-content: flex-start; background: rgba(10,2,16,0.55); }
+.dev-viewtab { flex: 0 0 auto; padding: 10px 20px; }
+.dev-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.dev-tree { flex: 1; overflow: auto; padding: 8px 6px; font-family: var(--mono); font-size: 12px; }
+.dev-tree-row {
+  display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 2px;
+  cursor: pointer; color: var(--ink-dim); white-space: nowrap;
+}
+.dev-tree-row:hover { background: rgba(255, 11, 82, 0.09); color: var(--white); }
+.dev-tree-row.active { background: rgba(255, 11, 82, 0.16); color: var(--white); }
+.dev-tree-row .dev-caret { width: 9px; color: var(--ink-faint); }
+.dev-tree-row .dev-size { margin-left: auto; color: var(--ink-faint); font-size: 10px; }
+.dev-tree-row.dir { color: var(--mint); }
+.dev-empty, .dev-hint { color: var(--ink-faint); font-family: var(--mono); font-size: 11px; line-height: 1.6; padding: 8px 10px; }
+.dev-rail-actions { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--line); }
+.dev-mini {
+  flex: 1; font-family: var(--mono); font-size: 10px; letter-spacing: 0.6px;
+  color: var(--ink-dim); background: transparent; border: 1px solid var(--line-2);
+  border-radius: 2px; padding: 5px 4px; cursor: pointer;
+}
+.dev-mini:hover { color: var(--white); border-color: var(--pink); }
+.dev-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.dev-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dev-log { flex: 1; overflow: auto; padding: 18px 22px; display: flex; flex-direction: column; gap: 12px; }
+.dev-msg { max-width: 86%; font-size: 14px; line-height: 1.55; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+.dev-msg.user {
+  align-self: flex-end; background: rgba(255, 11, 82, 0.12); border: 1px solid rgba(255, 11, 82, 0.35);
+  padding: 9px 12px; border-radius: 8px 8px 2px 8px;
+}
+.dev-msg.capri { align-self: flex-start; padding: 2px 0; }
+.dev-msg.sys { align-self: center; color: var(--ink-faint); font-family: var(--mono); font-size: 11px; }
+.dev-tool {
+  align-self: stretch; font-family: var(--mono); font-size: 11.5px;
+  border: 1px solid var(--line-2); border-left: 2px solid var(--mint);
+  background: rgba(109, 255, 190, 0.04); border-radius: 3px; padding: 8px 10px;
+}
+.dev-tool.fail { border-left-color: var(--pink); background: rgba(255, 11, 82, 0.06); }
+.dev-tool-head { display: flex; gap: 8px; align-items: center; color: var(--mint); letter-spacing: 0.4px; }
+.dev-tool.fail .dev-tool-head { color: var(--pink); }
+.dev-tool pre {
+  margin: 7px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  color: var(--ink-dim); font-family: var(--mono); font-size: 11px; line-height: 1.5;
+}
+.dev-attach { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 22px 0; }
+.dev-chip {
+  display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 10.5px;
+  color: var(--ink-dim); border: 1px solid var(--line-2); padding: 4px 8px; border-radius: 2px;
+}
+.dev-chip img { width: 26px; height: 26px; object-fit: cover; border-radius: 2px; }
+.dev-chip button { background: none; border: 0; color: var(--pink); cursor: pointer; font-size: 13px; padding: 0; }
+.dev-composer { display: flex; gap: 10px; padding: 12px 22px 16px; border-top: 1px solid var(--line); }
+.dev-composer textarea {
+  flex: 1; resize: none; background: rgba(0,0,0,0.45); color: var(--white);
+  border: 1px solid var(--line-2); border-radius: 4px; padding: 10px 12px;
+  font-family: var(--mono); font-size: 13px; line-height: 1.5; outline: none;
+}
+.dev-composer textarea:focus { border-color: var(--pink); }
+.dev-editor-bar {
+  display: flex; align-items: center; gap: 10px; padding: 7px 14px;
+  border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--ink-dim);
+}
+.dev-editor-bar .dev-dirty { color: var(--pink); }
+.dev-editor-bar .dev-grow { flex: 1; }
+.dev-editor-bar .dev-mini { flex: 0 0 auto; padding: 4px 12px; }
+#devEditor {
+  flex: 1; resize: none; border: 0; outline: none; background: rgba(0,0,0,0.35);
+  color: var(--white); font-family: var(--mono); font-size: 13px; line-height: 1.6;
+  padding: 16px 18px; tab-size: 2;
+}
+#devTerminal {
+  flex: 1; margin: 0; padding: 14px 18px; overflow: auto; background: rgba(0,0,0,0.4);
+  color: var(--mint); font-family: var(--mono); font-size: 12px; line-height: 1.55; white-space: pre-wrap;
+}
+.dev-perm {
+  position: fixed; inset: 0; z-index: 1320; display: flex; align-items: center; justify-content: center;
+  background: rgba(2, 0, 5, 0.72); backdrop-filter: blur(3px);
+}
+.dev-perm-card {
+  width: min(640px, 92vw); border: 1px solid var(--line-2); border-top: 2px solid var(--pink);
+  background: #0b0212; padding: 18px; box-shadow: 0 0 60px rgba(255, 11, 82, 0.18);
+}
+.dev-perm-card pre {
+  max-height: 40vh; overflow: auto; font-family: var(--mono); font-size: 12px; color: var(--mint);
+  background: rgba(0,0,0,0.5); padding: 10px; white-space: pre-wrap; word-break: break-word;
+}
+.dev-perm-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.dev-kicker { font-family: var(--mono); font-size: 10px; letter-spacing: 1.6px; color: var(--pink); margin: 12px 10px 0; }
+.dev-file {
+  margin: 8px 10px; padding: 8px 10px; border: 1px solid var(--line-2);
+  font-family: var(--mono); font-size: 11px; color: var(--mint); word-break: break-all;
+}
+.dev-file small { display: block; color: var(--ink-faint); margin-top: 4px; }
+.dev-shorts-opts { margin: 10px; display: flex; gap: 8px; }
+.dev-shorts-opts label { flex: 1; font-family: var(--mono); font-size: 10px; color: var(--ink-faint); letter-spacing: 1px; }
+.dev-shorts-opts select {
+  width: 100%; margin-top: 5px; background: #0b0212; color: var(--white);
+  border: 1px solid var(--line-2); padding: 6px; font-family: var(--mono); font-size: 11px;
+}
+#shortsPick, #shortsRun { width: calc(100% - 20px); margin-left: 10px; }
+.dev-progress { margin: 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); line-height: 1.7; }
+.dev-progress b { color: var(--mint); font-weight: 400; }
+.dev-result { margin: 10px; border: 1px solid var(--line-2); border-left: 2px solid var(--pink); padding: 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); line-height: 1.6; }
+.dev-result h4 { margin: 0 0 6px; font-family: var(--font); font-size: 14px; letter-spacing: 0.6px; color: var(--white); }
+.dev-result .dev-tags { color: var(--mint); word-break: break-word; margin: 6px 0; }
+.dev-result .dev-actions { display: flex; gap: 6px; margin-top: 8px; }
+.dev-result .dev-actions .dev-mini { flex: 1; }
+.dev-shorts-video { width: 100%; border: 1px solid var(--line-2); margin: 6px 0; }
