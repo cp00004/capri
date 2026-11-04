@@ -2597,6 +2597,9 @@ ipcMain.handle("capri-hands-policy-set", (_event, patch) => {
   return handsSummary();
 });
 ipcMain.handle("capri-hands-undo", () => undoHands());
+// Developer mode workspace tools. Windows-only overlay feature, so the tool
+// surface simply is not registered anywhere else.
+require("../lib/dev-tools.cjs").register(ipcMain);
 
 ipcMain.on("capri-eye-config", (_event, cfg) => {
   const wasEnabled = eyeEnabled;

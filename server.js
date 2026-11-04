@@ -786,6 +786,343 @@ async function chatCompletion({ provider, messages, tools, signal }) {
   return upstream;
 }
 
+// ---------------------------------------------------------------- dev mode
+// Developer mode is a local, PC-only workspace agent: the browser sends the
+// conversation, the server only decides the next move, and the Electron shell
+// executes tools inside the workspace the user opened.
+const DEV_SYSTEM = `You are Capri in developer mode: a precise coding agent on the user's Windows PC.
+You work inside one workspace folder. Paths you pass to tools are relative to it unless you also stay inside it.
+Rules:
+- Inspect before you change: list or read the files you are about to touch.
+- Make small, complete changes. Never leave placeholder code.
+- Python is available (python on PATH). Prefer it for scripting and video work.
+- Use run_command for tests, installs and anything the file tools cannot do; the user approves each command in the UI.
+- Use edit_file for surgical edits and write_file for new files or full rewrites.
+- Keep prose short. Say what you did and what is next. Do not ask for permission in prose; the UI handles approvals.
+- When you finish a task, stop calling tools and report the result.`;
+
+const DEV_TOOL_DEFS = [
+  {
+    type: "function",
+    function: {
+      name: "list_dir",
+      description: "List a folder inside the workspace: files and folders with sizes.",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string", description: "Folder path, relative to the workspace. Defaults to the workspace root." } },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "read_file",
+      description: "Read a text file inside the workspace. Returns up to ~20000 characters.",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" }, max_chars: { type: "integer" } },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "write_file",
+      description: "Create or overwrite a file inside the workspace. Parent folders are created.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          content: { type: "string" },
+          mode: { type: "string", enum: ["overwrite", "append"] },
+        },
+        required: ["path", "content"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "edit_file",
+      description: "Replace one exact chunk of text in a workspace file. Fails if old_text is not present.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string" },
+          old_text: { type: "string" },
+          new_text: { type: "string" },
+        },
+        required: ["path", "old_text", "new_text"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "make_dir",
+      description: "Create a folder (and parents) inside the workspace.",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "move_path",
+      description: "Move or rename a file or folder inside the workspace.",
+      parameters: {
+        type: "object",
+        properties: { from: { type: "string" }, to: { type: "string" } },
+        required: ["from", "to"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_path",
+      description: "Delete a file or folder inside the workspace. The user confirms in the UI.",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" }, recursive: { type: "boolean" } },
+        required: ["path"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "run_command",
+      description: "Run a command on the PC (PowerShell by default) with the workspace as cwd. The user approves it in the UI. Returns stdout, stderr and exit code. On Windows use curl.exe, python, node.",
+      parameters: {
+        type: "object",
+        properties: {
+          command: { type: "string" },
+          shell: { type: "string", enum: ["powershell", "cmd"] },
+          cwd: { type: "string", description: "Folder inside the workspace. Defaults to the workspace root." },
+          timeout: { type: "integer", description: "Milliseconds, max 180000." },
+        },
+        required: ["command"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "open_path",
+      description: "Reveal a workspace file or folder in Windows Explorer.",
+      parameters: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+    },
+  },
+];
+
+function devImagePart(url) {
+  return { type: "image_url", image_url: { url: String(url) } };
+}
+
+function devSanitizeMessages(raw, workspaceRoot) {
+  const list = Array.isArray(raw) ? raw.slice(-40) : [];
+  const out = [];
+  for (const m of list) {
+    if (!m || typeof m !== "object") continue;
+    if (m.role === "assistant") {
+      const msg = { role: "assistant", content: typeof m.content === "string" ? m.content : contentText(m.content) };
+      if (Array.isArray(m.tool_calls) && m.tool_calls.length) {
+        msg.tool_calls = m.tool_calls.slice(0, 8).map((c) => ({
+          id: String(c?.id || `call_${Math.random().toString(36).slice(2)}`),
+          type: "function",
+          function: { name: String(c?.function?.name || ""), arguments: String(c?.function?.arguments || "{}") },
+          ...(c?.extra_content ? { extra_content: c.extra_content } : {}),
+        }));
+      }
+      out.push(msg);
+      continue;
+    }
+    if (m.role === "tool") {
+      out.push({ role: "tool", tool_call_id: String(m.tool_call_id || ""), content: String(m.content || "").slice(0, 60000) });
+      continue;
+    }
+    if (m.role === "user") {
+      if (Array.isArray(m.content)) {
+        const parts = m.content
+          .filter((p) => p && (p.type === "text" || (p.type === "image_url" && p.image_url?.url)))
+          .slice(0, 8)
+          .map((p) => (p.type === "text" ? { type: "text", text: String(p.text || "").slice(0, 20000) } : devImagePart(p.image_url.url)));
+        out.push({ role: "user", content: parts });
+      } else {
+        out.push({ role: "user", content: String(m.content || "").slice(0, 20000) });
+      }
+    }
+  }
+  const root = String(workspaceRoot || "").slice(0, 500);
+  const head = root ? `\nWorkspace root: ${root}` : "\nNo workspace folder is open yet.";
+  return [{ role: "system", content: DEV_SYSTEM + head }, ...out];
+}
+
+function devHasImages(messages) {
+  return messages.some((m) => Array.isArray(m.content) && m.content.some((p) => p?.type === "image_url"));
+}
+
+function devCandidates(vision) {
+  const gemini = GEMINI_KEYS.map((key) => ({ name: "gemini", base: GEMINI_BASE, key, model: GEMINI_MODEL }));
+  return vision ? [...gemini, ...orderCandidates()] : [...orderCandidates(), ...gemini];
+}
+
+function devToolError(res, status, message) {
+  return json(res, status, { error: "dev_failed", message });
+}
+
+async function collectDevCompletion({ messages, tools }) {
+  const candidates = devCandidates(devHasImages(messages));
+  let lastErr = null;
+  for (let i = 0; i < Math.min(candidates.length, 6); i += 1) {
+    const provider = candidates[i];
+    let upstream;
+    try {
+      upstream = await chatCompletion({ provider, messages, tools });
+    } catch (err) {
+      lastErr = err;
+      const status = Number(err.status);
+      if (status === 429) coolDown(provider, Number(err.retryAfter) || 20);
+      else if (status === 401 || status === 403) coolDown(provider, 300);
+      else if (status === 404) coolDown(provider, 600);
+      else coolDown(provider, 15);
+      continue;
+    }
+    const reader = upstream.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let content = "";
+    let calls = [];
+    let done = false;
+    try {
+      while (!done) {
+        const { value, done: ended } = await readChunk(reader, 30_000);
+        if (ended) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf("\n\n")) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          const line = frame.split("\n").find((l) => l.startsWith("data:"));
+          if (!line) continue;
+          const payload = line.slice(5).trim();
+          if (payload === "[DONE]") { done = true; break; }
+          let chunk;
+          try { chunk = JSON.parse(payload); } catch { continue; }
+          const delta = chunk.choices?.[0]?.delta;
+          if (!delta) continue;
+          if (delta.content) content += typeof delta.content === "string" ? delta.content : contentText(delta.content);
+          for (const tc of delta.tool_calls || []) {
+            const at = tc.index ?? calls.length;
+            if (!calls[at]) calls[at] = { id: tc.id || `call_${Date.now()}_${at}`, type: "function", function: { name: "", arguments: "" } };
+            if (tc.id) calls[at].id = tc.id;
+            if (tc.extra_content) calls[at].extra_content = tc.extra_content;
+            if (tc.thought_signature) calls[at].thought_signature = tc.thought_signature;
+            if (tc.function?.name) calls[at].function.name += tc.function.name;
+            if (tc.function?.arguments) calls[at].function.arguments += tc.function.arguments;
+          }
+        }
+      }
+    } catch (err) {
+      try { await upstream.body.cancel(); } catch { /* gone */ }
+      lastErr = err;
+      coolDown(provider, 15);
+      continue;
+    }
+    const toolCalls = calls.filter((c) => c?.function?.name);
+    if (!content.trim() && !toolCalls.length) {
+      lastErr = new Error("The relay answered with nothing.");
+      coolDown(provider, 10);
+      continue;
+    }
+    return { content: content.trim(), tool_calls: toolCalls, provider: provider.name };
+  }
+  throw lastErr || new Error(cappedMessage());
+}
+
+async function handleDevStep(req, res) {
+  let body;
+  try { body = await readBody(req, 8_000_000); } catch (err) { return devToolError(res, 400, err.message); }
+  const messages = devSanitizeMessages(body.messages, body.workspaceRoot);
+  try {
+    const step = await collectDevCompletion({ messages, tools: DEV_TOOL_DEFS });
+    return json(res, 200, step);
+  } catch (err) {
+    return devToolError(res, 502, String(err?.message || "relay refused"));
+  }
+}
+
+function parseJsonLoose(text) {
+  const raw = String(text || "");
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = fence ? fence[1] : raw;
+  const start = body.indexOf("{");
+  const end = body.lastIndexOf("}");
+  if (start === -1 || end <= start) throw new Error("no JSON in reply");
+  return JSON.parse(body.slice(start, end + 1));
+}
+
+async function handleDevShorts(req, res) {
+  let body;
+  try { body = await readBody(req, 12_000_000); } catch (err) { return devToolError(res, 400, err.message); }
+  const duration = Math.max(1, Number(body.duration) || 0);
+  const target = String(body.target || "25-45 seconds").slice(0, 40);
+  const segments = Array.isArray(body.segments) ? body.segments.slice(0, 240) : [];
+  const frames = Array.isArray(body.frames) ? body.frames.slice(0, 12) : [];
+  const lines = segments
+    .map((s) => `[${Number(s.start).toFixed(1)}-${Number(s.end).toFixed(1)}] ${String(s.text || "").trim()}`)
+    .filter((l) => l.length > 8)
+    .join("\n")
+    .slice(0, 45000);
+  if (!lines) return devToolError(res, 400, "No speech was found in that video.");
+
+  const system = `You are Capri, a short-form editor who understands the YouTube Shorts / TikTok / Reels algorithm.
+Pick the single best continuous clip from the source for a vertical short. Target length: ${target}.
+Optimize for retention: a hook in the first 1-3 seconds, a clear payoff, no dead air, no intros, loop-friendly ending.
+You may cut a little dead air but never more than the given transcript allows.
+Return ONLY JSON with this shape:
+{"start": number, "end": number, "title": string, "hook": string, "hashtags": [string], "description": string, "caption": string, "why": string, "alternatives": [{"start": number, "end": number, "why": string}]}
+title must fit YouTube Shorts and stay under 90 characters. hashtags: 6-10, niche first, no spaces. description: 2-3 sentences. caption: one punchy on-screen line. why: 1-2 sentences.`;
+  const frameNote = frames.length
+    ? "Frames from the video are attached in order, each labeled with its timestamp."
+    : "No frames were attached; choose from the transcript.";
+  const content = [
+    { type: "text", text: `Video length: ${duration.toFixed(1)}s\n${frameNote}\n\nTranscript with timestamps:\n${lines}` },
+  ];
+  // Label each frame right before its image so times and visuals line up.
+  for (const f of frames) {
+    content.push({ type: "text", text: `Frame at ${Number(f.t).toFixed(1)}s:` });
+    if (f?.dataUrl) content.push(devImagePart(f.dataUrl));
+  }
+  const messages = [
+    { role: "system", content: system },
+    { role: "user", content },
+  ];
+  try {
+    const out = await collectDevCompletion({ messages, tools: undefined });
+    const pick = parseJsonLoose(out.content);
+    const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Number(n) || lo));
+    pick.start = clamp(pick.start, 0, Math.max(0, duration - 5));
+    pick.end = clamp(pick.end, pick.start + 8, Math.min(duration, pick.start + 60));
+    pick.hashtags = Array.isArray(pick.hashtags)
+      ? pick.hashtags.map((h) => String(h).replace(/^#/, "").replace(/\s+/g, "").slice(0, 30)).filter(Boolean).slice(0, 10)
+      : [];
+    pick.alternatives = Array.isArray(pick.alternatives) ? pick.alternatives.slice(0, 3) : [];
+    return json(res, 200, { pick, provider: out.provider });
+  } catch (err) {
+    return devToolError(res, 502, String(err?.message || "analysis failed"));
+  }
+}
+
 function actionLabel(name, args) {
   if (name === "call_me") return `call them ${String(args?.name || "").slice(0, 40)}`;
   if (name === "remember_fact") return String(args?.fact || "remembering").slice(0, 90);
@@ -2909,6 +3246,8 @@ const handler = async (req, res) => {
     }
 
     if (req.method === "POST" && pathname === "/api/chat") return handleChat(req, res, who);
+    if (req.method === "POST" && pathname === "/api/dev/step") return handleDevStep(req, res);
+    if (req.method === "POST" && pathname === "/api/dev/shorts") return handleDevShorts(req, res);
     if (req.method === "POST" && pathname === "/api/tts") return handleTts(req, res);
     if (req.method === "POST" && pathname === "/api/stt") return handleStt(req, res);
     if (req.method === "POST" && pathname === "/api/banter") return handleBanter(req, res);

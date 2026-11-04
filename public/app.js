@@ -3004,6 +3004,19 @@ async function respond(userText) {
   // minutes after this, never on its own.
   try { window.capriNative?.addressed?.(); } catch { /* browser build */ }
   try { window.capriNative?.log?.(`heard: ${String(userText || "").slice(0, 200)}`); } catch { /* browser build */ }
+  // Hidden trigger: developer mode exists only behind this phrase. It is not a
+  // setting, it is not on the phone, and closing the workspace leaves no trace.
+  const devPhrase = String(userText || "").toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (IS_DESKTOP_APP && !IS_PHONE && devPhrase === "enable developer mode") {
+    window.CapriDev?.open?.();
+    await sayLocally("Developer mode. Open a folder and tell me what to build.", userText);
+    return;
+  }
+  if (IS_DESKTOP_APP && !IS_PHONE && /^(exit|close|disable) developer mode$/.test(devPhrase)) {
+    window.CapriDev?.close?.();
+    await sayLocally("Developer mode closed.", userText);
+    return;
+  }
   if (await handleNoNut(userText)) return;
   if (await quickOpenTurn(userText)) return;
   state.history.push({ role: "user", content: userText });
@@ -4783,6 +4796,13 @@ function initUpdates() {
 /* ---------------------------------------------------------------- lost link */
 
 window.addEventListener("online", () => { if (!state.config) boot(); });
+
+// The developer workspace is its own file. It borrows this page's signed-in
+// transport instead of keeping a second set of credentials.
+window.capriDevBridge = {
+  api,
+  say: (text, userText) => sayLocally(text, userText),
+};
 
 nnnStartSync();
 boot();

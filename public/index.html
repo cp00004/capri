@@ -413,11 +413,94 @@
   </div>
 </section>
 
+<!-- ================================================= developer mode -->
+<section id="devScreen" class="dev-screen hidden" aria-label="Capri developer mode">
+  <header class="dev-top">
+    <div class="dev-brand"><span class="dev-pulse"></span> CAPRI <b>//</b> DEV MODE <em id="devWsLabel">no workspace</em></div>
+    <div class="dev-top-actions">
+      <button id="devOpenFolder" class="dev-btn" type="button">OPEN FOLDER</button>
+      <button id="devAddImages" class="dev-btn" type="button">ADD IMAGES</button>
+      <button id="devClose" class="dev-btn ghost" type="button" aria-label="Close developer mode">&times;</button>
+    </div>
+  </header>
+  <div class="dev-body">
+    <aside class="dev-rail">
+      <nav class="dev-tabs">
+        <button type="button" class="dev-tab active" data-dev-tab="explorer">WORKSPACE</button>
+        <button type="button" class="dev-tab" data-dev-tab="shorts">YOUTUBER</button>
+      </nav>
+      <div id="devExplorer" class="dev-pane">
+        <div class="dev-tree" id="devTree"><p class="dev-empty">Open a folder to give her a desk.</p></div>
+        <div class="dev-rail-actions">
+          <button id="devNewFile" class="dev-mini" type="button">+ FILE</button>
+          <button id="devNewFolder" class="dev-mini" type="button">+ FOLDER</button>
+          <button id="devRefresh" class="dev-mini" type="button">REFRESH</button>
+        </div>
+      </div>
+      <div id="devShorts" class="dev-pane hidden">
+        <p class="dev-kicker">YOUTUBER CONTENT</p>
+        <p class="dev-hint">Drop a downloaded video or pick one. She reads the whole thing, finds the hook and cuts a vertical short.</p>
+        <button id="shortsPick" class="dev-btn wide" type="button">PICK VIDEO</button>
+        <div id="shortsFile" class="dev-file hidden"></div>
+        <div class="dev-shorts-opts">
+          <label><span>TARGET LENGTH</span>
+            <select id="shortsLength">
+              <option value="short">18-30s</option>
+              <option value="mid" selected>25-45s</option>
+              <option value="long">45-60s</option>
+            </select>
+          </label>
+        </div>
+        <button id="shortsRun" class="dev-btn accent wide" type="button" disabled>ANALYZE &amp; CUT</button>
+        <div id="shortsProgress" class="dev-progress hidden"></div>
+        <div id="shortsResult" class="dev-result hidden"></div>
+      </div>
+    </aside>
+    <main class="dev-main">
+      <nav class="dev-viewtabs">
+        <button type="button" class="dev-viewtab active" data-dev-view="chat">AGENT</button>
+        <button type="button" class="dev-viewtab" data-dev-view="editor">EDITOR</button>
+        <button type="button" class="dev-viewtab" data-dev-view="terminal">TERMINAL</button>
+      </nav>
+      <div id="devChat" class="dev-view">
+        <div id="devLog" class="dev-log"></div>
+        <div id="devAttach" class="dev-attach hidden"></div>
+        <form id="devForm" class="dev-composer">
+          <textarea id="devInput" rows="2" placeholder="Tell her what to build. Enter sends, Shift+Enter breaks the line."></textarea>
+          <button id="devSend" class="dev-btn accent" type="submit">RUN</button>
+        </form>
+      </div>
+      <div id="devEditorView" class="dev-view hidden">
+        <div class="dev-editor-bar">
+          <span id="devFileLabel">no file</span>
+          <span id="devDirty" class="dev-dirty"></span>
+          <span class="dev-grow"></span>
+          <button id="devSave" class="dev-mini" type="button">SAVE</button>
+        </div>
+        <textarea id="devEditor" spellcheck="false" placeholder="Open a file from the workspace."></textarea>
+      </div>
+      <div id="devTerminalView" class="dev-view hidden"><pre id="devTerminal">// commands and their output land here</pre></div>
+    </main>
+  </div>
+  <div id="devPerm" class="dev-perm hidden">
+    <div class="dev-perm-card">
+      <p class="dev-kicker">SHE WANTS TO TOUCH THE MACHINE</p>
+      <pre id="devPermCmd"></pre>
+      <div class="dev-perm-actions">
+        <button id="devPermOnce" class="dev-btn accent" type="button">RUN ONCE</button>
+        <button id="devPermAlways" class="dev-btn" type="button">ALWAYS THIS SESSION</button>
+        <button id="devPermDeny" class="dev-btn ghost" type="button">DENY</button>
+      </div>
+    </div>
+  </div>
+</section>
+
 <div id="notice" class="toast hidden">
   <span id="noticeText"></span>
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
+<script src="dev.js?v=20261103-1"></script>
 <script src="app.js?v=20261101-78"></script>
 </body>
 </html>

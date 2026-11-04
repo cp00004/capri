@@ -58,3 +58,31 @@ contextBridge.exposeInMainWorld("capriNative", {
     ipcRenderer.on("capri-update", (_event, data) => cb(data || {}));
   },
 });
+
+// Developer mode talks to the workspace tools in the main process. Every call
+// stays inside the folder the user opened; destructive and shell actions are
+// confirmed by the dev screen before they reach this bridge.
+contextBridge.exposeInMainWorld("capriDev", {
+  isElectron: true,
+  root: () => ipcRenderer.invoke("capri-dev-root"),
+  setRoot: (dir) => ipcRenderer.invoke("capri-dev-set-root", String(dir || "")),
+  pickFolder: () => ipcRenderer.invoke("capri-dev-pick-folder"),
+  pickVideo: () => ipcRenderer.invoke("capri-dev-pick-video"),
+  pickImages: () => ipcRenderer.invoke("capri-dev-pick-images"),
+  list: (p) => ipcRenderer.invoke("capri-dev-list", String(p || ".")),
+  read: (p, max) => ipcRenderer.invoke("capri-dev-read", String(p || ""), Number(max) || 0),
+  write: (p, text, mode) => ipcRenderer.invoke("capri-dev-write", String(p || ""), String(text ?? ""), mode || "overwrite"),
+  edit: (p, oldText, newText) => ipcRenderer.invoke("capri-dev-edit", String(p || ""), String(oldText ?? ""), String(newText ?? "")),
+  mkdir: (p) => ipcRenderer.invoke("capri-dev-mkdir", String(p || "")),
+  move: (from, to) => ipcRenderer.invoke("capri-dev-move", String(from || ""), String(to || "")),
+  remove: (p, recursive) => ipcRenderer.invoke("capri-dev-delete", String(p || ""), Boolean(recursive)),
+  run: (args) => ipcRenderer.invoke("capri-dev-run", args || {}),
+  readImage: (p) => ipcRenderer.invoke("capri-dev-read-image", String(p || "")),
+  probe: (p) => ipcRenderer.invoke("capri-dev-probe", String(p || "")),
+  wav: (args) => ipcRenderer.invoke("capri-dev-wav", args || {}),
+  frame: (args) => ipcRenderer.invoke("capri-dev-frame", args || {}),
+  cut: (args) => ipcRenderer.invoke("capri-dev-cut", args || {}),
+  reveal: (p) => ipcRenderer.invoke("capri-dev-reveal", String(p || "")),
+  open: (p) => ipcRenderer.invoke("capri-dev-open", String(p || "")),
+  ffmpeg: () => ipcRenderer.invoke("capri-dev-ffmpeg"),
+});
