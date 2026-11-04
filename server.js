@@ -1096,7 +1096,7 @@ Title is searchable and clickable, under 70 characters. Hashtags: 6-10, niche fi
   const system = `You are Capri, a short-form editor who understands the YouTube Shorts and TikTok algorithms.
 ${algorithm}
 Pick the single best continuous clip from the source for a vertical short.
-Length: a short is at most 60 seconds. Choose the longest useful window up to 58 seconds unless the payoff clearly ends sooner; never go under 15 seconds and never over 60.
+Length: a short is at most 60 seconds. Take the full allowance - aim for 45-58 seconds when the source has that much usable material, and use the whole useful stretch when it is shorter. Never go under 15 seconds and never over 60.
 Optimize for retention: no dead air, no intros, a clear payoff, loop-friendly ending. You may skip dead air only if the transcript lets you.
 Return ONLY JSON with this shape:
 {"start": number, "end": number, "title": string, "hook": string, "hashtags": [string], "description": string, "caption": string, "why": string, "alternatives": [{"start": number, "end": number, "why": string}]}
