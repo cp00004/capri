@@ -2799,8 +2799,7 @@ function createTray() {
         writeEyeState({ enabled: true });
         try { win?.webContents.send("capri-eye-set", true); } catch { /* window gone */ }
       }
-      if (win && !win.isDestroyed() && win.isFocused()) hideEye();
-      else showEye();
+      showEye();
     } },
     { label: "Hide eye", click: () => { eyeDismissed = true; hideEye(); } },
     { type:  "separator" },
