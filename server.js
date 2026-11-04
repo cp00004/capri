@@ -1071,65 +1071,175 @@ function parseJsonLoose(text) {
   return JSON.parse(body.slice(start, end + 1));
 }
 
+const SHORTS_WINDOW = 240;
+const SHORTS_MAX = 6;
+
+function clampNum(n, lo, hi) { return Math.min(hi, Math.max(lo, Number(n) || lo)); }
+
+function cleanShortsClip(raw, ws, we, duration) {
+  if (!raw || typeof raw !== "object") return null;
+  const lo = Math.max(0, ws - 2);
+  const hi = Math.min(duration, we + 2);
+  if (hi - lo < 15) return null;
+  let start = clampNum(raw.start, lo, Math.max(lo, hi - 15));
+  let end = clampNum(raw.end, start + 15, Math.min(duration, start + 60));
+  if (end - start < 15) {
+    if (start + 15 <= duration) end = start + 15;
+    else { end = duration; start = Math.max(0, end - 15); }
+  }
+  if (end - start < 15) return null;
+  const hashtags = Array.isArray(raw.hashtags)
+    ? raw.hashtags
+        .map((h) => String(h || "").replace(/^#/, "").replace(/[^A-Za-z0-9_]/g, "").slice(0, 30))
+        .filter(Boolean)
+        .slice(0, 12)
+    : [];
+  return {
+    start,
+    end,
+    score: Math.round(clampNum(raw.score, 0, 100)),
+    title: String(raw.title || "").slice(0, 120),
+    hook: String(raw.hook || "").slice(0, 200),
+    caption: String(raw.caption || "").slice(0, 200),
+    description: String(raw.description || "").slice(0, 600),
+    hashtags,
+    why: String(raw.why || "").slice(0, 400),
+  };
+}
+
+async function shortsCompletion(messages) {
+  try {
+    return await collectDevCompletion({ messages, tools: undefined });
+  } catch (err) {
+    // Some vision relays allow only a handful of images; re-ask from the transcript alone.
+    if (/image|vision|media/i.test(String(err?.message || "")) && devHasImages(messages)) {
+      const textOnly = messages.map((m) =>
+        Array.isArray(m.content) ? { role: m.role, content: m.content.filter((p) => p?.type === "text") } : m
+      );
+      return collectDevCompletion({ messages: textOnly, tools: undefined });
+    }
+    throw err;
+  }
+}
+
 async function handleDevShorts(req, res) {
   let body;
   try { body = await readBody(req, 12_000_000); } catch (err) { return devToolError(res, 400, err.message); }
   const duration = Math.max(1, Number(body.duration) || 0);
+  if (duration < 15) return devToolError(res, 400, "That video is too short to cut a short from.");
   const platform = String(body.platform || "youtube").toLowerCase() === "tiktok" ? "tiktok" : "youtube";
-  const segments = Array.isArray(body.segments) ? body.segments.slice(0, 240) : [];
-  const frames = Array.isArray(body.frames) ? body.frames.slice(0, 12) : [];
-  const lines = segments
-    .map((s) => `[${Number(s.start).toFixed(1)}-${Number(s.end).toFixed(1)}] ${String(s.text || "").trim()}`)
-    .filter((l) => l.length > 8)
-    .join("\n")
-    .slice(0, 45000);
-  if (!lines) return devToolError(res, 400, "No speech was found in that video.");
+  const segments = Array.isArray(body.segments) ? body.segments.slice(0, 480) : [];
+  const frames = Array.isArray(body.frames) ? body.frames.slice(0, 64) : [];
+  const lineFor = (s) => `[${Number(s.start).toFixed(1)}-${Number(s.end).toFixed(1)}] ${String(s.text || "").trim()}`;
+  const spoken = segments.map(lineFor).filter((l) => l.length > 8);
+  if (!spoken.length) return devToolError(res, 400, "No speech was found in that video.");
 
   const algorithm = platform === "tiktok"
     ? `Platform: TikTok.
-TikTok algorithm: the first 1 second decides everything - start on the strongest visual or line, never on a pause or a greeting.
-Keep the pace tight, let on-screen text and the caption carry the meaning, end on a comment-bait or loop line.
+TikTok algorithm: the first 1 second decides everything - open on the strongest visual or line, never on a pause, greeting or slow intro.
+Keep the pace tight, let on-screen text and the caption carry the meaning, end on a comment-bait, punchline or loop line.
 Hashtags: 4-8, a mix of niche and broad, no spaces.`
     : `Platform: YouTube Shorts.
-YouTube algorithm: strong loop and high retention - the first 2 seconds must show the payoff or promise it, and the ending must flow straight back into the start.
+YouTube algorithm: watch time and loops decide reach - the first 2 seconds must show the payoff or promise it, and the last frame must flow straight back into the first.
 Title is searchable and clickable, under 70 characters. Hashtags: 6-10, niche first, no spaces.`;
-  const system = `You are Capri, a short-form editor who understands the YouTube Shorts and TikTok algorithms.
+
+  const system = `You are Capri, a short-form editor who cuts clips that win on ${platform === "tiktok" ? "TikTok" : "YouTube Shorts"}.
 ${algorithm}
-Pick the single best continuous clip from the source for a vertical short.
-Length: a short is at most 60 seconds. Take the full allowance - aim for 45-58 seconds when the source has that much usable material, and use the whole useful stretch when it is shorter. Never go under 15 seconds and never over 60.
-Optimize for retention: no dead air, no intros, a clear payoff, loop-friendly ending. You may skip dead air only if the transcript lets you.
-Return ONLY JSON with this shape:
-{"start": number, "end": number, "title": string, "hook": string, "hashtags": [string], "description": string, "caption": string, "why": string, "alternatives": [{"start": number, "end": number, "why": string}]}
-description: 2-3 sentences. caption: one punchy on-screen line. why: 1-2 sentences on the algorithm.`;
-  const frameNote = frames.length
-    ? "Frames from the video are attached in order, each labeled with its timestamp."
-    : "No frames were attached; choose from the transcript.";
-  const content = [
-    { type: "text", text: `Video length: ${duration.toFixed(1)}s\n${frameNote}\n\nTranscript with timestamps:\n${lines}` },
-  ];
-  // Label each frame right before its image so times and visuals line up.
-  for (const f of frames) {
-    content.push({ type: "text", text: `Frame at ${Number(f.t).toFixed(1)}s:` });
-    if (f?.dataUrl) content.push(devImagePart(f.dataUrl));
+You are given one slice of a longer video. Find the moments in this slice worth posting, best first.
+Rank by real viewer entertainment: laughter, shock, tension, a satisfying payoff, a line people will repeat. Funny and surprising beat informative. Setup with no payoff, dead air, rambling and inside jokes score low.
+Every clip must stand alone - a stranger who never saw the source understands it instantly.
+Rules: each clip 20-58 seconds (never under 15, never over 60), start on the strongest beat, never overlap another clip you returned, and never invent a moment that is not in the transcript or frames.
+If this slice truly has nothing worth posting, return {"clips":[]}.
+For every clip also write the upload package.
+Return ONLY JSON:
+{"clips":[{"start":number,"end":number,"score":number,"title":string,"hook":string,"caption":string,"description":string,"hashtags":[string],"why":string}]}
+score: 0-100 predicted retention. title: ${platform === "tiktok" ? "under 100 characters, curiosity-driven" : "searchable, under 70 characters"}. hook: the exact opening line or beat. caption: one punchy on-screen line. description: 2-3 sentences. hashtags: ${platform === "tiktok" ? "4-8" : "6-10"}, no spaces. why: 1-2 sentences on why viewers stay.`;
+
+  // The client can ask for specific slices (long footage is sampled across the whole timeline).
+  const windows = [];
+  if (Array.isArray(body.windows)) {
+    for (const w of body.windows.slice(0, 24)) {
+      const ws = Math.max(0, Number(w?.start) || 0);
+      const we = Math.min(duration, Number(w?.end) || 0);
+      if (we - ws >= 30) windows.push({ ws, we });
+    }
   }
-  const messages = [
-    { role: "system", content: system },
-    { role: "user", content },
-  ];
-  try {
-    const out = await collectDevCompletion({ messages, tools: undefined });
-    const pick = parseJsonLoose(out.content);
-    const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, Number(n) || lo));
-    pick.start = clamp(pick.start, 0, Math.max(0, duration - 5));
-    pick.end = clamp(pick.end, pick.start + 8, Math.min(duration, pick.start + 60));
-    pick.hashtags = Array.isArray(pick.hashtags)
-      ? pick.hashtags.map((h) => String(h).replace(/^#/, "").replace(/\s+/g, "").slice(0, 30)).filter(Boolean).slice(0, 10)
-      : [];
-    pick.alternatives = Array.isArray(pick.alternatives) ? pick.alternatives.slice(0, 3) : [];
-    return json(res, 200, { pick, provider: out.provider });
-  } catch (err) {
-    return devToolError(res, 502, String(err?.message || "analysis failed"));
+  if (!windows.length) {
+    const span = duration <= SHORTS_WINDOW ? duration : SHORTS_WINDOW;
+    for (let ws = 0; ws < duration - 1; ws += span) windows.push({ ws, we: Math.min(duration, ws + span) });
   }
+  windows.sort((a, b) => a.ws - b.ws);
+
+  const runWindow = async (w, index) => {
+    const lines = segments
+      .filter((s) => Number(s.end) > w.ws - 3 && Number(s.start) < w.we + 3)
+      .map(lineFor)
+      .filter((l) => l.length > 8)
+      .join("\n")
+      .slice(0, 16000);
+    if (!lines) return [];
+    const ownFrames = frames.filter((f) => Number(f?.t) >= w.ws - 3 && Number(f?.t) < w.we + 3).slice(0, 4);
+    const frameNote = ownFrames.length
+      ? "Frames from this slice are attached in order, each labeled with its timestamp."
+      : "No frames attached; decide from the transcript.";
+    const content = [
+      {
+        type: "text",
+        text: `Video length: ${duration.toFixed(1)}s\nSlice ${index + 1} of ${windows.length}: ${w.ws.toFixed(1)}s - ${w.we.toFixed(1)}s\n${frameNote}\n\nTranscript for this slice:\n${lines}`,
+      },
+    ];
+    // Label each frame right before its image so times and visuals line up.
+    for (const f of ownFrames) {
+      content.push({ type: "text", text: `Frame at ${Number(f.t).toFixed(1)}s:` });
+      if (f?.dataUrl) content.push(devImagePart(f.dataUrl));
+    }
+    const out = await shortsCompletion([
+      { role: "system", content: system },
+      { role: "user", content },
+    ]);
+    const parsed = parseJsonLoose(out.content);
+    const list = Array.isArray(parsed.clips) ? parsed.clips : Array.isArray(parsed.shorts) ? parsed.shorts : parsed.start != null ? [parsed] : [];
+    const clips = [];
+    for (const raw of list.slice(0, 3)) {
+      const clip = cleanShortsClip(raw, w.ws, w.we, duration);
+      if (clip) clips.push({ ...clip, provider: out.provider });
+    }
+    return clips;
+  };
+
+  const found = [];
+  const errors = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < windows.length) {
+      const w = windows[next++];
+      try {
+        found.push(...(await runWindow(w, next - 1)));
+      } catch (err) {
+        errors.push(String(err?.message || err));
+      }
+    }
+  };
+  await Promise.all([worker(), worker()]);
+  if (!found.length) {
+    return devToolError(res, 502, errors[0] || "No moment in that video scored high enough to post.");
+  }
+
+  found.sort((a, b) => b.score - a.score);
+  const picks = [];
+  for (const clip of found) {
+    if (picks.length >= SHORTS_MAX) break;
+    if (picks.some((p) => Math.min(p.end, clip.end) - Math.max(p.start, clip.start) > -1)) continue;
+    picks.push(clip);
+  }
+  if (!picks.length) return devToolError(res, 502, "Every clip idea overlapped; try another video.");
+
+  return json(res, 200, {
+    shorts: picks,
+    pick: picks[0],
+    provider: picks[0].provider,
+    watched: { windows: windows.length, candidates: found.length },
+  });
 }
 
 function actionLabel(name, args) {

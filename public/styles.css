@@ -1289,6 +1289,9 @@ body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 
 .dev-progress { margin: 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); line-height: 1.7; }
 .dev-progress b { color: var(--mint); font-weight: 400; }
 .dev-result { margin: 10px; border: 1px solid var(--line-2); border-left: 2px solid var(--pink); padding: 10px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); line-height: 1.6; }
+.dev-results { display: flex; flex-direction: column; gap: 8px; margin: 8px 10px; }
+.dev-results .dev-result { margin: 0; }
+.dev-result .dev-when { color: var(--mint); margin: 2px 0 4px; }
 .dev-result h4 { margin: 0 0 6px; font-family: var(--font); font-size: 14px; letter-spacing: 0.6px; color: var(--white); }
 .dev-result .dev-tags { color: var(--mint); word-break: break-word; margin: 6px 0; }
 .dev-result .dev-actions { display: flex; gap: 6px; margin-top: 8px; }
