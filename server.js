@@ -3246,8 +3246,14 @@ const handler = async (req, res) => {
     }
 
     if (req.method === "POST" && pathname === "/api/chat") return handleChat(req, res, who);
-    if (req.method === "POST" && pathname === "/api/dev/step") return handleDevStep(req, res);
-    if (req.method === "POST" && pathname === "/api/dev/shorts") return handleDevShorts(req, res);
+    if (req.method === "POST" && pathname === "/api/dev/step") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      return handleDevStep(req, res);
+    }
+    if (req.method === "POST" && pathname === "/api/dev/shorts") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      return handleDevShorts(req, res);
+    }
     if (req.method === "POST" && pathname === "/api/tts") return handleTts(req, res);
     if (req.method === "POST" && pathname === "/api/stt") return handleStt(req, res);
     if (req.method === "POST" && pathname === "/api/banter") return handleBanter(req, res);
