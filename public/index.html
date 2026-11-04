@@ -44,7 +44,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=4.7.2" />
+<link rel="stylesheet" href="styles.css?v=4.7.3" />
 </head>
 <body data-state="idle">
 <div class="grain" aria-hidden="true"></div>
@@ -443,7 +443,7 @@
         </div>
       </div>
       <div id="devShorts" class="dev-pane hidden">
-        <p class="dev-kicker">YOUTUBE OR TIKTOK</p>
+        <p class="dev-kicker">PLATFORM</p>
         <div class="dev-platforms">
           <button type="button" class="dev-platform active" data-platform="youtube">▶ YouTube</button>
           <button type="button" class="dev-platform" data-platform="tiktok">♪ TikTok</button>
@@ -454,9 +454,7 @@
           <small id="shortsFileMeta"></small>
           <button id="shortsClear" class="dev-file-x" type="button" aria-label="Remove this video">&times;</button>
         </div>
-        <button id="shortsRun" class="dev-btn accent wide" type="button" disabled>ANALYZE &amp; CUT</button>
-        <div id="shortsProgress" class="dev-progress hidden"></div>
-        <div id="shortsResult" class="dev-result hidden"></div>
+        <p class="dev-hint">The studio opens on the right: the video, its context, every cut and the caption file that goes with it.</p>
       </div>
       <button id="devExit" class="dev-btn ghost wide dev-exit" type="button">&times; CLOSE DEV MODE</button>
     </aside>
@@ -466,6 +464,30 @@
         <button type="button" class="dev-viewtab" data-dev-view="editor">EDITOR</button>
         <button type="button" class="dev-viewtab" data-dev-view="terminal">TERMINAL</button>
       </nav>
+      <div id="devYoutubeView" class="dev-view hidden">
+        <div class="yt-scroll">
+          <header class="yt-head">
+            <div class="yt-head-text">
+              <p class="dev-kicker">YOUTUBE STUDIO</p>
+              <h3 id="ytVideoTitle">No video selected</h3>
+              <p id="ytVideoMeta" class="yt-meta">Pick a downloaded video in the rail. She watches the whole thing, keeps the moments people can't scroll past, and edits each one.</p>
+            </div>
+            <button id="shortsRun" class="dev-btn accent" type="button" disabled>ANALYZE &amp; CUT</button>
+          </header>
+          <div id="ytContext" class="yt-context hidden">
+            <video id="ytPreview" class="yt-preview" controls preload="metadata"></video>
+            <dl class="yt-facts">
+              <div><dt>LENGTH</dt><dd id="ytFactLength">-</dd></div>
+              <div><dt>FRAME</dt><dd id="ytFactFrame">-</dd></div>
+              <div><dt>PLATFORM</dt><dd id="ytFactPlatform">-</dd></div>
+              <div><dt>SOURCE</dt><dd id="ytFactSource">-</dd></div>
+              <div><dt>SHORTS LAND IN</dt><dd id="ytFactOutput">-</dd></div>
+            </dl>
+          </div>
+          <div id="shortsProgress" class="dev-progress hidden"></div>
+          <div id="shortsResult" class="yt-results hidden"></div>
+        </div>
+      </div>
       <div id="devChat" class="dev-view">
         <div id="devLog" class="dev-log"></div>
         <div id="devAttach" class="dev-attach hidden"></div>
@@ -504,7 +526,7 @@
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
-<script src="dev.js?v=4.7.2"></script>
-<script src="app.js?v=4.7.2"></script>
+<script src="dev.js?v=4.7.3"></script>
+<script src="app.js?v=4.7.3"></script>
 </body>
 </html>

@@ -27,6 +27,7 @@
     shortsBusy: false,
     platform: "youtube",
     nameMode: "",
+    mainView: "chat",
   };
 
   /* ------------------------------------------------------------ shell UI */
@@ -58,6 +59,17 @@
       shortsResult: $("shortsResult"),
       nameForm: $("devNameForm"),
       nameInput: $("devNameInput"),
+      viewTabs: document.querySelector(".dev-viewtabs"),
+      ytView: $("devYoutubeView"),
+      ytTitle: $("ytVideoTitle"),
+      ytMeta: $("ytVideoMeta"),
+      ytContext: $("ytContext"),
+      ytPreview: $("ytPreview"),
+      ytLength: $("ytFactLength"),
+      ytFrame: $("ytFactFrame"),
+      ytPlatform: $("ytFactPlatform"),
+      ytSource: $("ytFactSource"),
+      ytOutput: $("ytFactOutput"),
     };
   }
 
@@ -131,6 +143,7 @@
   }
 
   function showView(name) {
+    dev.mainView = name;
     for (const b of document.querySelectorAll("[data-dev-view]")) {
       b.classList.toggle("active", b.getAttribute("data-dev-view") === name);
     }
@@ -145,6 +158,17 @@
     }
     $("devExplorer").classList.toggle("hidden", name !== "explorer");
     $("devShorts").classList.toggle("hidden", name !== "shorts");
+    const youtube = name === "shorts";
+    dev.els.viewTabs.classList.toggle("hidden", youtube);
+    dev.els.ytView.classList.toggle("hidden", !youtube);
+    if (youtube) {
+      $("devChat").classList.add("hidden");
+      $("devEditorView").classList.add("hidden");
+      $("devTerminalView").classList.add("hidden");
+      paintStudio();
+    } else {
+      showView(dev.mainView || "chat");
+    }
   }
 
   /* ------------------------------------------------------------ workspace */
@@ -542,8 +566,9 @@
       dev.els.shortsFile.classList.remove("hidden");
       dev.els.shortsFileName.textContent = f.name;
       dev.els.shortsFileMeta.textContent = `${clock(dev.info.duration)} · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[dev.platform].note}`;
-      dev.els.shortsRun.disabled = !dev.root;
       dev.els.shortsProgress.classList.add("hidden");
+      dev.els.shortsResult.classList.add("hidden");
+      paintStudio();
     } catch (err) {
       sysLine(`could not read that video: ${err.message || err}`);
     }
@@ -555,9 +580,9 @@
     dev.els.shortsFile.classList.add("hidden");
     dev.els.shortsFileName.textContent = "";
     dev.els.shortsFileMeta.textContent = "";
-    dev.els.shortsRun.disabled = true;
     dev.els.shortsProgress.classList.add("hidden");
     dev.els.shortsResult.classList.add("hidden");
+    paintStudio();
   }
 
   function setPlatform(name) {
@@ -567,6 +592,36 @@
       b.classList.toggle("active", b.getAttribute("data-platform") === name);
     }
     if (dev.info) dev.els.shortsFileMeta.textContent = `${clock(dev.info.duration)} · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[name].note}`;
+    paintStudio();
+  }
+
+  function mediaUrl(abs) {
+    return `/api/dev/media?path=${encodeURIComponent(String(abs || ""))}`;
+  }
+
+  function paintStudio() {
+    if (!dev.els?.ytTitle) return;
+    const video = dev.video;
+    const info = dev.info;
+    dev.els.ytTitle.textContent = video ? video.name : "No video selected";
+    dev.els.ytMeta.textContent =
+      video && info
+        ? `${clock(info.duration)} · ${info.width}x${info.height} · ${PLATFORMS[dev.platform].name} · ${PLATFORMS[dev.platform].note}`
+        : "Pick a downloaded video in the rail. She watches the whole thing, keeps the moments people can't scroll past, and edits each one.";
+    dev.els.ytContext.classList.toggle("hidden", !video);
+    if (video && info) {
+      const src = mediaUrl(video.path);
+      if (dev.els.ytPreview.getAttribute("src") !== src) dev.els.ytPreview.src = src;
+      dev.els.ytLength.textContent = `${clock(info.duration)} · ${Math.round(info.duration)}s`;
+      dev.els.ytFrame.textContent = `${info.width}x${info.height}${info.fps ? ` · ${Math.round(info.fps)}fps` : ""}`;
+      dev.els.ytPlatform.textContent = `${PLATFORMS[dev.platform].name} - ${PLATFORMS[dev.platform].note}`;
+      dev.els.ytSource.textContent = video.path;
+      dev.els.ytOutput.textContent = dev.root ? `${dev.root}\\shorts` : "open a workspace folder first";
+    } else {
+      dev.els.ytPreview.removeAttribute("src");
+      dev.els.ytPreview.load?.();
+    }
+    dev.els.shortsRun.disabled = !(video && dev.root) || dev.shortsBusy;
   }
 
   function shutdown(text) {
@@ -679,7 +734,7 @@
     return `${h}:${m}:${s},${r}`;
   }
 
-  function buildSrt(segments, start, end) {
+  function buildCues(segments, start, end) {
     const wrapped = segments.map((s) => ({ ...s })).sort((a, b) => a.start - b.start);
     const cues = [];
     for (const seg of wrapped) {
@@ -692,11 +747,59 @@
       let at = from;
       for (const sentence of sentences) {
         const span = ((to - from) * sentence.length) / total;
-        cues.push({ start: at, end: Math.min(to, at + span), text: sentence.trim() });
+        cues.push({ start: at - start, end: Math.min(to, at + span) - start, text: sentence.trim() });
         at += span;
       }
     }
-    return cues.map((c, i) => `${i + 1}\n${srtTime(c.start - start)} --> ${srtTime(c.end - start)}\n${c.text}`).join("\n\n") + "\n";
+    return cues;
+  }
+
+  function buildSrt(cues) {
+    return cues.map((c, i) => `${i + 1}\n${srtTime(c.start)} --> ${srtTime(c.end)}\n${c.text}`).join("\n\n") + "\n";
+  }
+
+  function assTime(t) {
+    const cs = Math.max(0, Math.round(t * 100));
+    const h = Math.floor(cs / 360000);
+    const m = Math.floor((cs % 360000) / 6000);
+    const s = Math.floor((cs % 6000) / 100);
+    const c = cs % 100;
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(c).padStart(2, "0")}`;
+  }
+
+  // CapCut-style captions: big bold white text, heavy outline, low third.
+  function buildAss(cues) {
+    const head = [
+      "[Script Info]",
+      "ScriptType: v4.00+",
+      "PlayResX: 1080",
+      "PlayResY: 1920",
+      "WrapStyle: 0",
+      "ScaledBorderAndShadow: yes",
+      "",
+      "[V4+ Styles]",
+      "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+      "Style: Capri,Arial,70,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,6,2,2,60,60,240,1",
+      "",
+      "[Events]",
+      "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ];
+    const lines = cues.map((c) => {
+      let text = String(c.text).replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
+      if (text.length > 26) {
+        const words = text.split(" ");
+        const rows = [];
+        let row = "";
+        for (const word of words) {
+          if (row && `${row} ${word}`.length > 26) { rows.push(row); row = word; }
+          else row = row ? `${row} ${word}` : word;
+        }
+        if (row) rows.push(row);
+        text = rows.slice(0, 3).join("\\N");
+      }
+      return `Dialogue: 0,${assTime(c.start)},${assTime(Math.max(c.end, c.start + 0.7))},Capri,,0,0,0,,${text}`;
+    });
+    return [...head, ...lines].join("\n") + "\n";
   }
 
   function slug(text) {
@@ -765,9 +868,19 @@
           `CUTTING ${i + 1}/${list.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s${pick.score ? ` · score ${pick.score}` : ""}`
         );
         try {
-          const cut = await D.cut({ video: video.path, start, duration: length, out: `shorts/${base}.mp4` });
-          const srt = buildSrt(segments, start, end);
+          const cues = buildCues(segments, start, end);
+          const srt = buildSrt(cues);
           await D.write(`shorts/${base}.srt`, srt);
+          await D.write(`shorts/${base}.ass`, buildAss(cues));
+          const cut = await D.cut({
+            video: video.path,
+            start,
+            duration: length,
+            out: `shorts/${base}.mp4`,
+            captions: `shorts/${base}.ass`,
+            width: info.width,
+            height: info.height,
+          });
           const meta = [
             `PLATFORM\n${PLATFORMS[dev.platform].name}`,
             `TITLE\n${pick.title || ""}`,
@@ -779,9 +892,10 @@
             `RETENTION SCORE\n${pick.score || "?"}/100`,
             `SOURCE\n${video.path}`,
             `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
+            `FILE\nshorts/${base}.mp4`,
           ].join("\n\n");
           await D.write(`shorts/${base}.txt`, meta);
-          made.push({ pick, cut, base });
+          made.push({ pick, cut, base, meta });
         } catch (err) {
           failures.push(`${clock(start)}-${clock(end)}: ${err.message || err}`);
         }
@@ -789,8 +903,9 @@
       if (!made.length) throw new Error(`every cut failed - ${failures[0] || "unknown error"}`);
       renderShortsResults(made);
       const where = made[0].cut.path.slice(0, made[0].cut.path.lastIndexOf("\\") + 1);
+      const watched = data.watched || {};
       shortsProgress(
-        `DONE\n${made.length} short${made.length === 1 ? "" : "s"} cut from ${data.watched?.windows || slices} slice${(data.watched?.windows || slices) === 1 ? "" : "s"} · ${data.watched?.candidates || list.length} moments scored\n${where}`
+        `DONE\n${made.length} short${made.length === 1 ? "" : "s"} cut from ${watched.windows || windows.length} slice${(watched.windows || windows.length) === 1 ? "" : "s"} · ${watched.candidates || list.length} moments scored\n${where}`
       );
       sysLine(`${made.length} short${made.length === 1 ? "" : "s"} ready in shorts/`);
     } catch (err) {
@@ -798,73 +913,99 @@
     } finally {
       if (ticker) clearInterval(ticker);
       dev.shortsBusy = false;
-      dev.els.shortsRun.disabled = false;
+      paintStudio();
     }
   }
 
+  // One block per short: the finished vertical file plays right there, the
+  // caption/info script sits next to it, and the copy buttons grab the post.
   function renderShortsResults(entries) {
     const box = dev.els.shortsResult;
     box.textContent = "";
     box.classList.remove("hidden");
-    const head = document.createElement("h4");
-    head.textContent = `${entries.length} short${entries.length === 1 ? "" : "s"} ready`;
-    box.appendChild(head);
-    const list = document.createElement("div");
-    list.className = "dev-results";
-    const copyText = (pick) => `${pick.title || ""}\n${(pick.hashtags || []).map((t) => `#${t}`).join(" ")}`;
-    for (const { pick, cut } of entries) {
-      const card = document.createElement("div");
-      card.className = "dev-result";
-      const h = document.createElement("h4");
-      h.textContent = pick.title || "Untitled short";
-      card.appendChild(h);
-      const when = document.createElement("div");
-      when.className = "dev-when";
-      const length = Math.max(0, (Number(pick.end) || 0) - (Number(pick.start) || 0));
-      when.textContent = `${clock(pick.start)} - ${clock(pick.end)} · ${length.toFixed(1)}s${pick.score ? ` · score ${pick.score}/100` : ""}`;
-      card.appendChild(when);
-      const hook = document.createElement("div");
-      hook.textContent = pick.hook ? `HOOK: ${pick.hook}` : "";
-      card.appendChild(hook);
-      const tags = document.createElement("div");
-      tags.className = "dev-tags";
-      tags.textContent = (pick.hashtags || []).map((t) => `#${t}`).join(" ");
-      card.appendChild(tags);
-      const desc = document.createElement("div");
-      desc.textContent = pick.description || "";
-      card.appendChild(desc);
-      const why = document.createElement("div");
-      why.textContent = pick.why ? `\n${pick.why}` : "";
-      card.appendChild(why);
-      const actions = document.createElement("div");
-      actions.className = "dev-actions";
-      const openBtn = document.createElement("button");
-      openBtn.type = "button";
-      openBtn.className = "dev-mini";
-      openBtn.textContent = "OPEN SHORT";
-      openBtn.addEventListener("click", () => D.open(cut.path).catch((e) => sysLine(String(e.message || e))));
-      actions.appendChild(openBtn);
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.className = "dev-mini";
-      copy.textContent = "COPY TITLE + TAGS";
-      copy.addEventListener("click", () => {
-        navigator.clipboard?.writeText(copyText(pick)).then(() => sysLine("title and hashtags copied")).catch(() => {});
-      });
-      actions.appendChild(copy);
-      card.appendChild(actions);
-      list.appendChild(card);
-    }
-    box.appendChild(list);
-    const actions = document.createElement("div");
-    actions.className = "dev-actions";
+    const head = document.createElement("div");
+    head.className = "yt-results-head";
+    const h = document.createElement("h4");
+    h.textContent = `${entries.length} short${entries.length === 1 ? "" : "s"} ready`;
+    head.appendChild(h);
     const reveal = document.createElement("button");
     reveal.type = "button";
     reveal.className = "dev-mini";
     reveal.textContent = "OPEN SHORTS FOLDER";
     reveal.addEventListener("click", () => D.reveal(entries[0].cut.path));
-    actions.appendChild(reveal);
-    box.appendChild(actions);
+    head.appendChild(reveal);
+    box.appendChild(head);
+    const copyText = (pick) => `${pick.title || ""}\n${(pick.hashtags || []).map((t) => `#${t}`).join(" ")}`;
+    const copy = (text, note) => {
+      navigator.clipboard?.writeText(text).then(() => sysLine(note)).catch(() => {});
+    };
+    for (const entry of entries) {
+      const { pick, cut, base, meta } = entry;
+      const card = document.createElement("article");
+      card.className = "yt-short";
+      const frame = document.createElement("div");
+      frame.className = "yt-short-frame";
+      const player = document.createElement("video");
+      player.className = "yt-short-video";
+      player.controls = true;
+      player.preload = "metadata";
+      player.playsInline = true;
+      player.src = cut.abs ? mediaUrl(cut.abs) : "";
+      frame.appendChild(player);
+      const num = document.createElement("span");
+      num.className = "yt-short-num";
+      num.textContent = String(entries.indexOf(entry) + 1).padStart(2, "0");
+      frame.appendChild(num);
+      card.appendChild(frame);
+      const body = document.createElement("div");
+      body.className = "yt-short-body";
+      const title = document.createElement("h4");
+      title.textContent = pick.title || "Untitled short";
+      body.appendChild(title);
+      const length = Math.max(0, (Number(pick.end) || 0) - (Number(pick.start) || 0));
+      const when = document.createElement("div");
+      when.className = "dev-when";
+      when.textContent = `${clock(pick.start)} - ${clock(pick.end)} · ${length.toFixed(1)}s · ${PLATFORMS[dev.platform].name}${pick.score ? ` · score ${pick.score}/100` : ""}`;
+      body.appendChild(when);
+      const tags = document.createElement("div");
+      tags.className = "dev-tags";
+      tags.textContent = (pick.hashtags || []).map((t) => `#${t}`).join(" ");
+      body.appendChild(tags);
+      const actions = document.createElement("div");
+      actions.className = "dev-actions";
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "dev-mini";
+      openBtn.textContent = "OPEN FILE";
+      openBtn.addEventListener("click", () => D.open(cut.path).catch((e) => sysLine(String(e.message || e))));
+      actions.appendChild(openBtn);
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "dev-mini";
+      copyBtn.textContent = "COPY TITLE + TAGS";
+      copyBtn.addEventListener("click", () => copy(copyText(pick), "title and hashtags copied"));
+      actions.appendChild(copyBtn);
+      const copyAll = document.createElement("button");
+      copyAll.type = "button";
+      copyAll.className = "dev-mini";
+      copyAll.textContent = "COPY INFO FILE";
+      copyAll.addEventListener("click", () => copy(meta || "", "info file copied"));
+      actions.appendChild(copyAll);
+      body.appendChild(actions);
+      const info = document.createElement("details");
+      info.className = "yt-short-info";
+      const sum = document.createElement("summary");
+      sum.textContent = `${base}.txt · written next to the video`;
+      info.appendChild(sum);
+      const pre = document.createElement("pre");
+      pre.className = "yt-short-txt";
+      pre.textContent = meta || "";
+      info.appendChild(pre);
+      body.appendChild(info);
+      card.appendChild(body);
+      box.appendChild(card);
+    }
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   /* ------------------------------------------------------------ open/close */

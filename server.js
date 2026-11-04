@@ -1148,9 +1148,10 @@ Title is searchable and clickable, under 70 characters. Hashtags: 6-10, niche fi
   const system = `You are Capri, a short-form editor who cuts clips that win on ${platform === "tiktok" ? "TikTok" : "YouTube Shorts"}.
 ${algorithm}
 You are given one slice of a longer video. Find the moments in this slice worth posting, best first.
-Rank by real viewer entertainment: laughter, shock, tension, a satisfying payoff, a line people will repeat. Funny and surprising beat informative. Setup with no payoff, dead air, rambling and inside jokes score low.
+Rank by real viewer entertainment: laughter, shock, tension, a satisfying payoff, a line people will repeat. Funny and surprising beat informative. Setup with no payoff, dead air, rambling and inside jokes score low. A clip must have a reason to exist - someone scrolling past should stop within the first second.
 Every clip must stand alone - a stranger who never saw the source understands it instantly.
 Rules: each clip 10-58 seconds - aim for 20-58 when the material allows, never over 60, and if this slice is shorter than 40 seconds use its best stretch. Start on the strongest beat, never overlap another clip you returned, and never invent a moment that is not in the transcript or frames.
+Return up to 3 clips for this slice, best first - if there are two or more genuinely postable moments, do not merge them into one long clip.
 If this slice truly has nothing worth posting, return {"clips":[]}.
 For every clip also write the upload package.
 Return ONLY JSON:
@@ -1214,9 +1215,11 @@ score: 0-100 predicted retention. title: ${platform === "tiktok" ? "under 100 ch
   let next = 0;
   const worker = async () => {
     while (next < windows.length) {
-      const w = windows[next++];
+      const index = next;
+      const w = windows[index];
+      next += 1;
       try {
-        found.push(...(await runWindow(w, next - 1)));
+        found.push(...(await runWindow(w, index)));
       } catch (err) {
         errors.push(String(err?.message || err));
       }
@@ -3370,6 +3373,35 @@ const handler = async (req, res) => {
     if (req.method === "POST" && pathname === "/api/dev/step") {
       if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
       return handleDevStep(req, res);
+    }
+    // Streams a cut back to the studio so it plays in place. Loopback only,
+    // media extensions only, and Range support so scrubbing works.
+    if (req.method === "GET" && pathname === "/api/dev/media") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      const raw = String(url.searchParams.get("path") || "");
+      const abs = raw && path.isAbsolute(raw) ? path.resolve(raw) : "";
+      const MEDIA = /\.(mp4|m4v|mov|webm|mkv|mp3|m4a|wav|ogg)$/i;
+      const mime = { ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm", ".mkv": "video/x-matroska", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".ogg": "audio/ogg" };
+      if (!abs || !MEDIA.test(abs) || !fs.existsSync(abs)) return json(res, 404, { error: "not_found" });
+      let stat;
+      try { stat = fs.statSync(abs); } catch { return json(res, 404, { error: "not_found" }); }
+      const total = stat.size;
+      const match = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ""));
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Content-Type", mime[path.extname(abs).toLowerCase()] || "application/octet-stream");
+      res.setHeader("Cache-Control", "no-store");
+      if (match) {
+        const start = match[1] ? Number(match[1]) : 0;
+        const end = match[2] ? Math.min(Number(match[2]), total - 1) : total - 1;
+        if (!Number.isFinite(start) || start >= total || start > end) {
+          res.writeHead(416, { "Content-Range": `bytes */${total}` });
+          return res.end();
+        }
+        res.writeHead(206, { "Content-Range": `bytes ${start}-${end}/${total}`, "Content-Length": end - start + 1 });
+        return fs.createReadStream(abs, { start, end }).pipe(res);
+      }
+      res.writeHead(200, { "Content-Length": total });
+      return fs.createReadStream(abs).pipe(res);
     }
     if (req.method === "POST" && pathname === "/api/dev/shorts") {
       if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
