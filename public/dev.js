@@ -24,6 +24,7 @@
     promptResolve: null,
     video: null,
     info: null,
+    videos: [],
     shortsBusy: false,
     platform: "youtube",
     nameMode: "",
@@ -50,10 +51,7 @@
       permOnce: $("devPermOnce"),
       permAlways: $("devPermAlways"),
       permDeny: $("devPermDeny"),
-      shortsFile: $("shortsFile"),
-      shortsFileName: $("shortsFileName"),
-      shortsFileMeta: $("shortsFileMeta"),
-      shortsClear: $("shortsClear"),
+      shortsFiles: $("shortsFiles"),
       shortsRun: $("shortsRun"),
       shortsProgress: $("shortsProgress"),
       shortsResult: $("shortsResult"),
@@ -551,38 +549,84 @@
     }
   }
 
-  async function pickVideo() {
+  async function pickVideos() {
+    if (dev.shortsBusy) return;
     try {
-      const f = await D.pickVideo();
-      if (!f) return;
-      dev.video = f;
-      dev.info = await D.probe(f.path);
-      if (!dev.info.hasAudio) {
-        dev.video = null;
-        dev.info = null;
-        shutdown(`"${f.name}" has no audio, so there is nothing to read for the hook.`);
-        return;
+      const files = await D.pickVideos();
+      if (!files.length) return;
+      const added = [];
+      for (const f of files) {
+        if (dev.videos.some((v) => v.path.toLowerCase() === f.path.toLowerCase())) continue;
+        const entry = { path: f.path, name: f.name, info: null, state: "reading" };
+        dev.videos.push(entry);
+        added.push(entry);
+        renderVideoList();
+        try {
+          entry.info = await D.probe(f.path);
+          entry.state = entry.info.hasAudio ? "ready" : "no audio - skipped";
+        } catch (err) {
+          entry.state = "unreadable";
+          sysLine(`could not read ${f.name}: ${err.message || err}`);
+        }
+        renderVideoList();
       }
-      dev.els.shortsFile.classList.remove("hidden");
-      dev.els.shortsFileName.textContent = f.name;
-      dev.els.shortsFileMeta.textContent = `${clock(dev.info.duration)} · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[dev.platform].note}`;
-      dev.els.shortsProgress.classList.add("hidden");
-      dev.els.shortsResult.classList.add("hidden");
-      paintStudio();
+      const first = added.find((v) => v.state === "ready") || added[0] || dev.videos.find((v) => v.state === "ready") || dev.videos[0];
+      if (first) selectVideo(first);
     } catch (err) {
-      sysLine(`could not read that video: ${err.message || err}`);
+      sysLine(`could not read those videos: ${err.message || err}`);
     }
   }
 
-  function clearVideo() {
-    dev.video = null;
-    dev.info = null;
-    dev.els.shortsFile.classList.add("hidden");
-    dev.els.shortsFileName.textContent = "";
-    dev.els.shortsFileMeta.textContent = "";
-    dev.els.shortsProgress.classList.add("hidden");
-    dev.els.shortsResult.classList.add("hidden");
+  function selectVideo(entry) {
+    dev.video = entry ? { path: entry.path, name: entry.name } : null;
+    dev.info = entry?.info || null;
     paintStudio();
+    renderVideoList();
+  }
+
+  function removeVideo(entry) {
+    const at = dev.videos.indexOf(entry);
+    if (at < 0 || dev.shortsBusy) return;
+    dev.videos.splice(at, 1);
+    if (dev.video?.path === entry.path) {
+      const next = dev.videos[Math.min(at, dev.videos.length - 1)];
+      selectVideo(next || null);
+    } else {
+      renderVideoList();
+    }
+    if (!dev.videos.length) {
+      dev.els.shortsProgress.classList.add("hidden");
+      dev.els.shortsResult.classList.add("hidden");
+      paintStudio();
+    }
+  }
+
+  function renderVideoList() {
+    const box = dev.els.shortsFiles;
+    if (!box) return;
+    box.textContent = "";
+    box.classList.toggle("hidden", !dev.videos.length);
+    dev.videos.forEach((v, i) => {
+      const row = document.createElement("div");
+      row.className = `dev-file${dev.video?.path === v.path ? " active" : ""}`;
+      row.title = v.path;
+      row.addEventListener("click", () => { if (!dev.shortsBusy) selectVideo(v); });
+      const label = document.createElement("span");
+      label.textContent = v.name;
+      row.appendChild(label);
+      const meta = document.createElement("small");
+      const facts = v.info ? `${clock(v.info.duration)} · ${v.info.width}x${v.info.height}` : "reading…";
+      meta.textContent = `${i + 1}/${dev.videos.length} · ${facts}${v.state && v.state !== "ready" ? ` · ${v.state}` : ""}`;
+      row.appendChild(meta);
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "dev-file-x";
+      x.setAttribute("aria-label", `Remove ${v.name}`);
+      x.textContent = "\u00d7";
+      x.addEventListener("click", (e) => { e.stopPropagation(); removeVideo(v); });
+      row.appendChild(x);
+      box.appendChild(row);
+    });
   }
 
   function setPlatform(name) {
@@ -591,7 +635,6 @@
     for (const b of document.querySelectorAll("[data-platform]")) {
       b.classList.toggle("active", b.getAttribute("data-platform") === name);
     }
-    if (dev.info) dev.els.shortsFileMeta.textContent = `${clock(dev.info.duration)} · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[name].note}`;
     paintStudio();
   }
 
@@ -603,16 +646,20 @@
     if (!dev.els?.ytTitle) return;
     const video = dev.video;
     const info = dev.info;
-    dev.els.ytTitle.textContent = video ? video.name : "No video selected";
+    const count = dev.videos.length;
+    const at = video ? dev.videos.findIndex((v) => v.path === video.path) : -1;
+    dev.els.ytTitle.textContent = video ? video.name : count ? `${count} videos queued` : "No video selected";
     dev.els.ytMeta.textContent =
       video && info
-        ? `${clock(info.duration)} · ${info.width}x${info.height} · ${PLATFORMS[dev.platform].name} · ${PLATFORMS[dev.platform].note}`
-        : "Pick a downloaded video in the rail. She watches the whole thing, keeps the moments people can't scroll past, and edits each one.";
-    dev.els.ytContext.classList.toggle("hidden", !video);
+        ? `${count > 1 ? `${at + 1} of ${count} · ` : ""}${clock(info.duration)} · ${info.width}x${info.height} · ${PLATFORMS[dev.platform].name} · ${PLATFORMS[dev.platform].note}`
+        : count
+          ? "Reading the queue. Pick the video you want on screen, then ANALYZE & CUT to run the whole batch."
+          : "Pick one or several downloaded videos in the rail. She watches each whole video, keeps the moments people can't scroll past, and edits every one.";
+    dev.els.ytContext.classList.toggle("hidden", !video || !info);
     if (video && info) {
       const src = mediaUrl(video.path);
       if (dev.els.ytPreview.getAttribute("src") !== src) dev.els.ytPreview.src = src;
-      dev.els.ytLength.textContent = `${clock(info.duration)} · ${Math.round(info.duration)}s`;
+      dev.els.ytLength.textContent = `${clock(info.duration)} · ${Math.round(info.duration)}s${count > 1 ? ` · ${count} videos queued` : ""}`;
       dev.els.ytFrame.textContent = `${info.width}x${info.height}${info.fps ? ` · ${Math.round(info.fps)}fps` : ""}`;
       dev.els.ytPlatform.textContent = `${PLATFORMS[dev.platform].name} - ${PLATFORMS[dev.platform].note}`;
       dev.els.ytSource.textContent = video.path;
@@ -621,7 +668,8 @@
       dev.els.ytPreview.removeAttribute("src");
       dev.els.ytPreview.load?.();
     }
-    dev.els.shortsRun.disabled = !(video && dev.root) || dev.shortsBusy;
+    const ready = dev.videos.some((v) => v.info?.hasAudio);
+    dev.els.shortsRun.disabled = !(ready && dev.root) || dev.shortsBusy;
   }
 
   function shutdown(text) {
@@ -807,7 +855,9 @@
   }
 
   async function runShorts() {
-    if (!dev.video || !dev.info || dev.shortsBusy) return;
+    if (dev.shortsBusy) return;
+    const queue = dev.videos.filter((v) => v.info?.hasAudio && v.state !== "working");
+    if (!queue.length) return;
     if (!dev.root) {
       shutdown("Open a workspace folder first - the shorts and their scripts are written into it.");
       return;
@@ -815,97 +865,116 @@
     dev.shortsBusy = true;
     dev.els.shortsRun.disabled = true;
     dev.els.shortsResult.classList.add("hidden");
-    const video = dev.video;
-    const info = dev.info;
     let ticker = null;
+    const made = [];
+    const failures = [];
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    let seq = 0;
     try {
-      shortsProgress(`READING THE VIDEO\nopening ${video.name}`);
-      const windows = scanWindows(info.duration);
-      const segments = await transcribe(video.path, info.duration, windows);
-      if (!segments.length) throw new Error("I could not hear any speech in that video.");
-      const frames = await sampleFrames(video.path, info.duration, windows);
-      let waited = 0;
-      ticker = setInterval(() => {
-        waited += 1;
-        shortsProgress(
-          `WATCHING THE WHOLE VIDEO\n${windows.length} slice${windows.length === 1 ? "" : "s"} across ${clock(info.duration)} · ${segments.length} lines read · scoring every moment · ${waited}s`
-        );
-      }, 1000);
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 480_000);
-      let data;
-      try {
-        const res = await bridge().api("/api/dev/shorts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            duration: info.duration,
-            platform: dev.platform,
-            segments,
-            frames,
-            windows,
-          }),
-          signal: ctrl.signal,
-        });
-        data = await res.json().catch(() => null);
-        if (!res.ok) throw new Error(data?.message || `analysis refused (${res.status})`);
-      } finally {
-        clearTimeout(timer);
-      }
-      const list = Array.isArray(data?.shorts) && data.shorts.length ? data.shorts : data?.pick ? [data.pick] : [];
-      if (!list.length) throw new Error("She watched the whole video and found nothing worth posting.");
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const made = [];
-      const failures = [];
-      for (let i = 0; i < list.length; i += 1) {
-        const pick = list[i];
-        const start = Math.max(0, Number(pick.start) || 0);
-        const end = Math.min(info.duration, Number(pick.end) || 0);
-        if (end - start < 8) continue;
-        const length = end - start;
-        const base = `${slug(pick.title)}-${stamp}-${i + 1}`;
-        shortsProgress(
-          `CUTTING ${i + 1}/${list.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s${pick.score ? ` · score ${pick.score}` : ""}`
-        );
+      for (let vi = 0; vi < queue.length; vi += 1) {
+        const entry = queue[vi];
+        const video = { path: entry.path, name: entry.name };
+        const info = entry.info;
+        const tag = `${vi + 1}/${queue.length} · ${entry.name}`;
+        entry.state = "working";
+        renderVideoList();
         try {
-          const cues = buildCues(segments, start, end);
-          const srt = buildSrt(cues);
-          await D.write(`shorts/${base}.srt`, srt);
-          await D.write(`shorts/${base}.ass`, buildAss(cues));
-          const cut = await D.cut({
-            video: video.path,
-            start,
-            duration: length,
-            out: `shorts/${base}.mp4`,
-            captions: `shorts/${base}.ass`,
-            width: info.width,
-            height: info.height,
-          });
-          const meta = [
-            `PLATFORM\n${PLATFORMS[dev.platform].name}`,
-            `TITLE\n${pick.title || ""}`,
-            `HOOK\n${pick.hook || ""}`,
-            `CAPTION\n${pick.caption || ""}`,
-            `HASHTAGS\n${(pick.hashtags || []).map((h) => `#${h}`).join(" ")}`,
-            `DESCRIPTION\n${pick.description || ""}`,
-            `WHY IT KEEPS VIEWERS\n${pick.why || ""}`,
-            `RETENTION SCORE\n${pick.score || "?"}/100`,
-            `SOURCE\n${video.path}`,
-            `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
-            `FILE\nshorts/${base}.mp4`,
-          ].join("\n\n");
-          await D.write(`shorts/${base}.txt`, meta);
-          made.push({ pick, cut, base, meta });
+          shortsProgress(`VIDEO ${tag}\nreading · ${clock(info.duration)}`);
+          const windows = scanWindows(info.duration);
+          const segments = await transcribe(video.path, info.duration, windows);
+          if (!segments.length) throw new Error("I could not hear any speech in that video.");
+          const frames = await sampleFrames(video.path, info.duration, windows);
+          let waited = 0;
+          ticker = setInterval(() => {
+            waited += 1;
+            shortsProgress(
+              `VIDEO ${tag} · WATCHING THE WHOLE VIDEO\n${windows.length} slice${windows.length === 1 ? "" : "s"} across ${clock(info.duration)} · ${segments.length} lines read · scoring every moment · ${waited}s`
+            );
+          }, 1000);
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 480_000);
+          let data;
+          try {
+            const res = await bridge().api("/api/dev/shorts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                duration: info.duration,
+                platform: dev.platform,
+                segments,
+                frames,
+                windows,
+              }),
+              signal: ctrl.signal,
+            });
+            data = await res.json().catch(() => null);
+            if (!res.ok) throw new Error(data?.message || `analysis refused (${res.status})`);
+          } finally {
+            clearTimeout(timer);
+          }
+          const list = Array.isArray(data?.shorts) && data.shorts.length ? data.shorts : data?.pick ? [data.pick] : [];
+          if (!list.length) throw new Error("She watched the whole video and found nothing worth posting.");
+          const before = made.length;
+          for (let i = 0; i < list.length; i += 1) {
+            const pick = list[i];
+            const start = Math.max(0, Number(pick.start) || 0);
+            const end = Math.min(info.duration, Number(pick.end) || 0);
+            if (end - start < 8) continue;
+            const length = end - start;
+            seq += 1;
+            const base = `${slug(pick.title)}-${stamp}-${seq}`;
+            shortsProgress(
+              `VIDEO ${tag} · CUTTING ${i + 1}/${list.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s${pick.score ? ` · score ${pick.score}` : ""}`
+            );
+            try {
+              const cues = buildCues(segments, start, end);
+              const srt = buildSrt(cues);
+              await D.write(`shorts/${base}.srt`, srt);
+              await D.write(`shorts/${base}.ass`, buildAss(cues));
+              const cut = await D.cut({
+                video: video.path,
+                start,
+                duration: length,
+                out: `shorts/${base}.mp4`,
+                captions: `shorts/${base}.ass`,
+                width: info.width,
+                height: info.height,
+              });
+              const meta = [
+                `VIDEO\n${entry.name}`,
+                `PLATFORM\n${PLATFORMS[dev.platform].name}`,
+                `TITLE\n${pick.title || ""}`,
+                `HOOK\n${pick.hook || ""}`,
+                `CAPTION\n${pick.caption || ""}`,
+                `HASHTAGS\n${(pick.hashtags || []).map((h) => `#${h}`).join(" ")}`,
+                `DESCRIPTION\n${pick.description || ""}`,
+                `WHY IT KEEPS VIEWERS\n${pick.why || ""}`,
+                `RETENTION SCORE\n${pick.score || "?"}/100`,
+                `SOURCE\n${video.path}`,
+                `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
+                `FILE\nshorts/${base}.mp4`,
+              ].join("\n\n");
+              await D.write(`shorts/${base}.txt`, meta);
+              made.push({ pick, cut, base, meta, videoName: entry.name });
+            } catch (err) {
+              failures.push(`${entry.name} ${clock(start)}-${clock(end)}: ${err.message || err}`);
+            }
+          }
+          entry.state = made.length > before ? "done" : "nothing postable";
+          renderShortsResults(made, false);
         } catch (err) {
-          failures.push(`${clock(start)}-${clock(end)}: ${err.message || err}`);
+          entry.state = "failed";
+          failures.push(`${entry.name}: ${err.message || err}`);
+        } finally {
+          if (ticker) { clearInterval(ticker); ticker = null; }
+          renderVideoList();
         }
       }
-      if (!made.length) throw new Error(`every cut failed - ${failures[0] || "unknown error"}`);
-      renderShortsResults(made);
+      if (!made.length) throw new Error(`every video failed - ${failures[0] || "unknown error"}`);
+      renderShortsResults(made, true);
       const where = made[0].cut.path.slice(0, made[0].cut.path.lastIndexOf("\\") + 1);
-      const watched = data.watched || {};
       shortsProgress(
-        `DONE\n${made.length} short${made.length === 1 ? "" : "s"} cut from ${watched.windows || windows.length} slice${(watched.windows || windows.length) === 1 ? "" : "s"} · ${watched.candidates || list.length} moments scored\n${where}`
+        `DONE\n${made.length} short${made.length === 1 ? "" : "s"} from ${queue.length} video${queue.length === 1 ? "" : "s"}${failures.length ? ` · ${failures.length} skipped` : ""}\n${where}`
       );
       sysLine(`${made.length} short${made.length === 1 ? "" : "s"} ready in shorts/`);
     } catch (err) {
@@ -913,20 +982,22 @@
     } finally {
       if (ticker) clearInterval(ticker);
       dev.shortsBusy = false;
+      renderVideoList();
       paintStudio();
     }
   }
 
   // One block per short: the finished vertical file plays right there, the
   // caption/info script sits next to it, and the copy buttons grab the post.
-  function renderShortsResults(entries) {
+  function renderShortsResults(entries, scroll = true) {
     const box = dev.els.shortsResult;
     box.textContent = "";
     box.classList.remove("hidden");
     const head = document.createElement("div");
     head.className = "yt-results-head";
     const h = document.createElement("h4");
-    h.textContent = `${entries.length} short${entries.length === 1 ? "" : "s"} ready`;
+    const sources = new Set(entries.map((e) => e.videoName || "this video"));
+    h.textContent = `${entries.length} short${entries.length === 1 ? "" : "s"} from ${sources.size} video${sources.size === 1 ? "" : "s"}`;
     head.appendChild(h);
     const reveal = document.createElement("button");
     reveal.type = "button";
@@ -967,6 +1038,10 @@
       when.className = "dev-when";
       when.textContent = `${clock(pick.start)} - ${clock(pick.end)} · ${length.toFixed(1)}s · ${PLATFORMS[dev.platform].name}${pick.score ? ` · score ${pick.score}/100` : ""}`;
       body.appendChild(when);
+      const from = document.createElement("div");
+      from.className = "yt-short-from";
+      from.textContent = `from ${entry.videoName || "selected video"}`;
+      body.appendChild(from);
       const tags = document.createElement("div");
       tags.className = "dev-tags";
       tags.textContent = (pick.hashtags || []).map((t) => `#${t}`).join(" ");
@@ -1005,7 +1080,7 @@
       card.appendChild(body);
       box.appendChild(card);
     }
-    box.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   /* ------------------------------------------------------------ open/close */
@@ -1089,8 +1164,7 @@
     dev.els.permOnce.addEventListener("click", () => dev.promptResolve?.("once"));
     dev.els.permAlways.addEventListener("click", () => dev.promptResolve?.("always"));
     dev.els.permDeny.addEventListener("click", () => dev.promptResolve?.("deny"));
-    $("shortsPick").addEventListener("click", pickVideo);
-    dev.els.shortsClear.addEventListener("click", clearVideo);
+    $("shortsPick").addEventListener("click", pickVideos);
     $("shortsRun").addEventListener("click", runShorts);
     document.querySelectorAll("[data-platform]").forEach((b) => {
       b.addEventListener("click", () => setPlatform(b.getAttribute("data-platform")));

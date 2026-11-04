@@ -67,7 +67,7 @@ contextBridge.exposeInMainWorld("capriDev", {
   root: () => ipcRenderer.invoke("capri-dev-root"),
   setRoot: (dir) => ipcRenderer.invoke("capri-dev-set-root", String(dir || "")),
   pickFolder: () => ipcRenderer.invoke("capri-dev-pick-folder"),
-  pickVideo: () => ipcRenderer.invoke("capri-dev-pick-video"),
+  pickVideos: () => ipcRenderer.invoke("capri-dev-pick-videos"),
   pickImages: () => ipcRenderer.invoke("capri-dev-pick-images"),
   list: (p) => ipcRenderer.invoke("capri-dev-list", String(p || ".")),
   read: (p, max) => ipcRenderer.invoke("capri-dev-read", String(p || ""), Number(max) || 0),
