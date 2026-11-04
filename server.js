@@ -1080,14 +1080,16 @@ function cleanShortsClip(raw, ws, we, duration) {
   if (!raw || typeof raw !== "object") return null;
   const lo = Math.max(0, ws - 2);
   const hi = Math.min(duration, we + 2);
-  if (hi - lo < 15) return null;
-  let start = clampNum(raw.start, lo, Math.max(lo, hi - 15));
-  let end = clampNum(raw.end, start + 15, Math.min(duration, start + 60));
-  if (end - start < 15) {
-    if (start + 15 <= duration) end = start + 15;
-    else { end = duration; start = Math.max(0, end - 15); }
+  // A source slice shorter than 30s cannot give a 15s+ short plus breathing room.
+  const minLen = hi - lo < 30 ? 10 : 15;
+  if (hi - lo < minLen) return null;
+  let start = clampNum(raw.start, lo, Math.max(lo, hi - minLen));
+  let end = clampNum(raw.end, start + minLen, Math.min(duration, start + 60));
+  if (end - start < minLen) {
+    if (start + minLen <= duration) end = start + minLen;
+    else { end = duration; start = Math.max(0, end - minLen); }
   }
-  if (end - start < 15) return null;
+  if (end - start < minLen) return null;
   const hashtags = Array.isArray(raw.hashtags)
     ? raw.hashtags
         .map((h) => String(h || "").replace(/^#/, "").replace(/[^A-Za-z0-9_]/g, "").slice(0, 30))
@@ -1148,7 +1150,7 @@ ${algorithm}
 You are given one slice of a longer video. Find the moments in this slice worth posting, best first.
 Rank by real viewer entertainment: laughter, shock, tension, a satisfying payoff, a line people will repeat. Funny and surprising beat informative. Setup with no payoff, dead air, rambling and inside jokes score low.
 Every clip must stand alone - a stranger who never saw the source understands it instantly.
-Rules: each clip 20-58 seconds (never under 15, never over 60), start on the strongest beat, never overlap another clip you returned, and never invent a moment that is not in the transcript or frames.
+Rules: each clip 10-58 seconds - aim for 20-58 when the material allows, never over 60, and if this slice is shorter than 40 seconds use its best stretch. Start on the strongest beat, never overlap another clip you returned, and never invent a moment that is not in the transcript or frames.
 If this slice truly has nothing worth posting, return {"clips":[]}.
 For every clip also write the upload package.
 Return ONLY JSON:
