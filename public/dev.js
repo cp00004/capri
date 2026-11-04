@@ -541,7 +541,7 @@
       }
       dev.els.shortsFile.classList.remove("hidden");
       dev.els.shortsFileName.textContent = f.name;
-      dev.els.shortsFileMeta.textContent = `${Math.round(dev.info.duration)}s · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[dev.platform].note}`;
+      dev.els.shortsFileMeta.textContent = `${clock(dev.info.duration)} · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[dev.platform].note}`;
       dev.els.shortsRun.disabled = !dev.root;
       dev.els.shortsProgress.classList.add("hidden");
     } catch (err) {
@@ -566,7 +566,7 @@
     for (const b of document.querySelectorAll("[data-platform]")) {
       b.classList.toggle("active", b.getAttribute("data-platform") === name);
     }
-    if (dev.info) dev.els.shortsFileMeta.textContent = `${Math.round(dev.info.duration)}s · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[name].note}`;
+    if (dev.info) dev.els.shortsFileMeta.textContent = `${clock(dev.info.duration)} · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[name].note}`;
   }
 
   function shutdown(text) {
@@ -664,7 +664,10 @@
 
   function clock(t) {
     const s = Math.max(0, Math.round(Number(t) || 0));
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
   }
 
   function srtTime(t) {
