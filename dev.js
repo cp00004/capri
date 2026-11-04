@@ -541,7 +541,7 @@
       }
       dev.els.shortsFile.classList.remove("hidden");
       dev.els.shortsFileName.textContent = f.name;
-      dev.els.shortsFileMeta.textContent = `${Math.round(dev.info.duration)}s · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[dev.platform].note}`;
+      dev.els.shortsFileMeta.textContent = `${clock(dev.info.duration)} · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[dev.platform].note}`;
       dev.els.shortsRun.disabled = !dev.root;
       dev.els.shortsProgress.classList.add("hidden");
     } catch (err) {
@@ -566,7 +566,7 @@
     for (const b of document.querySelectorAll("[data-platform]")) {
       b.classList.toggle("active", b.getAttribute("data-platform") === name);
     }
-    if (dev.info) dev.els.shortsFileMeta.textContent = `${Math.round(dev.info.duration)}s · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[name].note}`;
+    if (dev.info) dev.els.shortsFileMeta.textContent = `${clock(dev.info.duration)} · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[name].note}`;
   }
 
   function shutdown(text) {
@@ -574,38 +574,63 @@
     dev.els.shortsProgress.textContent = text;
   }
 
-  async function transcribe(video, duration) {
+  // Long footage is sampled in evenly spaced slices so the whole timeline gets watched.
+  function scanWindows(duration) {
+    if (duration <= 2400) return [{ start: 0, end: duration }];
+    const count = Math.min(16, Math.max(8, Math.round(duration / 900)));
+    const span = Math.min(180, duration / count);
+    const step = (duration - span) / Math.max(1, count - 1);
+    const list = [];
+    for (let i = 0; i < count; i += 1) {
+      const start = i * step;
+      list.push({ start, end: Math.min(duration, start + span) });
+    }
+    return list;
+  }
+
+  async function transcribe(video, duration, windows) {
     const CHUNK = 25;
-    const limit = Math.min(duration, 20 * 60);
-    const count = Math.max(1, Math.ceil(limit / CHUNK));
+    const jobs = [];
+    for (const w of windows) {
+      for (let at = w.start; at < w.end - 1; at += CHUNK) {
+        jobs.push({ start: at, span: Math.min(CHUNK, w.end - at) });
+      }
+    }
     const segments = [];
     let next = 0;
     let done = 0;
+    const ask = async (job) => {
+      const wav = await D.wav({ video, start: job.start, duration: job.span });
+      const bytes = Uint8Array.from(atob(wav.data), (c) => c.charCodeAt(0));
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 60_000);
+      try {
+        const res = await bridge().api("/api/stt", {
+          method: "POST",
+          headers: { "Content-Type": "audio/wav" },
+          body: new Blob([bytes], { type: "audio/wav" }),
+          signal: ctrl.signal,
+        });
+        if (!res.ok) return "";
+        const data = await res.json();
+        return String(data.text || "").trim();
+      } finally {
+        clearTimeout(timer);
+      }
+    };
     const worker = async () => {
-      while (next < count) {
-        const i = next++;
-        const start = i * CHUNK;
-        const span = Math.min(CHUNK, limit - start);
-        if (span < 1) continue;
+      while (next < jobs.length) {
+        const job = jobs[next++];
+        let text = "";
         try {
-          const wav = await D.wav({ video, start, duration: span });
-          const bytes = Uint8Array.from(atob(wav.data), (c) => c.charCodeAt(0));
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 60_000);
-          const res = await bridge().api("/api/stt", {
-            method: "POST",
-            headers: { "Content-Type": "audio/wav" },
-            body: new Blob([bytes], { type: "audio/wav" }),
-            signal: ctrl.signal,
-          }).finally(() => clearTimeout(timer));
-          if (res.ok) {
-            const data = await res.json();
-            const text = String(data.text || "").trim();
-            if (text && !/^\[?(silence|blank|music|no speech)/i.test(text)) segments.push({ start, end: start + span, text });
-          }
+          text = await ask(job);
+          if (!text) { await new Promise((r) => setTimeout(r, 1200)); text = await ask(job); }
         } catch { /* one dead chunk should not kill the read */ }
+        if (text && !/^\[?(silence|blank|music|no speech)/i.test(text)) {
+          segments.push({ start: job.start, end: job.start + job.span, text });
+        }
         done += 1;
-        shortsProgress(`READING THE VIDEO\nchunk ${done}/${count} · ${segments.length} lines heard`);
+        shortsProgress(`READING THE VIDEO\nchunk ${done}/${jobs.length} · ${segments.length} lines heard`);
       }
     };
     await Promise.all([worker(), worker()]);
@@ -613,16 +638,36 @@
     return segments;
   }
 
-  async function sampleFrames(video, duration) {
+  async function sampleFrames(video, duration, windows) {
     const frames = [];
-    const count = duration > 240 ? 10 : 8;
-    for (let i = 0; i < count; i += 1) {
-      const t = Math.max(0, Math.min(duration - 0.2, duration * ((i + 0.5) / count)));
+    const spots = [];
+    if (windows.length === 1) {
+      const count = Math.max(6, Math.min(20, Math.ceil(duration / 25)));
+      for (let i = 0; i < count; i += 1) {
+        spots.push(Math.max(0, Math.min(duration - 0.2, duration * ((i + 0.5) / count))));
+      }
+    } else {
+      for (const w of windows) {
+        for (let i = 0; i < 3; i += 1) {
+          spots.push(Math.max(0, Math.min(duration - 0.2, w.start + ((w.end - w.start) * (i + 0.5)) / 3)));
+        }
+      }
+    }
+    for (let i = 0; i < spots.length; i += 1) {
+      const t = spots[i];
       const b64 = await D.frame({ video, at: t });
       if (b64) frames.push({ t, dataUrl: `data:image/jpeg;base64,${b64}` });
-      shortsProgress(`READING THE VIDEO\nframe ${i + 1}/${count}`);
+      shortsProgress(`READING THE VIDEO\nframe ${i + 1}/${spots.length} · ${Math.round(duration)}s of footage`);
     }
     return frames;
+  }
+
+  function clock(t) {
+    const s = Math.max(0, Math.round(Number(t) || 0));
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = String(s % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
   }
 
   function srtTime(t) {
@@ -661,7 +706,7 @@
   async function runShorts() {
     if (!dev.video || !dev.info || dev.shortsBusy) return;
     if (!dev.root) {
-      shutdown("Open a workspace folder first - the short and its script are written into it.");
+      shutdown("Open a workspace folder first - the shorts and their scripts are written into it.");
       return;
     }
     dev.shortsBusy = true;
@@ -669,15 +714,23 @@
     dev.els.shortsResult.classList.add("hidden");
     const video = dev.video;
     const info = dev.info;
+    let ticker = null;
     try {
       shortsProgress(`READING THE VIDEO\nopening ${video.name}`);
-      const segments = await transcribe(video.path, info.duration);
+      const windows = scanWindows(info.duration);
+      const segments = await transcribe(video.path, info.duration, windows);
       if (!segments.length) throw new Error("I could not hear any speech in that video.");
-      const frames = await sampleFrames(video.path, info.duration);
-      shortsProgress("READING THE VIDEO\nchoosing the hook and the cut");
+      const frames = await sampleFrames(video.path, info.duration, windows);
+      let waited = 0;
+      ticker = setInterval(() => {
+        waited += 1;
+        shortsProgress(
+          `WATCHING THE WHOLE VIDEO\n${windows.length} slice${windows.length === 1 ? "" : "s"} across ${clock(info.duration)} · ${segments.length} lines read · scoring every moment · ${waited}s`
+        );
+      }, 1000);
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 180_000);
-      let pick;
+      const timer = setTimeout(() => ctrl.abort(), 480_000);
+      let data;
       try {
         const res = await bridge().api("/api/dev/shorts", {
           method: "POST",
@@ -687,94 +740,130 @@
             platform: dev.platform,
             segments,
             frames,
+            windows,
           }),
           signal: ctrl.signal,
         });
-        const data = await res.json().catch(() => null);
+        data = await res.json().catch(() => null);
         if (!res.ok) throw new Error(data?.message || `analysis refused (${res.status})`);
-        pick = data.pick;
       } finally {
         clearTimeout(timer);
       }
-      if (!pick || !Number.isFinite(Number(pick.start))) throw new Error("She could not settle on a cut.");
-      const start = Math.max(0, Number(pick.start));
-      const end = Math.min(info.duration, Number(pick.end));
-      const length = Math.max(8, end - start);
+      const list = Array.isArray(data?.shorts) && data.shorts.length ? data.shorts : data?.pick ? [data.pick] : [];
+      if (!list.length) throw new Error("She watched the whole video and found nothing worth posting.");
       const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-      const base = `${slug(pick.title)}-${stamp}`;
-      shortsProgress(`CUTTING\n${start.toFixed(1)}s -> ${end.toFixed(1)}s · ${length.toFixed(1)}s`);
-      const cut = await D.cut({ video: video.path, start, duration: length, out: `shorts/${base}.mp4` });
-      const srt = buildSrt(segments, start, end);
-      await D.write(`shorts/${base}.srt`, srt);
-      const meta = [
-        `PLATFORM\n${PLATFORMS[dev.platform].name}`,
-        `TITLE\n${pick.title || ""}`,
-        `HOOK\n${pick.hook || ""}`,
-        `CAPTION\n${pick.caption || ""}`,
-        `HASHTAGS\n${(pick.hashtags || []).map((h) => `#${h}`).join(" ")}`,
-        `DESCRIPTION\n${pick.description || ""}`,
-        `WHY THIS CUT\n${pick.why || ""}`,
-        `SOURCE\n${video.path}`,
-        `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
-      ].join("\n\n");
-      await D.write(`shorts/${base}.txt`, meta);
-      renderShortsResult(pick, cut, base);
-      shortsProgress(`DONE\n${cut.path} · ${(cut.bytes / 1_048_576).toFixed(1)} MB`);
-      sysLine(`short ready: ${cut.path}`);
+      const made = [];
+      const failures = [];
+      for (let i = 0; i < list.length; i += 1) {
+        const pick = list[i];
+        const start = Math.max(0, Number(pick.start) || 0);
+        const end = Math.min(info.duration, Number(pick.end) || 0);
+        if (end - start < 8) continue;
+        const length = end - start;
+        const base = `${slug(pick.title)}-${stamp}-${i + 1}`;
+        shortsProgress(
+          `CUTTING ${i + 1}/${list.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s${pick.score ? ` · score ${pick.score}` : ""}`
+        );
+        try {
+          const cut = await D.cut({ video: video.path, start, duration: length, out: `shorts/${base}.mp4` });
+          const srt = buildSrt(segments, start, end);
+          await D.write(`shorts/${base}.srt`, srt);
+          const meta = [
+            `PLATFORM\n${PLATFORMS[dev.platform].name}`,
+            `TITLE\n${pick.title || ""}`,
+            `HOOK\n${pick.hook || ""}`,
+            `CAPTION\n${pick.caption || ""}`,
+            `HASHTAGS\n${(pick.hashtags || []).map((h) => `#${h}`).join(" ")}`,
+            `DESCRIPTION\n${pick.description || ""}`,
+            `WHY IT KEEPS VIEWERS\n${pick.why || ""}`,
+            `RETENTION SCORE\n${pick.score || "?"}/100`,
+            `SOURCE\n${video.path}`,
+            `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
+          ].join("\n\n");
+          await D.write(`shorts/${base}.txt`, meta);
+          made.push({ pick, cut, base });
+        } catch (err) {
+          failures.push(`${clock(start)}-${clock(end)}: ${err.message || err}`);
+        }
+      }
+      if (!made.length) throw new Error(`every cut failed - ${failures[0] || "unknown error"}`);
+      renderShortsResults(made);
+      const where = made[0].cut.path.slice(0, made[0].cut.path.lastIndexOf("\\") + 1);
+      shortsProgress(
+        `DONE\n${made.length} short${made.length === 1 ? "" : "s"} cut from ${data.watched?.windows || slices} slice${(data.watched?.windows || slices) === 1 ? "" : "s"} · ${data.watched?.candidates || list.length} moments scored\n${where}`
+      );
+      sysLine(`${made.length} short${made.length === 1 ? "" : "s"} ready in shorts/`);
     } catch (err) {
       shutdown(`FAILED\n${err.message || err}`);
     } finally {
+      if (ticker) clearInterval(ticker);
       dev.shortsBusy = false;
       dev.els.shortsRun.disabled = false;
     }
   }
 
-  function renderShortsResult(pick, cut, base) {
+  function renderShortsResults(entries) {
     const box = dev.els.shortsResult;
     box.textContent = "";
     box.classList.remove("hidden");
-    const h = document.createElement("h4");
-    h.textContent = pick.title || "Untitled short";
-    box.appendChild(h);
-    const hook = document.createElement("div");
-    hook.textContent = pick.hook ? `HOOK: ${pick.hook}` : "";
-    box.appendChild(hook);
-    const tags = document.createElement("div");
-    tags.className = "dev-tags";
-    tags.textContent = (pick.hashtags || []).map((t) => `#${t}`).join(" ");
-    box.appendChild(tags);
-    const desc = document.createElement("div");
-    desc.textContent = pick.description || "";
-    box.appendChild(desc);
-    const why = document.createElement("div");
-    why.textContent = pick.why ? `\n${pick.why}` : "";
-    box.appendChild(why);
-    const path = document.createElement("div");
-    path.textContent = `\n${cut.path} · SRT and script saved next to it`;
-    box.appendChild(path);
+    const head = document.createElement("h4");
+    head.textContent = `${entries.length} short${entries.length === 1 ? "" : "s"} ready`;
+    box.appendChild(head);
+    const list = document.createElement("div");
+    list.className = "dev-results";
+    const copyText = (pick) => `${pick.title || ""}\n${(pick.hashtags || []).map((t) => `#${t}`).join(" ")}`;
+    for (const { pick, cut } of entries) {
+      const card = document.createElement("div");
+      card.className = "dev-result";
+      const h = document.createElement("h4");
+      h.textContent = pick.title || "Untitled short";
+      card.appendChild(h);
+      const when = document.createElement("div");
+      when.className = "dev-when";
+      const length = Math.max(0, (Number(pick.end) || 0) - (Number(pick.start) || 0));
+      when.textContent = `${clock(pick.start)} - ${clock(pick.end)} · ${length.toFixed(1)}s${pick.score ? ` · score ${pick.score}/100` : ""}`;
+      card.appendChild(when);
+      const hook = document.createElement("div");
+      hook.textContent = pick.hook ? `HOOK: ${pick.hook}` : "";
+      card.appendChild(hook);
+      const tags = document.createElement("div");
+      tags.className = "dev-tags";
+      tags.textContent = (pick.hashtags || []).map((t) => `#${t}`).join(" ");
+      card.appendChild(tags);
+      const desc = document.createElement("div");
+      desc.textContent = pick.description || "";
+      card.appendChild(desc);
+      const why = document.createElement("div");
+      why.textContent = pick.why ? `\n${pick.why}` : "";
+      card.appendChild(why);
+      const actions = document.createElement("div");
+      actions.className = "dev-actions";
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "dev-mini";
+      openBtn.textContent = "OPEN SHORT";
+      openBtn.addEventListener("click", () => D.open(cut.path).catch((e) => sysLine(String(e.message || e))));
+      actions.appendChild(openBtn);
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.className = "dev-mini";
+      copy.textContent = "COPY TITLE + TAGS";
+      copy.addEventListener("click", () => {
+        navigator.clipboard?.writeText(copyText(pick)).then(() => sysLine("title and hashtags copied")).catch(() => {});
+      });
+      actions.appendChild(copy);
+      card.appendChild(actions);
+      list.appendChild(card);
+    }
+    box.appendChild(list);
     const actions = document.createElement("div");
     actions.className = "dev-actions";
-    const openBtn = document.createElement("button");
-    openBtn.type = "button";
-    openBtn.className = "dev-mini";
-    openBtn.textContent = "OPEN SHORT";
-    openBtn.addEventListener("click", () => D.open(cut.path).catch((e) => sysLine(String(e.message || e))));
-    actions.appendChild(openBtn);
     const reveal = document.createElement("button");
     reveal.type = "button";
     reveal.className = "dev-mini";
-    reveal.textContent = "OPEN FOLDER";
-    reveal.addEventListener("click", () => D.reveal(cut.path));
+    reveal.textContent = "OPEN SHORTS FOLDER";
+    reveal.addEventListener("click", () => D.reveal(entries[0].cut.path));
     actions.appendChild(reveal);
-    const copy = document.createElement("button");
-    copy.type = "button";
-    copy.className = "dev-mini";
-    copy.textContent = "COPY TITLE + TAGS";
-    copy.addEventListener("click", () => {
-      const text = `${pick.title || ""}\n${(pick.hashtags || []).map((t) => `#${t}`).join(" ")}`;
-      navigator.clipboard?.writeText(text).then(() => sysLine("title and hashtags copied")).catch(() => {});
-    });
-    actions.appendChild(copy);
     box.appendChild(actions);
   }
 
