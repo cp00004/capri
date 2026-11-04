@@ -741,7 +741,19 @@
     try { window.capriNative?.log?.("dev: closed"); } catch { /* browser */ }
   }
 
-  window.CapriDev = { open, close, isOpen: () => dev.open };
+  window.CapriDev = {
+    open,
+    close,
+    isOpen: () => dev.open,
+    __testLoadVideo: async (path) => {
+      dev.video = { name: path.split(/[\\/]/).pop(), path };
+      dev.info = await D.probe(path);
+      dev.els.shortsFile.classList.remove("hidden");
+      dev.els.shortsFile.textContent = dev.video.name;
+      dev.els.shortsRun.disabled = !dev.root;
+      return dev.info;
+    },
+  };
 
   function wire() {
     initRefs();
