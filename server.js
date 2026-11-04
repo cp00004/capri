@@ -1075,7 +1075,7 @@ async function handleDevShorts(req, res) {
   let body;
   try { body = await readBody(req, 12_000_000); } catch (err) { return devToolError(res, 400, err.message); }
   const duration = Math.max(1, Number(body.duration) || 0);
-  const target = String(body.target || "25-45 seconds").slice(0, 40);
+  const platform = String(body.platform || "youtube").toLowerCase() === "tiktok" ? "tiktok" : "youtube";
   const segments = Array.isArray(body.segments) ? body.segments.slice(0, 240) : [];
   const frames = Array.isArray(body.frames) ? body.frames.slice(0, 12) : [];
   const lines = segments
@@ -1085,13 +1085,22 @@ async function handleDevShorts(req, res) {
     .slice(0, 45000);
   if (!lines) return devToolError(res, 400, "No speech was found in that video.");
 
-  const system = `You are Capri, a short-form editor who understands the YouTube Shorts / TikTok / Reels algorithm.
-Pick the single best continuous clip from the source for a vertical short. Target length: ${target}.
-Optimize for retention: a hook in the first 1-3 seconds, a clear payoff, no dead air, no intros, loop-friendly ending.
-You may cut a little dead air but never more than the given transcript allows.
+  const algorithm = platform === "tiktok"
+    ? `Platform: TikTok.
+TikTok algorithm: the first 1 second decides everything - start on the strongest visual or line, never on a pause or a greeting.
+Keep the pace tight, let on-screen text and the caption carry the meaning, end on a comment-bait or loop line.
+Hashtags: 4-8, a mix of niche and broad, no spaces.`
+    : `Platform: YouTube Shorts.
+YouTube algorithm: strong loop and high retention - the first 2 seconds must show the payoff or promise it, and the ending must flow straight back into the start.
+Title is searchable and clickable, under 70 characters. Hashtags: 6-10, niche first, no spaces.`;
+  const system = `You are Capri, a short-form editor who understands the YouTube Shorts and TikTok algorithms.
+${algorithm}
+Pick the single best continuous clip from the source for a vertical short.
+Length: a short is at most 60 seconds. Choose the longest useful window up to 58 seconds unless the payoff clearly ends sooner; never go under 15 seconds and never over 60.
+Optimize for retention: no dead air, no intros, a clear payoff, loop-friendly ending. You may skip dead air only if the transcript lets you.
 Return ONLY JSON with this shape:
 {"start": number, "end": number, "title": string, "hook": string, "hashtags": [string], "description": string, "caption": string, "why": string, "alternatives": [{"start": number, "end": number, "why": string}]}
-title must fit YouTube Shorts and stay under 90 characters. hashtags: 6-10, niche first, no spaces. description: 2-3 sentences. caption: one punchy on-screen line. why: 1-2 sentences.`;
+description: 2-3 sentences. caption: one punchy on-screen line. why: 1-2 sentences on the algorithm.`;
   const frameNote = frames.length
     ? "Frames from the video are attached in order, each labeled with its timestamp."
     : "No frames were attached; choose from the transcript.";

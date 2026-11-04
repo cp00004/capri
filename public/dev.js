@@ -25,6 +25,8 @@
     video: null,
     info: null,
     shortsBusy: false,
+    platform: "youtube",
+    nameMode: "",
   };
 
   /* ------------------------------------------------------------ shell UI */
@@ -48,9 +50,14 @@
       permAlways: $("devPermAlways"),
       permDeny: $("devPermDeny"),
       shortsFile: $("shortsFile"),
+      shortsFileName: $("shortsFileName"),
+      shortsFileMeta: $("shortsFileMeta"),
+      shortsClear: $("shortsClear"),
       shortsRun: $("shortsRun"),
       shortsProgress: $("shortsProgress"),
       shortsResult: $("shortsResult"),
+      nameForm: $("devNameForm"),
+      nameInput: $("devNameInput"),
     };
   }
 
@@ -273,6 +280,44 @@
     }
   }
 
+  function openNameForm(mode) {
+    if (!dev.root) {
+      sysLine("Open a folder first.");
+      chooseFolder();
+      return;
+    }
+    dev.nameMode = mode;
+    dev.els.nameForm.classList.remove("hidden");
+    dev.els.nameInput.value = "";
+    dev.els.nameInput.placeholder = mode === "file" ? "name it, e.g. script.py" : "name the folder";
+    dev.els.nameInput.focus();
+  }
+
+  function closeNameForm() {
+    dev.nameMode = "";
+    dev.els.nameForm.classList.add("hidden");
+  }
+
+  async function createName() {
+    const name = String(dev.els.nameInput.value || "").trim();
+    if (!name || !dev.nameMode) return;
+    const mode = dev.nameMode;
+    closeNameForm();
+    try {
+      if (mode === "file") {
+        await D.write(name, "");
+        await reloadTree();
+        await openFile(name);
+      } else {
+        await D.mkdir(name);
+        await reloadTree();
+      }
+      sysLine(mode === "file" ? `created file ${name}` : `created folder ${name}`);
+    } catch (err) {
+      sysLine(`could not create ${name}: ${err.message || err}`);
+    }
+  }
+
   /* ------------------------------------------------------------ approvals */
 
   function askPerm(title, note) {
@@ -466,10 +511,9 @@
 
   /* ------------------------------------------------------------ shorts */
 
-  const LENGTHS = {
-    short: "18-30 seconds",
-    mid: "25-45 seconds",
-    long: "45-60 seconds",
+  const PLATFORMS = {
+    youtube: { name: "YouTube Shorts", note: "9:16 · up to 60s · retention-first" },
+    tiktok: { name: "TikTok", note: "9:16 · up to 60s · hook in the first second" },
   };
 
   function shortsProgress(text) {
@@ -488,24 +532,41 @@
       const f = await D.pickVideo();
       if (!f) return;
       dev.video = f;
-      dev.els.shortsFile.classList.remove("hidden");
-      dev.els.shortsFile.textContent = f.name;
-      try {
-        dev.info = await D.probe(f.path);
-        const note = document.createElement("small");
-        note.textContent = `${Math.round(dev.info.duration)}s · ${dev.info.width}x${dev.info.height}${dev.info.hasAudio ? "" : " · no audio"}`;
-        dev.els.shortsFile.appendChild(note);
-        if (!dev.info.hasAudio) {
-          shutdown(`"${f.name}" has no audio, so there is nothing to read for the hook.`);
-          return;
-        }
-        dev.els.shortsRun.disabled = !dev.root;
-      } catch (err) {
-        shutdown(`Could not read that video: ${err.message || err}`);
+      dev.info = await D.probe(f.path);
+      if (!dev.info.hasAudio) {
+        dev.video = null;
+        dev.info = null;
+        shutdown(`"${f.name}" has no audio, so there is nothing to read for the hook.`);
+        return;
       }
+      dev.els.shortsFile.classList.remove("hidden");
+      dev.els.shortsFileName.textContent = f.name;
+      dev.els.shortsFileMeta.textContent = `${Math.round(dev.info.duration)}s · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[dev.platform].note}`;
+      dev.els.shortsRun.disabled = !dev.root;
+      dev.els.shortsProgress.classList.add("hidden");
     } catch (err) {
-      sysLine(`video picker failed: ${err.message || err}`);
+      sysLine(`could not read that video: ${err.message || err}`);
     }
+  }
+
+  function clearVideo() {
+    dev.video = null;
+    dev.info = null;
+    dev.els.shortsFile.classList.add("hidden");
+    dev.els.shortsFileName.textContent = "";
+    dev.els.shortsFileMeta.textContent = "";
+    dev.els.shortsRun.disabled = true;
+    dev.els.shortsProgress.classList.add("hidden");
+    dev.els.shortsResult.classList.add("hidden");
+  }
+
+  function setPlatform(name) {
+    if (!PLATFORMS[name]) return;
+    dev.platform = name;
+    for (const b of document.querySelectorAll("[data-platform]")) {
+      b.classList.toggle("active", b.getAttribute("data-platform") === name);
+    }
+    if (dev.info) dev.els.shortsFileMeta.textContent = `${Math.round(dev.info.duration)}s · ${dev.info.width}x${dev.info.height} · ${PLATFORMS[name].note}`;
   }
 
   function shutdown(text) {
@@ -623,7 +684,7 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             duration: info.duration,
-            target: LENGTHS[$("shortsLength").value] || LENGTHS.mid,
+            platform: dev.platform,
             segments,
             frames,
           }),
@@ -646,6 +707,7 @@
       const srt = buildSrt(segments, start, end);
       await D.write(`shorts/${base}.srt`, srt);
       const meta = [
+        `PLATFORM\n${PLATFORMS[dev.platform].name}`,
         `TITLE\n${pick.title || ""}`,
         `HOOK\n${pick.hook || ""}`,
         `CAPTION\n${pick.caption || ""}`,
@@ -726,7 +788,7 @@
     if (!dev.logInit) {
       dev.logInit = true;
       sysLine("developer mode armed · this never shows up in settings");
-      sysLine("open a folder, add images, or point her at a video in YOU TUBER");
+      sysLine("open a folder, add images, or point her at a video in YOUTUBE");
     }
     initRoot();
     setTimeout(() => dev.els.input?.focus(), 80);
@@ -737,6 +799,7 @@
     if (!dev.els?.screen) return;
     dev.open = false;
     dev.els.screen.classList.add("hidden");
+    closeNameForm();
     if (dev.promptResolve) dev.promptResolve("deny");
     try { window.capriNative?.log?.("dev: closed"); } catch { /* browser */ }
   }
@@ -746,20 +809,19 @@
   function wire() {
     initRefs();
     $("devClose").addEventListener("click", close);
+    $("devExit").addEventListener("click", close);
     $("devOpenFolder").addEventListener("click", chooseFolder);
     $("devAddImages").addEventListener("click", addImages);
     $("devRefresh").addEventListener("click", () => reloadTree().catch(() => {}));
-    $("devNewFile").addEventListener("click", async () => {
-      if (!dev.root) return sysLine("Open a folder first.");
-      const name = window.prompt("New file name (with extension):");
-      if (!name) return;
-      try { await D.write(name, ""); await reloadTree(); openFile(name); } catch (err) { sysLine(String(err.message || err)); }
+    $("devNewFile").addEventListener("click", () => openNameForm("file"));
+    $("devNewFolder").addEventListener("click", () => openNameForm("folder"));
+    dev.els.nameForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      createName();
     });
-    $("devNewFolder").addEventListener("click", async () => {
-      if (!dev.root) return sysLine("Open a folder first.");
-      const name = window.prompt("New folder name:");
-      if (!name) return;
-      try { await D.mkdir(name); await reloadTree(); } catch (err) { sysLine(String(err.message || err)); }
+    $("devNameCancel").addEventListener("click", closeNameForm);
+    dev.els.nameInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") { e.stopPropagation(); closeNameForm(); }
     });
     $("devSave").addEventListener("click", saveFile);
     dev.els.editor.addEventListener("input", () => { dev.dirty = true; paintDirty(); });
@@ -798,10 +860,15 @@
     dev.els.permAlways.addEventListener("click", () => dev.promptResolve?.("always"));
     dev.els.permDeny.addEventListener("click", () => dev.promptResolve?.("deny"));
     $("shortsPick").addEventListener("click", pickVideo);
+    dev.els.shortsClear.addEventListener("click", clearVideo);
     $("shortsRun").addEventListener("click", runShorts);
+    document.querySelectorAll("[data-platform]").forEach((b) => {
+      b.addEventListener("click", () => setPlatform(b.getAttribute("data-platform")));
+    });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && dev.open) {
         if (dev.promptResolve) { dev.promptResolve("deny"); return; }
+        if (dev.nameMode) { closeNameForm(); return; }
         close();
       }
     });

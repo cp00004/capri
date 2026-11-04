@@ -427,34 +427,38 @@
     <aside class="dev-rail">
       <nav class="dev-tabs">
         <button type="button" class="dev-tab active" data-dev-tab="explorer">WORKSPACE</button>
-        <button type="button" class="dev-tab" data-dev-tab="shorts">YOUTUBER</button>
+        <button type="button" class="dev-tab" data-dev-tab="shorts">YOUTUBE</button>
       </nav>
       <div id="devExplorer" class="dev-pane">
         <div class="dev-tree" id="devTree"><p class="dev-empty">Open a folder to give her a desk.</p></div>
+        <form id="devNameForm" class="dev-name hidden" autocomplete="off">
+          <input id="devNameInput" type="text" placeholder="name it, e.g. script.py" />
+          <button id="devNameOk" class="dev-mini" type="submit">CREATE</button>
+          <button id="devNameCancel" class="dev-mini ghost" type="button" aria-label="Cancel">&times;</button>
+        </form>
         <div class="dev-rail-actions">
-          <button id="devNewFile" class="dev-mini" type="button">+ FILE</button>
-          <button id="devNewFolder" class="dev-mini" type="button">+ FOLDER</button>
-          <button id="devRefresh" class="dev-mini" type="button">REFRESH</button>
+          <button id="devNewFile" class="dev-mini wide" type="button">📄 New file</button>
+          <button id="devNewFolder" class="dev-mini wide" type="button">📁 New folder</button>
+          <button id="devRefresh" class="dev-mini wide" type="button">↻ Refresh</button>
         </div>
       </div>
       <div id="devShorts" class="dev-pane hidden">
-        <p class="dev-kicker">YOUTUBER CONTENT</p>
-        <p class="dev-hint">Drop a downloaded video or pick one. She reads the whole thing, finds the hook and cuts a vertical short.</p>
+        <p class="dev-kicker">YOUTUBE OR TIKTOK</p>
+        <div class="dev-platforms">
+          <button type="button" class="dev-platform active" data-platform="youtube">▶ YouTube</button>
+          <button type="button" class="dev-platform" data-platform="tiktok">♪ TikTok</button>
+        </div>
         <button id="shortsPick" class="dev-btn wide" type="button">PICK VIDEO</button>
-        <div id="shortsFile" class="dev-file hidden"></div>
-        <div class="dev-shorts-opts">
-          <label><span>TARGET LENGTH</span>
-            <select id="shortsLength">
-              <option value="short">18-30s</option>
-              <option value="mid" selected>25-45s</option>
-              <option value="long">45-60s</option>
-            </select>
-          </label>
+        <div id="shortsFile" class="dev-file hidden">
+          <span id="shortsFileName"></span>
+          <small id="shortsFileMeta"></small>
+          <button id="shortsClear" class="dev-file-x" type="button" aria-label="Remove this video">&times;</button>
         </div>
         <button id="shortsRun" class="dev-btn accent wide" type="button" disabled>ANALYZE &amp; CUT</button>
         <div id="shortsProgress" class="dev-progress hidden"></div>
         <div id="shortsResult" class="dev-result hidden"></div>
       </div>
+      <button id="devExit" class="dev-btn ghost wide dev-exit" type="button">&times; CLOSE DEV MODE</button>
     </aside>
     <main class="dev-main">
       <nav class="dev-viewtabs">
