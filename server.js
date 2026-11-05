@@ -1629,10 +1629,14 @@ Return ONLY JSON:
     const known = coins.some((c) => c.symbol === symbol);
     const sellable = holding && symbol === holding.symbol;
     const safeAction = action === "BUY" && !known ? "HOLD" : action === "SELL" && !sellable ? "HOLD" : action;
+    let confidence = Number(raw?.confidence);
+    if (!Number.isFinite(confidence) || confidence <= 0) confidence = pick.confidence;
+    if (confidence > 0 && confidence <= 1) confidence *= 100;
+    confidence = Math.max(0, Math.min(100, Math.round(confidence)));
     return json(res, 200, {
       action: safeAction,
       symbol: safeAction === "HOLD" ? "" : symbol,
-      confidence: Math.max(0, Math.min(100, Math.round(Number(raw?.confidence) || pick.confidence))),
+      confidence,
       reason: String(raw?.reason || pick.reason).replace(/\s+/g, " ").trim().slice(0, 240),
       provider: out.provider || "capri",
     });

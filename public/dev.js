@@ -1696,6 +1696,13 @@
     return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
   }
 
+  function tradeConfidence(n) {
+    let v = Number(n);
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    if (v <= 1) v *= 100;
+    return Math.max(0, Math.min(100, Math.round(v)));
+  }
+
   function tradeQty(n) {
     const v = Number(n) || 0;
     if (v >= 1000) return v.toFixed(2);
@@ -1859,7 +1866,7 @@
     const coins = dev.trading.market?.coins || [];
     const action = String(pick?.action || "HOLD").toUpperCase();
     const symbol = String(pick?.symbol || "").toUpperCase();
-    const confidence = Math.max(0, Math.min(100, Math.round(Number(pick?.confidence) || 0)));
+    const confidence = tradeConfidence(pick?.confidence);
     const reason = String(pick?.reason || "").replace(/\s+/g, " ").trim().slice(0, 240);
     if (action === "BUY") {
       const coin = coins.find((c) => c.symbol === symbol);
@@ -2234,7 +2241,7 @@
     const label = document.createElement("strong");
     label.textContent = `${action}${pick.symbol ? ` · ${pick.symbol}` : ""}`;
     const conf = document.createElement("span");
-    conf.textContent = `${Math.round(Number(pick.confidence) || 0)}% · ${pick.provider || "capri"}`;
+    conf.textContent = `${tradeConfidence(pick.confidence)}% · ${pick.provider || "capri"}`;
     head.append(label, conf);
     const reason = document.createElement("p");
     reason.textContent = pick.reason || "";
