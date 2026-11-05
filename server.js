@@ -1465,7 +1465,7 @@ Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
 
 - ${theme === "trending"
     ? "Choose ONE story or subject from the live feed (or the user's angle if they gave one) that people are already curious about. Never invent news; if the feed is unavailable, pick a broad evergreen topic that travels."
-    : "Build ONE coherent themed run. Every part covers a different standout example, fact or story inside the theme - no repeats, no filler - and the whole run keeps one visual world."}
+    : "Build ONE coherent themed run. Every part covers a different standout example, fact or story inside the theme - no repeats, no filler - and the whole run keeps one visual world. Every example must be real and true: no invented species, records, prices or events."}
 - Prefer wonder, tech, AI, space, science, animals, internet culture and weird true stories. Skip tragedy, war, crime victims, death tolls, elections and politics.
 - Split it into exactly ${partCount} parts. Part 1 hooks and sets the question. Every middle part escalates with a new twist nobody saw coming. The final part pays it off and lands the takeaway. Each part must stand alone as its own complete video and still tease the next.
 - For each part give a title (under 70 characters, end with "| Part N"), a 2-sentence description with one question that invites comments, 6-8 lowercase hashtags, and a one-line outline of the 3 scenes.
