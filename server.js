@@ -1349,6 +1349,30 @@ async function fetchTrendingTopics(limit = 18) {
   return topics.slice(0, limit);
 }
 
+async function askDevJson(system, user, attempts = 2) {
+  let last = "empty reply";
+  for (let i = 0; i < attempts; i += 1) {
+    const out = await collectDevCompletion({
+      messages: [
+        { role: "system", content: system },
+        {
+          role: "user",
+          content: i === 0
+            ? user
+            : `${user}\n\nYour previous reply could not be parsed. Return ONLY valid JSON: no markdown fences, no comments, no trailing commas, no literal line breaks inside strings.`,
+        },
+      ],
+      tools: undefined,
+    });
+    try {
+      return parseJsonLoose(out.content);
+    } catch (err) {
+      last = String(err?.message || err);
+    }
+  }
+  throw new Error(last);
+}
+
 function cleanAiStory(raw, wantScenes) {
   if (!raw || typeof raw !== "object") throw new Error("The script came back empty.");
   const list = Array.isArray(raw.scenes) ? raw.scenes : Array.isArray(raw.shots) ? raw.shots : [];
@@ -1418,81 +1442,101 @@ Upload package:
 Return ONLY JSON:
 {"title":string,"description":string,"hashtags":[string],"scenes":[{"narration":string,"imagePrompt":string,"caption":string}]}`;
 
-  const seriesSystem = `You are Capri, programming an automatic 3-part micro-series from what is trending online right now.
+  const seriesPlanSystem = `You are Capri, programming an automatic 3-part micro-series from what is trending online right now.
 Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
 Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
 
-How to build it:
-- Choose ONE story or subject from the live feed (or the user's angle if they gave one) that people are already curious about. Never invent news; if the feed is unavailable, pick a broad topic that reliably travels and keep it evergreen.
-- Split it into exactly 3 parts. Part 1 hooks and sets the question. Part 2 escalates with the twist or detail nobody saw coming. Part 3 pays it off and lands the takeaway. Each part must stand alone for someone who missed the others, and each ends by teasing the next.
-- Every part has exactly ${wantScenes} scenes. Scene 1 of every part is the hook.
-- Narration is spoken by Capri, first person when it fits, no stage directions, no emojis, no quotation marks, no camera language. About ${words} words per scene, natural out loud.
-- imagePrompt is pure visual description: subject, action, environment, lighting, lens, mood. 25-50 words. It must stand alone because each shot is painted separately. Keep one consistent subject and world across all parts.
-- No words, letters, signs, captions, logos, watermarks, UI or text inside images. No real celebrities, no brands, no sexual content, no gore, no politics.
-- Caption: on-screen line, max 45 characters, adds to the image.
-
-Each part gets its own upload package:
-- title: under 70 characters, end it with "| Part N" so the series reads clean in a feed.
-- description: 2-3 plain sentences, plus one question that invites comments.
-- hashtags: 6-10 lowercase, specific topic first, then the niche, then one or two broad tags, no #fyp or #viral filler.
+- Choose ONE story or subject from the live feed (or the user's angle if they gave one) that people are already curious about. Never invent news; if the feed is unavailable, pick a broad evergreen topic that travels.
+- Split it into exactly 3 parts. Part 1 hooks and sets the question. Part 2 escalates with the twist nobody saw coming. Part 3 pays it off and lands the takeaway. Each part must stand alone and tease the next.
+- For each part give a title (under 70 characters, end with "| Part N"), a 2-sentence description with one question that invites comments, 6-8 lowercase hashtags, and a one-line outline of the 3 scenes.
+- No real celebrities, no brands, no sexual content, no gore, no politics.
 
 Return ONLY JSON:
-{"topic":string,"title":string,"description":string,"hashtags":[string],"parts":[{"title":string,"description":string,"hashtags":[string],"scenes":[{"narration":string,"imagePrompt":string,"caption":string}]}]}`;
+{"topic":string,"title":string,"description":string,"hashtags":[string],"parts":[{"title":string,"description":string,"hashtags":[string],"outline":string}]}`;
 
-  const system = mode === "series" ? seriesSystem : singleSystem;
+  const seriesPartSystem = `You are Capri, writing part N of a 3-part short-video series that has already been planned.
+Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
+Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
+Every part has exactly 3 scenes and scene 1 is the hook: strongest image and first line inside two seconds.
+Narration: spoken by Capri, first person when it fits, no stage directions, no emojis, no quotation marks, no camera language. About 15 words per scene, natural out loud. Part 3 closes the loop and lands the takeaway.
+imagePrompt: pure visual description - subject, action, environment, lighting, lens, mood. 25-45 words, stands alone, same subject and world as the plan. No text, logos, watermarks, real celebrities, brands, sexual content, gore or politics inside the image.
+caption: on-screen line, max 45 characters, adds to the image instead of repeating the narration.
+
+Return ONLY JSON:
+{"title":string,"description":string,"hashtags":[string],"scenes":[{"narration":string,"imagePrompt":string,"caption":string}]}`;
+
   const feed = trends.length
     ? trends.map((t, i) => `${i + 1}. ${t}`).join("\n")
-    : "(the live feed did not answer - use a broad topic that is blowing up this week)";
-  const ask = mode === "series"
-    ? `The angle from the user (may be empty, then pick freely):\n${prompt || "(none)"}\n\nLive trending right now:\n${feed}`
-    : `The prompt:\n${prompt}`;
+    : "(the live feed did not answer - use a broad evergreen topic that is blowing up this week)";
 
-  let out;
-  try {
-    out = await collectDevCompletion({
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: ask },
-      ],
-      tools: undefined,
-    });
-  } catch (err) {
-    return devToolError(res, 502, String(err?.message || "the relays ran dry"));
-  }
-  let parsed;
-  try { parsed = parseJsonLoose(out.content); } catch (err) {
-    return devToolError(res, 502, `The script came back unusable: ${String(err?.message || err)}`);
-  }
   const pixels = AI_FRAME_PIXELS[frame];
   if (mode === "series") {
-    const rawParts = Array.isArray(parsed?.parts) ? parsed.parts : [];
-    if (!rawParts.length) return devToolError(res, 502, "She came back without a series. Try Auto series again.");
+    let plan;
+    try {
+      plan = await askDevJson(seriesPlanSystem, `The angle from the user (may be empty, then pick freely):\n${prompt || "(none)"}\n\nLive trending right now:\n${feed}`);
+    } catch (err) {
+      return devToolError(res, 502, `The series plan came back unusable: ${String(err?.message || err)}`);
+    }
+    const planned = Array.isArray(plan?.parts) ? plan.parts.slice(0, 3) : [];
+    if (!planned.length) return devToolError(res, 502, "She came back without a series. Try Auto series again.");
     const parts = [];
-    for (let i = 0; i < rawParts.length && parts.length < 3; i += 1) {
+    for (let i = 0; i < planned.length; i += 1) {
+      const seed = planned[i] || {};
+      const context = [
+        `Series topic: ${plan.topic || ""}`,
+        plan.title ? `Series title: ${plan.title}` : "",
+        `This is part ${i + 1} of ${planned.length}.`,
+        `Planned title: ${seed.title || `Part ${i + 1}`}`,
+        seed.outline ? `Scene outline: ${seed.outline}` : "",
+        parts.length ? `Previous part ended with: ${parts[parts.length - 1].scenes.slice(-1)[0]?.narration || ""}` : "",
+        "Write this part now. Keep the same subject and visual world across the whole series.",
+      ].filter(Boolean).join("\n");
+      let part;
       try {
-        const story = cleanAiStory(rawParts[i], wantScenes);
-        parts.push({ ...story, part: i + 1, pixels });
+        part = await askDevJson(seriesPartSystem.replace("part N", `part ${i + 1}`), context);
+      } catch { continue; }
+      const merged = {
+        title: part?.title || seed.title,
+        description: part?.description || seed.description,
+        hashtags: part?.hashtags || seed.hashtags,
+        scenes: part?.scenes,
+      };
+      try {
+        const story = cleanAiStory(merged, wantScenes);
+        parts.push({ ...story, part: parts.length + 1, pixels });
       } catch { /* skip an unusable part */ }
     }
     if (!parts.length) return devToolError(res, 502, "The series had no usable shots. Try again.");
     return json(res, 200, {
       mode,
-      topic: String(parsed.topic || trends[0] || parts[0].title || "").slice(0, 160),
-      title: String(parsed.title || parsed.topic || "Capri series").slice(0, 160),
-      description: String(parsed.description || "").slice(0, 700),
-      hashtags: (Array.isArray(parsed.hashtags) ? parsed.hashtags : []).slice(0, 10),
+      topic: String(plan.topic || trends[0] || parts[0].title || "").slice(0, 160),
+      title: String(plan.title || plan.topic || "Capri series").slice(0, 160),
+      description: String(plan.description || "").slice(0, 700),
+      hashtags: (Array.isArray(plan.hashtags) ? plan.hashtags : []).slice(0, 10),
       trends,
       parts,
       prompt,
       style,
       frame,
       pixels,
-      provider: out.provider,
+      provider: "capri",
     });
+  }
+  let out;
+  try {
+    out = await collectDevCompletion({
+      messages: [
+        { role: "system", content: singleSystem },
+        { role: "user", content: `The prompt:\n${prompt}` },
+      ],
+      tools: undefined,
+    });
+  } catch (err) {
+    return devToolError(res, 502, String(err?.message || "the relays ran dry"));
   }
   let story;
   try {
-    story = cleanAiStory(parsed, wantScenes);
+    story = cleanAiStory(parseJsonLoose(out.content), wantScenes);
   } catch (err) {
     return devToolError(res, 502, `The script came back unusable: ${String(err?.message || err)}`);
   }
