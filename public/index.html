@@ -44,7 +44,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=4.7.6" />
+<link rel="stylesheet" href="styles.css?v=4.7.7" />
 </head>
 <body data-state="idle">
 <div class="grain" aria-hidden="true"></div>
@@ -458,6 +458,11 @@
           <p class="dev-hint">Pick one or several downloaded videos. The studio opens on the right: each video, its context, and every cut with its caption file.</p>
         </div>
         <div id="devContentAi" class="dev-subpane hidden">
+          <p class="dev-kicker">MODE</p>
+          <div class="dev-chips">
+            <button type="button" class="dev-chip active" data-ai-mode="single">One video</button>
+            <button type="button" class="dev-chip" data-ai-mode="series">Auto series</button>
+          </div>
           <p class="dev-kicker">THE IDEA</p>
           <textarea id="aiPrompt" class="ai-prompt" rows="5" placeholder="A rain-soaked rooftop at 3am, she looks up at the skyline and says the line that stops the scroll. End on the city going dark."></textarea>
           <p class="dev-kicker">STYLE</p>
@@ -473,14 +478,13 @@
             <button type="button" class="dev-chip" data-ai-frame="landscape">16:9</button>
             <button type="button" class="dev-chip" data-ai-frame="square">1:1</button>
           </div>
-          <p class="dev-kicker">LENGTH</p>
+          <p class="dev-kicker">PLAN</p>
           <div class="dev-chips">
-            <button type="button" class="dev-chip" data-ai-seconds="15">15s</button>
-            <button type="button" class="dev-chip active" data-ai-seconds="30">30s</button>
-            <button type="button" class="dev-chip" data-ai-seconds="60">60s</button>
+            <span class="dev-chip static">Length: auto</span>
+            <span class="dev-chip static">Scenes: auto</span>
           </div>
           <button id="aiRun" class="dev-btn accent wide" type="button">GENERATE VIDEO</button>
-          <p class="dev-hint">She writes the beats, paints every shot, voices each line in her own voice, then edits the finished file into videos/ with a .txt holding the title, description and hashtags.</p>
+          <p class="dev-hint">One video: she turns your idea into a cut with no timer - the script decides its own length. Auto series: leave the idea empty and she picks what is trending online right now, then makes Part 1, Part 2 and Part 3 back to back.</p>
         </div>
       </div>
       <button id="devExit" class="dev-btn ghost wide dev-exit" type="button">&times; CLOSE DEV MODE</button>
@@ -521,13 +525,14 @@
             <div class="yt-head-text">
               <p class="dev-kicker">AI VIDEO STUDIO</p>
               <h3 id="aiTitle">No prompt yet</h3>
-              <p id="aiMeta" class="yt-meta">Write the idea in the rail. She writes the script, paints every shot, voices it in her own voice, and edits the finished video herself.</p>
+              <p id="aiMeta" class="yt-meta">One video: she writes the script, paints every shot, voices it in her own voice, and edits it herself. Auto series: she finds what is trending and makes Part 1, 2 and 3.</p>
             </div>
             <button id="aiRunMain" class="dev-btn accent" type="button" disabled>GENERATE VIDEO</button>
           </header>
           <div id="aiContext" class="yt-context ai-context">
             <dl class="yt-facts">
-              <div><dt>LENGTH</dt><dd id="aiFactLength">-</dd></div>
+              <div><dt>MODE</dt><dd id="aiFactMode">-</dd></div>
+              <div><dt>LENGTH</dt><dd id="aiFactLength">auto</dd></div>
               <div><dt>FRAME</dt><dd id="aiFactFrame">-</dd></div>
               <div><dt>STYLE</dt><dd id="aiFactStyle">-</dd></div>
               <div><dt>SCENES</dt><dd id="aiFactScenes">-</dd></div>

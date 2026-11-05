@@ -1304,7 +1304,52 @@ const AI_FRAME_PIXELS = {
   square: { w: 1024, h: 1024 },
 };
 
-function cleanAiStory(raw, wantScenes, seconds) {
+function stripXml(value) {
+  return String(value || "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Two keyless, no-login feeds give Capri a live picture of what people are
+// actually clicking today. Either one can fail without stopping the series.
+async function fetchTrendingTopics(limit = 18) {
+  const topics = [];
+  const add = (value) => {
+    const text = stripXml(value).replace(/\s*[-|]\s*[^-|]{2,40}$/, "").slice(0, 160);
+    if (text.length < 12) return;
+    if (topics.some((t) => t.toLowerCase() === text.toLowerCase())) return;
+    topics.push(text);
+  };
+  await Promise.all([
+    (async () => {
+      const res = await fetch("https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en", {
+        signal: AbortSignal.timeout(9000),
+        headers: { "User-Agent": "Capri/1.0" },
+      });
+      if (!res.ok) return;
+      const xml = await res.text();
+      for (const match of xml.matchAll(/<item>[\s\S]*?<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/g)) add(match[1]);
+    })().catch(() => {}),
+    (async () => {
+      const res = await fetch("https://www.reddit.com/r/popular/hot.json?limit=20", {
+        signal: AbortSignal.timeout(9000),
+        headers: { "User-Agent": "Capri/1.0 (trend reader)" },
+      });
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      for (const child of data?.data?.children || []) add(child?.data?.title);
+    })().catch(() => {}),
+  ]);
+  return topics.slice(0, limit);
+}
+
+function cleanAiStory(raw, wantScenes) {
   if (!raw || typeof raw !== "object") throw new Error("The script came back empty.");
   const list = Array.isArray(raw.scenes) ? raw.scenes : Array.isArray(raw.shots) ? raw.shots : [];
   const scenes = [];
@@ -1338,22 +1383,22 @@ function cleanAiStory(raw, wantScenes, seconds) {
 async function handleDevAiVideo(req, res) {
   let body;
   try { body = await readBody(req, 200_000); } catch (err) { return devToolError(res, 400, err.message); }
+  const mode = String(body.mode) === "series" ? "series" : "single";
   const prompt = String(body.prompt || "").replace(/\s+/g, " ").trim().slice(0, 1200);
-  if (prompt.length < 4) return devToolError(res, 400, "Give her the idea first.");
+  if (mode === "single" && prompt.length < 4) return devToolError(res, 400, "Give her the idea first.");
   const style = AI_STYLE_DIRECTIONS[String(body.style)] ? String(body.style) : "cinematic";
   const frame = AI_FRAME_PIXELS[String(body.frame)] ? String(body.frame) : "vertical";
-  const seconds = Math.round(clampNum(body.seconds, 10, 90));
-  // One painted image per scene, and the keyless painter allows one image
-  // every 45 seconds. Five shots keeps a full minute of video under five
-  // minutes of painting; each shot is long enough to breathe.
-  const wantScenes = Math.max(3, Math.min(5, Math.round(seconds / 12)));
-  // Roughly 2.4 spoken words a second leaves room for the beats between lines.
-  const words = Math.max(7, Math.round((seconds * 2.4) / wantScenes));
+  // No length picker: each script earns its own runtime. Four shots for one
+  // video, three per part for a series. The keyless painter allows one image
+  // every 45 seconds, so nine painted shots is already a long automatic run.
+  const wantScenes = mode === "series" ? 3 : 4;
+  const words = mode === "series" ? 15 : 18;
+  const trends = mode === "series" ? await fetchTrendingTopics() : [];
 
-  const system = `You are Capri, directing a short AI-generated video from one prompt.
+  const singleSystem = `You are Capri, directing a short AI-generated video from one prompt.
 Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
 Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
-Target: about ${seconds} seconds, split into ${wantScenes} scenes of roughly equal length.
+Shape: ${wantScenes} scenes, no fixed runtime - each scene lasts as long as its line needs, roughly 3-10 seconds.
 
 Write it like a director who knows the feed:
 - Scene 1 is the hook: the strongest image and the first line land inside the first two seconds. No greetings, no slow wind-up.
@@ -1373,31 +1418,91 @@ Upload package:
 Return ONLY JSON:
 {"title":string,"description":string,"hashtags":[string],"scenes":[{"narration":string,"imagePrompt":string,"caption":string}]}`;
 
+  const seriesSystem = `You are Capri, programming an automatic 3-part micro-series from what is trending online right now.
+Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
+Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
+
+How to build it:
+- Choose ONE story or subject from the live feed (or the user's angle if they gave one) that people are already curious about. Never invent news; if the feed is unavailable, pick a broad topic that reliably travels and keep it evergreen.
+- Split it into exactly 3 parts. Part 1 hooks and sets the question. Part 2 escalates with the twist or detail nobody saw coming. Part 3 pays it off and lands the takeaway. Each part must stand alone for someone who missed the others, and each ends by teasing the next.
+- Every part has exactly ${wantScenes} scenes. Scene 1 of every part is the hook.
+- Narration is spoken by Capri, first person when it fits, no stage directions, no emojis, no quotation marks, no camera language. About ${words} words per scene, natural out loud.
+- imagePrompt is pure visual description: subject, action, environment, lighting, lens, mood. 25-50 words. It must stand alone because each shot is painted separately. Keep one consistent subject and world across all parts.
+- No words, letters, signs, captions, logos, watermarks, UI or text inside images. No real celebrities, no brands, no sexual content, no gore, no politics.
+- Caption: on-screen line, max 45 characters, adds to the image.
+
+Each part gets its own upload package:
+- title: under 70 characters, end it with "| Part N" so the series reads clean in a feed.
+- description: 2-3 plain sentences, plus one question that invites comments.
+- hashtags: 6-10 lowercase, specific topic first, then the niche, then one or two broad tags, no #fyp or #viral filler.
+
+Return ONLY JSON:
+{"topic":string,"title":string,"description":string,"hashtags":[string],"parts":[{"title":string,"description":string,"hashtags":[string],"scenes":[{"narration":string,"imagePrompt":string,"caption":string}]}]}`;
+
+  const system = mode === "series" ? seriesSystem : singleSystem;
+  const feed = trends.length
+    ? trends.map((t, i) => `${i + 1}. ${t}`).join("\n")
+    : "(the live feed did not answer - use a broad topic that is blowing up this week)";
+  const ask = mode === "series"
+    ? `The angle from the user (may be empty, then pick freely):\n${prompt || "(none)"}\n\nLive trending right now:\n${feed}`
+    : `The prompt:\n${prompt}`;
+
   let out;
   try {
     out = await collectDevCompletion({
       messages: [
         { role: "system", content: system },
-        { role: "user", content: `The prompt:\n${prompt}` },
+        { role: "user", content: ask },
       ],
       tools: undefined,
     });
   } catch (err) {
     return devToolError(res, 502, String(err?.message || "the relays ran dry"));
   }
+  let parsed;
+  try { parsed = parseJsonLoose(out.content); } catch (err) {
+    return devToolError(res, 502, `The script came back unusable: ${String(err?.message || err)}`);
+  }
+  const pixels = AI_FRAME_PIXELS[frame];
+  if (mode === "series") {
+    const rawParts = Array.isArray(parsed?.parts) ? parsed.parts : [];
+    if (!rawParts.length) return devToolError(res, 502, "She came back without a series. Try Auto series again.");
+    const parts = [];
+    for (let i = 0; i < rawParts.length && parts.length < 3; i += 1) {
+      try {
+        const story = cleanAiStory(rawParts[i], wantScenes);
+        parts.push({ ...story, part: i + 1, pixels });
+      } catch { /* skip an unusable part */ }
+    }
+    if (!parts.length) return devToolError(res, 502, "The series had no usable shots. Try again.");
+    return json(res, 200, {
+      mode,
+      topic: String(parsed.topic || trends[0] || parts[0].title || "").slice(0, 160),
+      title: String(parsed.title || parsed.topic || "Capri series").slice(0, 160),
+      description: String(parsed.description || "").slice(0, 700),
+      hashtags: (Array.isArray(parsed.hashtags) ? parsed.hashtags : []).slice(0, 10),
+      trends,
+      parts,
+      prompt,
+      style,
+      frame,
+      pixels,
+      provider: out.provider,
+    });
+  }
   let story;
   try {
-    story = cleanAiStory(parseJsonLoose(out.content), wantScenes, seconds);
+    story = cleanAiStory(parsed, wantScenes);
   } catch (err) {
     return devToolError(res, 502, `The script came back unusable: ${String(err?.message || err)}`);
   }
   return json(res, 200, {
     ...story,
+    mode,
     prompt,
     style,
     frame,
-    seconds,
-    pixels: AI_FRAME_PIXELS[frame],
+    pixels,
     provider: out.provider,
   });
 }
