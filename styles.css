@@ -1355,6 +1355,12 @@ body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 
 .dev-chips .dev-chip { font-family: var(--mono); font-size: 10.5px; color: var(--ink-dim); background: transparent; border: 1px solid var(--line-2); border-radius: 2px; padding: 6px 9px; cursor: pointer; }
 .dev-chips .dev-chip:hover { color: var(--white); border-color: var(--pink); }
 .dev-chips .dev-chip.active { color: var(--white); border-color: var(--pink); background: rgba(255, 11, 82, 0.14); }
+.dev-chips .dev-chip.static { cursor: default; color: var(--mint); border-style: dashed; }
+.dev-chips .dev-chip.static:hover { border-color: var(--mint); }
+.ai-part-badge { display: inline-block; font-family: var(--mono); font-size: 9.5px; letter-spacing: 1.4px; color: #05050a; background: var(--mint); padding: 2px 7px; margin-bottom: 6px; }
+.ai-series-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 0 0 10px; }
+.ai-series-head h4 { margin: 0; }
+.ai-series-topic { font-family: var(--mono); font-size: 10.5px; color: var(--mint); }
 #aiRun { width: calc(100% - 20px); margin-left: 10px; }
 .ai-board { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .ai-board .dev-empty { padding: 0; }

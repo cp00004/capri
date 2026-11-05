@@ -31,10 +31,11 @@
     ai: {
       style: "cinematic",
       frame: "vertical",
-      seconds: 30,
+      mode: "single",
       busy: false,
       story: null,
-      result: null,
+      series: null,
+      results: [],
     },
     nameMode: "",
     mainView: "chat",
@@ -87,6 +88,7 @@
       aiProgress: $("aiProgress"),
       aiResultBox: $("aiResult"),
       aiLength: $("aiFactLength"),
+      aiMode: $("aiFactMode"),
       aiFrame: $("aiFactFrame"),
       aiStyle: $("aiFactStyle"),
       aiScenes: $("aiFactScenes"),
@@ -1162,7 +1164,10 @@
     landscape: { name: "16:9", note: "YouTube, widescreen", w: 1920, h: 1080 },
     square: { name: "1:1", note: "feed posts", w: 1080, h: 1080 },
   };
-  const AI_LENGTHS = new Set([15, 30, 60]);
+  const AI_MODES = {
+    single: "One video",
+    series: "Auto series",
+  };
 
   function aiProgress(text) {
     const box = dev.els.aiProgress;
@@ -1219,29 +1224,41 @@
     for (const b of document.querySelectorAll("[data-ai-frame]")) {
       b.classList.toggle("active", b.getAttribute("data-ai-frame") === a.frame);
     }
-    for (const b of document.querySelectorAll("[data-ai-seconds]")) {
-      b.classList.toggle("active", Number(b.getAttribute("data-ai-seconds")) === a.seconds);
+    for (const b of document.querySelectorAll("[data-ai-mode]")) {
+      b.classList.toggle("active", b.getAttribute("data-ai-mode") === a.mode);
     }
     const frame = AI_FRAMES[a.frame] || AI_FRAMES.vertical;
     const story = a.story;
-    const out = a.result;
-    els.aiTitle.textContent = story?.title || (a.busy ? "Writing the script…" : "No prompt yet");
+    const series = a.series;
+    const out = a.results[a.results.length - 1]?.out;
+    const seriesLabel = a.mode === "series" ? "AUTO SERIES" : "ONE VIDEO";
+    els.aiTitle.textContent = series?.topic || story?.title || (a.busy ? "Writing the script…" : "No prompt yet");
     els.aiMeta.textContent = out
-      ? `${Math.round(out.seconds)}s finished · ${(out.bytes / 1048576).toFixed(1)} MB · ${frame.name} ${frame.note} · ${AI_STYLES[a.style]}`
+      ? series
+        ? `${a.results.length}/${series.parts.length} parts finished · ${series.description || series.topic}`
+        : `${Math.round(out.seconds)}s finished · ${(out.bytes / 1048576).toFixed(1)} MB · ${frame.name} ${frame.note} · ${AI_STYLES[a.style]}`
       : story
         ? story.description || "The board is ready. Painting the shots and cutting them together now."
-        : `Write the idea in the rail. She turns it into a ${frame.name} video ${frame.note ? `for ${frame.note}` : ""}, ${AI_STYLES[a.style].toLowerCase()}, about ${a.seconds} seconds long.`;
-    els.aiLength.textContent = `${Math.round(out?.seconds || a.seconds)}s`;
+        : a.mode === "series"
+          ? `Auto series: leave the idea empty and she picks what is trending online, then makes Part 1, 2 and 3 in ${frame.name}.`
+          : `Write the idea in the rail. She turns it into a ${frame.name} video ${frame.note ? `for ${frame.note}` : ""}, ${AI_STYLES[a.style].toLowerCase()}, at whatever length the script earns - no timer.`;
+    els.aiMode.textContent = seriesLabel;
+    els.aiLength.textContent = out ? `${Math.round(out.seconds)}s` : "auto";
     els.aiFrame.textContent = `${frame.name} · ${frame.w}x${frame.h} · ${frame.note}`;
     els.aiStyle.textContent = AI_STYLES[a.style];
-    const planned = Math.max(3, Math.min(5, Math.round(a.seconds / 12)));
-    els.aiScenes.textContent = story?.scenes?.length ? `${story.scenes.length} scenes` : `${planned} planned`;
+    const planned = a.mode === "series" ? 9 : 4;
+    els.aiScenes.textContent = series?.parts?.length
+      ? `${series.parts.length} parts × 3 scenes`
+      : story?.scenes?.length
+        ? `${story.scenes.length} scenes`
+        : `${planned} planned`;
     els.aiOutput.textContent = dev.root ? `${dev.root}\\videos` : "open a workspace folder first";
-    const ready = Boolean(dev.root) && !a.busy && Boolean(String(els.aiPrompt.value || "").trim());
+    const ready = Boolean(dev.root) && !a.busy && (a.mode === "series" || Boolean(String(els.aiPrompt.value || "").trim()));
     els.aiRun.disabled = !ready;
     els.aiRunMain.disabled = !ready;
-    els.aiRun.textContent = a.busy ? "..." : "GENERATE VIDEO";
-    els.aiRunMain.textContent = a.busy ? "..." : "GENERATE VIDEO";
+    const label = a.mode === "series" ? "GENERATE SERIES" : "GENERATE VIDEO";
+    els.aiRun.textContent = a.busy ? "..." : label;
+    els.aiRunMain.textContent = a.busy ? "..." : label;
   }
 
   function setAiStyle(name) {
@@ -1256,17 +1273,89 @@
     paintAi();
   }
 
-  function setAiSeconds(n) {
-    const seconds = Number(n);
-    if (!AI_LENGTHS.has(seconds) || dev.ai.busy) return;
-    dev.ai.seconds = seconds;
+  function setAiMode(name) {
+    if (!AI_MODES[name] || dev.ai.busy) return;
+    dev.ai.mode = name;
     paintAi();
   }
 
-  function renderAiResult(out, story) {
-    const box = dev.els.aiResultBox;
-    box.textContent = "";
+  function renderAiResult(out, story, opts = {}) {
+    const box = opts.box || dev.els.aiResultBox;
+    if (!opts.keep) box.textContent = "";
     box.classList.remove("hidden");
+    if (opts.part) {
+      const card = document.createElement("article");
+      card.className = "yt-short";
+      const frame = document.createElement("div");
+      frame.className = "yt-short-frame";
+      const player = document.createElement("video");
+      player.className = "yt-short-video ai-result-frame";
+      player.controls = true;
+      player.preload = "metadata";
+      player.playsInline = true;
+      const dims = AI_FRAMES[dev.ai.frame] || AI_FRAMES.vertical;
+      player.style.aspectRatio = `${dims.w} / ${dims.h}`;
+      player.src = out.abs ? mediaUrl(out.abs) : "";
+      frame.appendChild(player);
+      card.appendChild(frame);
+
+      const body = document.createElement("div");
+      body.className = "yt-short-body";
+      const badge = document.createElement("span");
+      badge.className = "ai-part-badge";
+      badge.textContent = `PART ${opts.part} OF ${opts.parts}`;
+      body.appendChild(badge);
+      const title = document.createElement("h4");
+      title.textContent = story?.title || `Part ${opts.part}`;
+      body.appendChild(title);
+      const when = document.createElement("div");
+      when.className = "dev-when";
+      when.textContent = `${Math.round(out.seconds)}s · ${story?.scenes?.length || 0} scenes · ${(out.bytes / 1048576).toFixed(1)} MB`;
+      body.appendChild(when);
+      if (story?.description) {
+        const desc = document.createElement("div");
+        desc.textContent = story.description;
+        body.appendChild(desc);
+      }
+      const tags = document.createElement("div");
+      tags.className = "dev-tags";
+      tags.textContent = (story?.hashtags || []).map((t) => `#${t}`).join(" ");
+      body.appendChild(tags);
+      const actions = document.createElement("div");
+      actions.className = "dev-actions";
+      const openBtn = document.createElement("button");
+      openBtn.type = "button";
+      openBtn.className = "dev-mini";
+      openBtn.textContent = "OPEN FILE";
+      openBtn.addEventListener("click", () => D.open(out.path).catch((e) => sysLine(String(e.message || e))));
+      actions.appendChild(openBtn);
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "dev-mini";
+      copyBtn.textContent = "COPY TITLE + TAGS";
+      copyBtn.addEventListener("click", () => {
+        const text = `${story?.title || ""}\n${(story?.hashtags || []).map((t) => `#${t}`).join(" ")}`;
+        navigator.clipboard?.writeText(text).then(() => sysLine(`part ${opts.part} title and hashtags copied`)).catch(() => {});
+      });
+      actions.appendChild(copyBtn);
+      body.appendChild(actions);
+      if (out.infoPath) {
+        const info = document.createElement("details");
+        info.className = "yt-short-info";
+        const sum = document.createElement("summary");
+        sum.textContent = `${out.infoPath} · written next to the video`;
+        info.appendChild(sum);
+        const pre = document.createElement("pre");
+        pre.className = "yt-short-txt";
+        pre.textContent = out.script || "";
+        info.appendChild(pre);
+        body.appendChild(info);
+      }
+      card.appendChild(body);
+      box.appendChild(card);
+      if (!opts.keep) box.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     const head = document.createElement("div");
     head.className = "yt-results-head";
     const h = document.createElement("h4");
@@ -1362,8 +1451,9 @@
     const a = dev.ai;
     if (a.busy) return;
     const prompt = String(dev.els.aiPrompt.value || "").trim();
-    if (!prompt) {
-      aiProgress("Give her the idea first - one line in THE IDEA is enough.");
+    const seriesMode = a.mode === "series";
+    if (!prompt && !seriesMode) {
+      aiProgress("Give her the idea first - one line in THE IDEA is enough, or switch to Auto series.");
       return;
     }
     if (!dev.root) {
@@ -1372,27 +1462,27 @@
     }
     a.busy = true;
     a.story = null;
-    a.result = null;
+    a.series = null;
+    a.results = [];
     dev.els.aiResultBox.classList.add("hidden");
     paintAiBoard(null);
     paintAi();
     const frame = AI_FRAMES[a.frame];
-    aiProgress(`WRITING THE SCRIPT\n${AI_STYLES[a.style]} · ${frame.name} · ${a.seconds}s`);
+    aiProgress(
+      seriesMode
+        ? `FINDING WHAT IS TRENDING\n${AI_STYLES[a.style]} · ${frame.name} · 3 parts`
+        : `WRITING THE SCRIPT\n${AI_STYLES[a.style]} · ${frame.name} · length set by the script`,
+    );
     try {
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 180_000);
+      const timer = setTimeout(() => ctrl.abort(), 240_000);
       let res;
       let data;
       try {
         res = await bridge().api("/api/dev/aivideo", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            prompt,
-            style: a.style,
-            frame: a.frame,
-            seconds: a.seconds,
-          }),
+          body: JSON.stringify({ prompt, style: a.style, frame: a.frame, mode: a.mode }),
           signal: ctrl.signal,
         });
         data = await res.json().catch(() => null);
@@ -1400,24 +1490,59 @@
         clearTimeout(timer);
       }
       if (!res.ok) throw new Error(data?.message || `script refused (${res.status})`);
-      if (!Array.isArray(data?.scenes) || !data.scenes.length) throw new Error("She could not find a story in that prompt.");
-      a.story = data;
-      paintAiBoard(data);
-      paintAi();
-      aiProgress(`SCRIPT READY\n${data.scenes.length} scenes · painting every shot now`);
-      const out = await D.aiVideo({ storyboard: data, style: a.style, frame: a.frame, seconds: a.seconds });
-      a.result = out;
-      renderAiResult(out, data);
-      aiProgress(`DONE\n${out.path}\n${Math.round(out.seconds)}s · ${(out.bytes / 1048576).toFixed(1)} MB`);
-      sysLine(`video ready: ${out.path}`);
+      if (seriesMode) {
+        if (!Array.isArray(data?.parts) || !data.parts.length) throw new Error("She could not find a series online.");
+        a.series = data;
+        paintAi();
+        const total = data.parts.length;
+        for (let i = 0; i < total; i += 1) {
+          const part = data.parts[i];
+          a.story = part;
+          paintAiBoard(part);
+          paintAi();
+          aiProgress(
+            `PART ${i + 1} OF ${total}\n${part.title || seriesLabel(data, i)}\n${data.trends?.length ? `trend: ${data.topic}` : "topic: " + (data.topic || "")}`,
+          );
+          const out = await D.aiVideo({
+            storyboard: part,
+            style: a.style,
+            frame: a.frame,
+            part: i + 1,
+            parts: total,
+            series: data.topic || "",
+          });
+          a.results.push({ out, story: part });
+          renderAiResult(out, part, { box: dev.els.aiResultBox, part: i + 1, parts: total, keep: true });
+          dev.els.aiResultBox.classList.remove("hidden");
+          aiProgress(`PART ${i + 1} OF ${total} READY\n${out.path}\n${Math.round(out.seconds)}s · ${(out.bytes / 1048576).toFixed(1)} MB`);
+          sysLine(`part ${i + 1} ready: ${out.path}`);
+        }
+        dev.els.aiResultBox.scrollIntoView({ behavior: "smooth", block: "start" });
+        aiProgress(`SERIES DONE\n${total} parts · ${data.topic || ""}\n${a.results.map((r) => r.out.path).join("\n")}`);
+      } else {
+        if (!Array.isArray(data?.scenes) || !data.scenes.length) throw new Error("She could not find a story in that prompt.");
+        a.story = data;
+        paintAiBoard(data);
+        paintAi();
+        aiProgress(`SCRIPT READY\n${data.scenes.length} scenes · painting every shot now`);
+        const out = await D.aiVideo({ storyboard: data, style: a.style, frame: a.frame });
+        a.results.push({ out, story: data });
+        renderAiResult(out, data);
+        aiProgress(`DONE\n${out.path}\n${Math.round(out.seconds)}s · ${(out.bytes / 1048576).toFixed(1)} MB`);
+        sysLine(`video ready: ${out.path}`);
+      }
     } catch (err) {
       const message = String(err?.message || err);
-      aiProgress(`FAILED\n${message}`);
+      aiProgress(`FAILED\n${message}${a.results.length ? `\nfinished parts are still listed above (${a.results.length})` : ""}`);
       sysLine(`ai video: ${message}`);
     } finally {
       a.busy = false;
       paintAi();
     }
+  }
+
+  function seriesLabel(data, index) {
+    return data?.seriesTitle || `Part ${index + 1}`;
   }
 
   /* ------------------------------------------------------------ open/close */
@@ -1430,7 +1555,7 @@
     if (!dev.logInit) {
       dev.logInit = true;
       sysLine("developer mode armed · this never shows up in settings");
-      sysLine("open a folder, add images, point her at a video in CONTENT, or hand her a prompt to generate one");
+      sysLine("open a folder, point her at a video in CONTENT, or switch AI VIDEO to Auto series and let her make part 1, 2, 3 from what is trending");
     }
     initRoot();
     setTimeout(() => dev.els.input?.focus(), 80);
@@ -1515,8 +1640,8 @@
     document.querySelectorAll("[data-ai-frame]").forEach((b) => {
       b.addEventListener("click", () => setAiFrame(b.getAttribute("data-ai-frame")));
     });
-    document.querySelectorAll("[data-ai-seconds]").forEach((b) => {
-      b.addEventListener("click", () => setAiSeconds(b.getAttribute("data-ai-seconds")));
+    document.querySelectorAll("[data-ai-mode]").forEach((b) => {
+      b.addEventListener("click", () => setAiMode(b.getAttribute("data-ai-mode")));
     });
     dev.els.aiPrompt.addEventListener("input", () => paintAi());
     dev.els.aiRun.addEventListener("click", runAiVideo);
