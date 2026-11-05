@@ -44,7 +44,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=4.7.5" />
+<link rel="stylesheet" href="styles.css?v=4.7.6" />
 </head>
 <body data-state="idle">
 <div class="grain" aria-hidden="true"></div>
@@ -427,7 +427,7 @@
     <aside class="dev-rail">
       <nav class="dev-tabs">
         <button type="button" class="dev-tab active" data-dev-tab="explorer">WORKSPACE</button>
-        <button type="button" class="dev-tab" data-dev-tab="shorts">YOUTUBE</button>
+        <button type="button" class="dev-tab" data-dev-tab="content">CONTENT</button>
       </nav>
       <div id="devExplorer" class="dev-pane">
         <div class="dev-tree" id="devTree"><p class="dev-empty">Open a folder to give her a desk.</p></div>
@@ -442,15 +442,46 @@
           <button id="devRefresh" class="dev-mini wide" type="button">↻ Refresh</button>
         </div>
       </div>
-      <div id="devShorts" class="dev-pane hidden">
-        <p class="dev-kicker">PLATFORM</p>
-        <div class="dev-platforms">
-          <button type="button" class="dev-platform active" data-platform="youtube">▶ YouTube</button>
-          <button type="button" class="dev-platform" data-platform="tiktok">♪ TikTok</button>
+      <div id="devContent" class="dev-pane hidden">
+        <div class="dev-pages">
+          <button type="button" class="dev-page active" data-content-page="shorts">SHORTS</button>
+          <button type="button" class="dev-page" data-content-page="ai">AI VIDEO</button>
         </div>
-        <button id="shortsPick" class="dev-btn wide" type="button">PICK VIDEOS</button>
-        <div id="shortsFiles" class="dev-files hidden"></div>
-        <p class="dev-hint">Pick one or several downloaded videos. The studio opens on the right: each video, its context, and every cut with its caption file.</p>
+        <div id="devContentShorts" class="dev-subpane">
+          <p class="dev-kicker">PLATFORM</p>
+          <div class="dev-platforms">
+            <button type="button" class="dev-platform active" data-platform="youtube">▶ YouTube</button>
+            <button type="button" class="dev-platform" data-platform="tiktok">♪ TikTok</button>
+          </div>
+          <button id="shortsPick" class="dev-btn wide" type="button">PICK VIDEOS</button>
+          <div id="shortsFiles" class="dev-files hidden"></div>
+          <p class="dev-hint">Pick one or several downloaded videos. The studio opens on the right: each video, its context, and every cut with its caption file.</p>
+        </div>
+        <div id="devContentAi" class="dev-subpane hidden">
+          <p class="dev-kicker">THE IDEA</p>
+          <textarea id="aiPrompt" class="ai-prompt" rows="5" placeholder="A rain-soaked rooftop at 3am, she looks up at the skyline and says the line that stops the scroll. End on the city going dark."></textarea>
+          <p class="dev-kicker">STYLE</p>
+          <div class="dev-chips">
+            <button type="button" class="dev-chip active" data-ai-style="cinematic">Cinematic</button>
+            <button type="button" class="dev-chip" data-ai-style="anime">Anime</button>
+            <button type="button" class="dev-chip" data-ai-style="cyberpunk">Cyberpunk</button>
+            <button type="button" class="dev-chip" data-ai-style="realistic">Realistic</button>
+          </div>
+          <p class="dev-kicker">FRAME</p>
+          <div class="dev-chips">
+            <button type="button" class="dev-chip active" data-ai-frame="vertical">9:16</button>
+            <button type="button" class="dev-chip" data-ai-frame="landscape">16:9</button>
+            <button type="button" class="dev-chip" data-ai-frame="square">1:1</button>
+          </div>
+          <p class="dev-kicker">LENGTH</p>
+          <div class="dev-chips">
+            <button type="button" class="dev-chip" data-ai-seconds="15">15s</button>
+            <button type="button" class="dev-chip active" data-ai-seconds="30">30s</button>
+            <button type="button" class="dev-chip" data-ai-seconds="60">60s</button>
+          </div>
+          <button id="aiRun" class="dev-btn accent wide" type="button">GENERATE VIDEO</button>
+          <p class="dev-hint">She writes the beats, paints every shot, voices each line in her own voice, then edits the finished file into videos/ with a .txt holding the title, description and hashtags.</p>
+        </div>
       </div>
       <button id="devExit" class="dev-btn ghost wide dev-exit" type="button">&times; CLOSE DEV MODE</button>
     </aside>
@@ -464,7 +495,7 @@
         <div class="yt-scroll">
           <header class="yt-head">
             <div class="yt-head-text">
-              <p class="dev-kicker">YOUTUBE STUDIO</p>
+              <p class="dev-kicker">SHORTS STUDIO</p>
               <h3 id="ytVideoTitle">No video selected</h3>
               <p id="ytVideoMeta" class="yt-meta">Pick a downloaded video in the rail. She watches the whole thing, keeps the moments people can't scroll past, and edits each one.</p>
             </div>
@@ -482,6 +513,32 @@
           </div>
           <div id="shortsProgress" class="dev-progress hidden"></div>
           <div id="shortsResult" class="yt-results hidden"></div>
+        </div>
+      </div>
+      <div id="devAiView" class="dev-view hidden">
+        <div class="yt-scroll">
+          <header class="yt-head">
+            <div class="yt-head-text">
+              <p class="dev-kicker">AI VIDEO STUDIO</p>
+              <h3 id="aiTitle">No prompt yet</h3>
+              <p id="aiMeta" class="yt-meta">Write the idea in the rail. She writes the script, paints every shot, voices it in her own voice, and edits the finished video herself.</p>
+            </div>
+            <button id="aiRunMain" class="dev-btn accent" type="button" disabled>GENERATE VIDEO</button>
+          </header>
+          <div id="aiContext" class="yt-context ai-context">
+            <dl class="yt-facts">
+              <div><dt>LENGTH</dt><dd id="aiFactLength">-</dd></div>
+              <div><dt>FRAME</dt><dd id="aiFactFrame">-</dd></div>
+              <div><dt>STYLE</dt><dd id="aiFactStyle">-</dd></div>
+              <div><dt>SCENES</dt><dd id="aiFactScenes">-</dd></div>
+              <div><dt>VIDEO LANDS IN</dt><dd id="aiFactOutput">-</dd></div>
+            </dl>
+            <div class="ai-board" id="aiBoard">
+              <p class="dev-empty">Every generated video starts as a board here: the hook, each shot, the line she says over it, and the caption burned into the frame.</p>
+            </div>
+          </div>
+          <div id="aiProgress" class="dev-progress hidden"></div>
+          <div id="aiResult" class="yt-results hidden"></div>
         </div>
       </div>
       <div id="devChat" class="dev-view">
@@ -522,7 +579,7 @@
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
-<script src="dev.js?v=4.7.5"></script>
-<script src="app.js?v=4.7.5"></script>
+<script src="dev.js?v=4.7.6"></script>
+<script src="app.js?v=4.7.6"></script>
 </body>
 </html>
