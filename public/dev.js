@@ -1679,7 +1679,7 @@
   function tradeUsd(n) {
     const v = Number(n) || 0;
     const abs = Math.abs(v);
-    const digits = abs >= 1 ? 2 : 4;
+    const digits = abs === 0 || abs >= 1 ? 2 : 4;
     return `${v < 0 ? "-" : ""}$${abs.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
   }
 
