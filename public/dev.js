@@ -1160,6 +1160,7 @@
 
   const AI_STYLES = {
     cinematic: "Cinematic",
+    movie: "3D movie",
     anime: "Anime",
     cyberpunk: "Cyberpunk",
     realistic: "Realistic",
@@ -1176,6 +1177,7 @@
   const AI_THEMES = {
     trending: "Trending now",
     fruits: "Fruits",
+    fruitdrama: "Fruit drama",
     animals: "Animals",
     space: "Space",
     ai: "AI",
@@ -1310,6 +1312,7 @@
   function setAiTheme(name) {
     if (!AI_THEMES[name] || dev.ai.busy) return;
     dev.ai.theme = name;
+    if (name === "fruitdrama") dev.ai.style = "movie";
     paintAi();
   }
 
@@ -1540,7 +1543,7 @@
           );
           const out = await D.aiVideo({
             storyboard: part,
-            style: a.style,
+            style: data.style || a.style,
             frame: a.frame,
             part: i + 1,
             parts: total,
@@ -1560,7 +1563,7 @@
         paintAiBoard(data);
         paintAi();
         aiProgress(`SCRIPT READY\n${data.scenes.length} scenes · painting every shot now`);
-        const out = await D.aiVideo({ storyboard: data, style: a.style, frame: a.frame });
+        const out = await D.aiVideo({ storyboard: data, style: data.style || a.style, frame: a.frame });
         a.results.push({ out, story: data });
         renderAiResult(out, data);
         aiProgress(`DONE\n${out.path}\n${Math.round(out.seconds)}s · ${(out.bytes / 1048576).toFixed(1)} MB`);

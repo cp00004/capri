@@ -32,6 +32,8 @@
       style: "cinematic",
       frame: "vertical",
       mode: "single",
+      parts: 3,
+      theme: "trending",
       busy: false,
       story: null,
       series: null,
@@ -92,6 +94,9 @@
       aiFrame: $("aiFactFrame"),
       aiStyle: $("aiFactStyle"),
       aiScenes: $("aiFactScenes"),
+      aiParts: $("aiFactParts"),
+      aiTheme: $("aiFactTheme"),
+      aiSeriesRows: $("aiSeriesRows"),
       aiOutput: $("aiFactOutput"),
     };
   }
@@ -1155,6 +1160,7 @@
 
   const AI_STYLES = {
     cinematic: "Cinematic",
+    movie: "3D movie",
     anime: "Anime",
     cyberpunk: "Cyberpunk",
     realistic: "Realistic",
@@ -1168,6 +1174,15 @@
     single: "One video",
     series: "Auto series",
   };
+  const AI_THEMES = {
+    trending: "Trending now",
+    fruits: "Fruits",
+    fruitdrama: "Fruit drama",
+    animals: "Animals",
+    space: "Space",
+    ai: "AI",
+  };
+  const AI_PART_COUNTS = [3, 4, 5, 6];
 
   function aiProgress(text) {
     const box = dev.els.aiProgress;
@@ -1227,6 +1242,13 @@
     for (const b of document.querySelectorAll("[data-ai-mode]")) {
       b.classList.toggle("active", b.getAttribute("data-ai-mode") === a.mode);
     }
+    for (const b of document.querySelectorAll("[data-ai-parts]")) {
+      b.classList.toggle("active", Number(b.getAttribute("data-ai-parts")) === a.parts);
+    }
+    for (const b of document.querySelectorAll("[data-ai-theme]")) {
+      b.classList.toggle("active", b.getAttribute("data-ai-theme") === a.theme);
+    }
+    els.aiSeriesRows?.classList.toggle("hidden", a.mode !== "series");
     const frame = AI_FRAMES[a.frame] || AI_FRAMES.vertical;
     const story = a.story;
     const series = a.series;
@@ -1240,13 +1262,15 @@
       : story
         ? story.description || "The board is ready. Painting the shots and cutting them together now."
         : a.mode === "series"
-          ? `Auto series: leave the idea empty and she picks what is trending online, then makes Part 1, 2 and 3 in ${frame.name}.`
+          ? `Auto series: ${a.parts} parts, ${AI_THEMES[a.theme].toLowerCase()} theme. Leave the idea empty and she builds the whole run in ${frame.name}, one standalone video per part.`
           : `Write the idea in the rail. She turns it into a ${frame.name} video ${frame.note ? `for ${frame.note}` : ""}, ${AI_STYLES[a.style].toLowerCase()}, at whatever length the script earns - no timer.`;
     els.aiMode.textContent = seriesLabel;
+    els.aiParts.textContent = a.mode === "series" ? String(a.parts) : "1";
+    els.aiTheme.textContent = a.mode === "series" ? AI_THEMES[a.theme] : "-";
     els.aiLength.textContent = out ? `${Math.round(out.seconds)}s` : "auto";
     els.aiFrame.textContent = `${frame.name} · ${frame.w}x${frame.h} · ${frame.note}`;
     els.aiStyle.textContent = AI_STYLES[a.style];
-    const planned = a.mode === "series" ? 9 : 4;
+    const planned = a.mode === "series" ? a.parts * 3 : 4;
     els.aiScenes.textContent = series?.parts?.length
       ? `${series.parts.length} parts × 3 scenes`
       : story?.scenes?.length
@@ -1276,6 +1300,19 @@
   function setAiMode(name) {
     if (!AI_MODES[name] || dev.ai.busy) return;
     dev.ai.mode = name;
+    paintAi();
+  }
+
+  function setAiParts(count) {
+    if (!AI_PART_COUNTS.includes(count) || dev.ai.busy) return;
+    dev.ai.parts = count;
+    paintAi();
+  }
+
+  function setAiTheme(name) {
+    if (!AI_THEMES[name] || dev.ai.busy) return;
+    dev.ai.theme = name;
+    if (name === "fruitdrama") dev.ai.style = "movie";
     paintAi();
   }
 
@@ -1471,7 +1508,7 @@
     const frame = AI_FRAMES[a.frame];
     aiProgress(
       seriesMode
-        ? `FINDING WHAT IS TRENDING\n${AI_STYLES[a.style]} · ${frame.name} · 3 parts`
+        ? `${a.theme === "trending" ? "FINDING WHAT IS TRENDING" : `BUILDING ${a.theme === "ai" ? "AN AI" : `A ${AI_THEMES[a.theme].toUpperCase()}`} SERIES`}\n${AI_STYLES[a.style]} · ${frame.name} · ${a.parts} parts`
         : `WRITING THE SCRIPT\n${AI_STYLES[a.style]} · ${frame.name} · length set by the script`,
     );
     try {
@@ -1483,7 +1520,7 @@
         res = await bridge().api("/api/dev/aivideo", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt, style: a.style, frame: a.frame, mode: a.mode }),
+          body: JSON.stringify({ prompt, style: a.style, frame: a.frame, mode: a.mode, parts: a.parts, theme: a.theme }),
           signal: ctrl.signal,
         });
         data = await res.json().catch(() => null);
@@ -1506,7 +1543,7 @@
           );
           const out = await D.aiVideo({
             storyboard: part,
-            style: a.style,
+            style: data.style || a.style,
             frame: a.frame,
             part: i + 1,
             parts: total,
@@ -1526,7 +1563,7 @@
         paintAiBoard(data);
         paintAi();
         aiProgress(`SCRIPT READY\n${data.scenes.length} scenes · painting every shot now`);
-        const out = await D.aiVideo({ storyboard: data, style: a.style, frame: a.frame });
+        const out = await D.aiVideo({ storyboard: data, style: data.style || a.style, frame: a.frame });
         a.results.push({ out, story: data });
         renderAiResult(out, data);
         aiProgress(`DONE\n${out.path}\n${Math.round(out.seconds)}s · ${(out.bytes / 1048576).toFixed(1)} MB`);
@@ -1556,7 +1593,7 @@
     if (!dev.logInit) {
       dev.logInit = true;
       sysLine("developer mode armed · this never shows up in settings");
-      sysLine("open a folder, point her at a video in CONTENT, or switch AI VIDEO to Auto series and let her make part 1, 2, 3 from what is trending");
+      sysLine("open a folder, point her at a video in CONTENT, or switch AI VIDEO to Auto series and choose a part count and theme - trending or a themed run like Fruits");
     }
     initRoot();
     setTimeout(() => dev.els.input?.focus(), 80);
@@ -1643,6 +1680,12 @@
     });
     document.querySelectorAll("[data-ai-mode]").forEach((b) => {
       b.addEventListener("click", () => setAiMode(b.getAttribute("data-ai-mode")));
+    });
+    document.querySelectorAll("[data-ai-parts]").forEach((b) => {
+      b.addEventListener("click", () => setAiParts(Number(b.getAttribute("data-ai-parts"))));
+    });
+    document.querySelectorAll("[data-ai-theme]").forEach((b) => {
+      b.addEventListener("click", () => setAiTheme(b.getAttribute("data-ai-theme")));
     });
     dev.els.aiPrompt.addEventListener("input", () => paintAi());
     dev.els.aiRun.addEventListener("click", runAiVideo);

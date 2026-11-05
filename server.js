@@ -1292,6 +1292,7 @@ const AI_STYLE_DIRECTIONS = {
   anime: "hand-drawn 2D anime, crisp linework, vibrant cel shading, expressive faces, dynamic camera angles",
   cyberpunk: "neon-drenched cyberpunk, rain-slick surfaces, chrome, holograms, magenta and cyan light, dense night city",
   realistic: "photorealistic, natural skin texture, documentary realism, real lens bokeh, believable practical light",
+  movie: "Pixar-style 3D animated movie, cute stylized anthropomorphic characters with big expressive eyes, glossy surfaces, bright saturated color, warm cinematic light, soft depth of field",
 };
 const AI_COMPOSITIONS = {
   vertical: "vertical 9:16 portrait framing, the subject alive in the middle third, strong headroom, tight enough to read on a phone",
@@ -1307,10 +1308,12 @@ const AI_FRAME_PIXELS = {
 // series still lands when the user does not want news headlines.
 const AI_SERIES_THEMES = {
   fruits: "wild, record-breaking and strange fruits - rare species, impossible tastes, fruit science, fruit history and the prices people pay for them",
+  fruitdrama: "a 3D-animated fruit drama - anthropomorphic fruit characters (broccoli, bell pepper, strawberry, banana) caught in a tense, funny, emotional everyday story inside a miniature world, in the spirit of the viral fruit-drama shorts",
   animals: "astonishing animals - record holders, strange abilities, deep-sea creatures, newly discovered species and animal intelligence",
   space: "space and astronomy - missions, planets, black holes, the scale of the universe and the discoveries changing what we know",
   ai: "artificial intelligence - how the models actually work, what just changed, robots, and the strange edge cases nobody expected",
 };
+const AI_FICTION_THEMES = new Set(["fruitdrama"]);
 
 function stripXml(value) {
   return String(value || "")
@@ -1410,10 +1413,23 @@ function cleanAiStory(raw, wantScenes) {
         .filter(Boolean)
         .slice(0, 10)
     : [];
+  const cast = Array.isArray(raw.cast)
+    ? raw.cast
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+          const name = String(item.name || "").replace(/\s+/g, " ").trim().slice(0, 40);
+          const look = String(item.look ?? item.description ?? item.visual ?? "").replace(/\s+/g, " ").trim().slice(0, 180);
+          return look ? { name, look } : null;
+        })
+        .filter(Boolean)
+        .slice(0, 4)
+    : [];
   return {
     title: String(raw.title || "Capri cut").replace(/\s+/g, " ").trim().slice(0, 120),
     description: String(raw.description || "").replace(/\s+/g, " ").trim().slice(0, 700),
     hashtags,
+    cast,
+    setting: String(raw.setting || "").replace(/\s+/g, " ").trim().slice(0, 200),
     scenes,
   };
 }
@@ -1434,10 +1450,15 @@ async function handleDevAiVideo(req, res) {
   const partCount = Math.round(clampNum(body.parts || 3, 2, 8));
   const theme = mode === "series" && AI_SERIES_THEMES[String(body.theme)] ? String(body.theme) : "trending";
   const themeBrief = AI_SERIES_THEMES[theme] || "";
+  const fiction = AI_FICTION_THEMES.has(theme);
+  // The fruit drama lives or dies on one look: force the Pixar-style 3D movie
+  // direction even if a different style chip was left selected.
+  const lookStyle = fiction ? "movie" : style;
+  const movieLook = lookStyle === "movie";
   const trends = mode === "series" && theme === "trending" ? await fetchTrendingTopics() : [];
 
   const singleSystem = `You are Capri, directing a short AI-generated video from one prompt.
-Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
+Style: ${lookStyle} - ${AI_STYLE_DIRECTIONS[lookStyle]}.
 Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
 Shape: ${wantScenes} scenes, no fixed runtime - each scene lasts as long as its line needs, roughly 3-10 seconds.
 
@@ -1446,10 +1467,16 @@ Write it like a director who knows the feed:
 - Every scene moves: a new image, a new beat, never a static repeat of the same shot.
 - The narration, read in order, is one tight script that builds and pays off at the end. It is spoken by Capri, first person when it fits, no stage directions, no emojis, no quotation marks, no camera language.
 - Each narration is about ${words} words and sounds natural out loud.
-- Each imagePrompt is pure visual description: subject, action, environment, lighting, lens, mood. 25-50 words. It must stand alone because each shot is illustrated separately.
-- Keep one consistent look for the subject and world across every imagePrompt (same person, same colors, same place if the story has one).
+${movieLook
+    ? `- Invent a small cast of 1-3 characters with fixed names and a one-line look (species, exact body color, size, outfit). If the idea is a fruit drama, they are anthropomorphic fruit. Keep them identical in every scene.
+- Each imagePrompt is one clean 3D-movie still: start with the main character by name and species, then one clear action, the environment, the light. 12-24 words, one main subject, no long literary description.
+- Keep the same characters, colors, outfits and world in every imagePrompt.`
+    : `- Each imagePrompt is pure visual description: subject, action, environment, lighting, lens, mood. 25-50 words. It must stand alone because each shot is illustrated separately.
+- Keep one consistent look for the subject and world across every imagePrompt (same person, same colors, same place if the story has one).`}
 - No words, letters, signs, captions, logos, watermarks, UI or text of any kind inside the images. No real celebrities, no brands, no sexual content, no gore.
-- Caption: the short on-screen line for that shot, max 45 characters, adds to the image instead of repeating the narration.
+${movieLook
+    ? "- Caption: the on-screen line, max 18 characters, ALL CAPS, one to three words such as BROKEN, ANYONE, SCARED - a trailer beat, not the narration."
+    : "- Caption: the short on-screen line for that shot, max 45 characters, adds to the image instead of repeating the narration."}
 
 Upload package:
 - title: under 70 characters, concrete, front-load the searchable subject, no fake claims.
@@ -1457,31 +1484,41 @@ Upload package:
 - hashtags: 6-10 lowercase, no spaces, no #fyp or #viral filler; specific topic first, then the niche, then one or two broad tags.
 
 Return ONLY JSON:
-{"title":string,"description":string,"hashtags":[string],"scenes":[{"narration":string,"imagePrompt":string,"caption":string}]}`;
+{"title":string,"description":string,"hashtags":[string]${movieLook ? `,"cast":[{"name":string,"look":string}],"setting":string` : ""},"scenes":[{"narration":string,"imagePrompt":string,"caption":string}]}`;
 
   const seriesPlanSystem = `You are Capri, programming an automatic ${partCount}-part micro-series ${theme === "trending" ? "from what is trending online right now." : `built around one popular theme: ${themeBrief}.`}
-Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
+Style: ${lookStyle} - ${AI_STYLE_DIRECTIONS[lookStyle]}.
 Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
 
-- ${theme === "trending"
+${fiction
+    ? `- Invent ONE cast of 2-3 anthropomorphic fruit characters with fixed names, species, colors, outfits and personality. Give each a one-line look that can be pasted into an image prompt: species + exact body color + outfit. They must look identical in every part.
+- Pick ONE everyday situation that goes wrong and stretch it across exactly ${partCount} parts as one continuous story. Each part ends on a cliffhanger; the final part pays it off.
+- Every shot is a Pixar-style 3D animated movie still: cute stylized fruit characters in a miniature real-world setting, big expressive eyes, glossy texture, warm cinematic light. Never a photo of real fruit, never generic humans.
+- Tone: big emotions, small stakes, funny and warm. No text, no logos, no brands, no real people.
+- This is fiction: continuity matters more than facts. Invent freely, but keep the cast, colors and world consistent.`
+    : `- ${theme === "trending"
     ? "Choose ONE story or subject from the live feed (or the user's angle if they gave one) that people are already curious about. Never invent news; if the feed is unavailable, pick a broad evergreen topic that travels."
     : "Build ONE coherent themed run. Every part covers a different standout example, fact or story inside the theme - no repeats, no filler - and the whole run keeps one visual world. Every example must be real and true: no invented species, records, prices or events."}
-- Prefer wonder, tech, AI, space, science, animals, internet culture and weird true stories. Skip tragedy, war, crime victims, death tolls, elections and politics.
+- Prefer wonder, tech, AI, space, science, animals, internet culture and weird true stories. Skip tragedy, war, crime victims, death tolls, elections and politics.`}
 - Split it into exactly ${partCount} parts. Part 1 hooks and sets the question. Every middle part escalates with a new twist nobody saw coming. The final part pays it off and lands the takeaway. Each part must stand alone as its own complete video and still tease the next.
 - For each part give a title (under 70 characters, end with "| Part N"), a 2-sentence description with one question that invites comments, 6-8 lowercase hashtags, and a one-line outline of the 3 scenes.
 - topic: a short human-readable series name in normal title case, never a slug, hyphenated identifier or all-lowercase phrase.
 - No real celebrities, no brands, no sexual content, no gore, no politics.
 
 Return ONLY JSON:
-{"topic":string,"title":string,"description":string,"hashtags":[string],"parts":[{"title":string,"description":string,"hashtags":[string],"outline":string}]}`;
+{"topic":string,"title":string,"description":string,"hashtags":[string]${fiction ? `,"cast":[{"name":string,"look":string}],"setting":string` : ""},"parts":[{"title":string,"description":string,"hashtags":[string],"outline":string}]}`;
 
   const seriesPartSystem = `You are Capri, writing part N of a ${partCount}-part short-video series that has already been planned.
-Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
+Style: ${lookStyle} - ${AI_STYLE_DIRECTIONS[lookStyle]}.
 Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
 Every part has exactly 3 scenes and scene 1 is the hook: strongest image and first line inside two seconds.
 Narration: spoken by Capri, first person when it fits, no stage directions, no emojis, no quotation marks, no camera language. About 15 words per scene, natural out loud. The last part closes the loop and lands the takeaway.
-imagePrompt: pure visual description - subject, action, environment, lighting, lens, mood. 25-45 words, stands alone, same subject and world as the plan. No text, logos, watermarks, real celebrities, brands, sexual content, gore or politics inside the image.
-caption: on-screen line, max 45 characters, adds to the image instead of repeating the narration.
+${movieLook
+    ? `imagePrompt: one clean 3D-movie still of the planned cast - start with the main character by name and species (color, outfit), then one clear action, the environment, the light. 12-24 words, one main subject. Keep every character exactly as described in the plan, same colors and outfits in every shot.
+caption: on-screen line, ALL CAPS, 1-3 words such as BROKEN, ANYONE, SCARED - a trailer beat.`
+    : `imagePrompt: pure visual description - subject, action, environment, lighting, lens, mood. 25-45 words, stands alone, same subject and world as the plan.
+caption: on-screen line, max 45 characters, adds to the image instead of repeating the narration.`}
+No text, logos, watermarks, real celebrities, brands, sexual content, gore or politics inside the image.
 
 Return ONLY JSON:
 {"title":string,"description":string,"hashtags":[string],"scenes":[{"narration":string,"imagePrompt":string,"caption":string}]}`;
@@ -1506,11 +1543,17 @@ Return ONLY JSON:
     const planned = Array.isArray(plan?.parts) ? plan.parts.slice(0, partCount) : [];
     if (!planned.length) return devToolError(res, 502, "She came back without a series. Try Auto series again.");
     const parts = [];
+    const castText = (Array.isArray(plan.cast) ? plan.cast : [])
+      .map((c) => `${c?.name || "character"}: ${c?.look || ""}`)
+      .filter((line) => line.trim().length > 2)
+      .join("; ");
     for (let i = 0; i < planned.length; i += 1) {
       const seed = planned[i] || {};
       const context = [
         `Series topic: ${plan.topic || ""}`,
         plan.title ? `Series title: ${plan.title}` : "",
+        castText ? `Cast (keep identical in every shot): ${castText}` : "",
+        plan.setting ? `Setting: ${plan.setting}` : "",
         `This is part ${i + 1} of ${planned.length}.`,
         `Planned title: ${seed.title || `Part ${i + 1}`}`,
         seed.outline ? `Scene outline: ${seed.outline}` : "",
@@ -1525,6 +1568,8 @@ Return ONLY JSON:
         title: part?.title || seed.title,
         description: part?.description || seed.description,
         hashtags: part?.hashtags || seed.hashtags,
+        cast: plan.cast,
+        setting: plan.setting,
         scenes: part?.scenes,
       };
       try {
@@ -1548,7 +1593,7 @@ Return ONLY JSON:
       partCount,
       theme,
       prompt,
-      style,
+      style: lookStyle,
       frame,
       pixels,
       provider: "capri",
@@ -1576,7 +1621,7 @@ Return ONLY JSON:
     ...story,
     mode,
     prompt,
-    style,
+    style: lookStyle,
     frame,
     pixels,
     provider: out.provider,
