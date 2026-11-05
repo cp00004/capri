@@ -1303,6 +1303,14 @@ const AI_FRAME_PIXELS = {
   landscape: { w: 1344, h: 768 },
   square: { w: 1024, h: 1024 },
 };
+// Themed runs are popular, evergreen subjects that travel on their own, so a
+// series still lands when the user does not want news headlines.
+const AI_SERIES_THEMES = {
+  fruits: "wild, record-breaking and strange fruits - rare species, impossible tastes, fruit science, fruit history and the prices people pay for them",
+  animals: "astonishing animals - record holders, strange abilities, deep-sea creatures, newly discovered species and animal intelligence",
+  space: "space and astronomy - missions, planets, black holes, the scale of the universe and the discoveries changing what we know",
+  ai: "artificial intelligence - how the models actually work, what just changed, robots, and the strange edge cases nobody expected",
+};
 
 function stripXml(value) {
   return String(value || "")
@@ -1423,7 +1431,10 @@ async function handleDevAiVideo(req, res) {
   // every 45 seconds, so nine painted shots is already a long automatic run.
   const wantScenes = mode === "series" ? 3 : 4;
   const words = mode === "series" ? 15 : 18;
-  const trends = mode === "series" ? await fetchTrendingTopics() : [];
+  const partCount = Math.round(clampNum(body.parts || 3, 2, 8));
+  const theme = mode === "series" && AI_SERIES_THEMES[String(body.theme)] ? String(body.theme) : "trending";
+  const themeBrief = AI_SERIES_THEMES[theme] || "";
+  const trends = mode === "series" && theme === "trending" ? await fetchTrendingTopics() : [];
 
   const singleSystem = `You are Capri, directing a short AI-generated video from one prompt.
 Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
@@ -1448,24 +1459,26 @@ Upload package:
 Return ONLY JSON:
 {"title":string,"description":string,"hashtags":[string],"scenes":[{"narration":string,"imagePrompt":string,"caption":string}]}`;
 
-  const seriesPlanSystem = `You are Capri, programming an automatic 3-part micro-series from what is trending online right now.
+  const seriesPlanSystem = `You are Capri, programming an automatic ${partCount}-part micro-series ${theme === "trending" ? "from what is trending online right now." : `built around one popular theme: ${themeBrief}.`}
 Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
 Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
 
-- Choose ONE story or subject from the live feed (or the user's angle if they gave one) that people are already curious about. Never invent news; if the feed is unavailable, pick a broad evergreen topic that travels.
+- ${theme === "trending"
+    ? "Choose ONE story or subject from the live feed (or the user's angle if they gave one) that people are already curious about. Never invent news; if the feed is unavailable, pick a broad evergreen topic that travels."
+    : "Build ONE coherent themed run. Every part covers a different standout example, fact or story inside the theme - no repeats, no filler - and the whole run keeps one visual world."}
 - Prefer wonder, tech, AI, space, science, animals, internet culture and weird true stories. Skip tragedy, war, crime victims, death tolls, elections and politics.
-- Split it into exactly 3 parts. Part 1 hooks and sets the question. Part 2 escalates with the twist nobody saw coming. Part 3 pays it off and lands the takeaway. Each part must stand alone and tease the next.
+- Split it into exactly ${partCount} parts. Part 1 hooks and sets the question. Every middle part escalates with a new twist nobody saw coming. The final part pays it off and lands the takeaway. Each part must stand alone as its own complete video and still tease the next.
 - For each part give a title (under 70 characters, end with "| Part N"), a 2-sentence description with one question that invites comments, 6-8 lowercase hashtags, and a one-line outline of the 3 scenes.
 - No real celebrities, no brands, no sexual content, no gore, no politics.
 
 Return ONLY JSON:
 {"topic":string,"title":string,"description":string,"hashtags":[string],"parts":[{"title":string,"description":string,"hashtags":[string],"outline":string}]}`;
 
-  const seriesPartSystem = `You are Capri, writing part N of a 3-part short-video series that has already been planned.
+  const seriesPartSystem = `You are Capri, writing part N of a ${partCount}-part short-video series that has already been planned.
 Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
 Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
 Every part has exactly 3 scenes and scene 1 is the hook: strongest image and first line inside two seconds.
-Narration: spoken by Capri, first person when it fits, no stage directions, no emojis, no quotation marks, no camera language. About 15 words per scene, natural out loud. Part 3 closes the loop and lands the takeaway.
+Narration: spoken by Capri, first person when it fits, no stage directions, no emojis, no quotation marks, no camera language. About 15 words per scene, natural out loud. The last part closes the loop and lands the takeaway.
 imagePrompt: pure visual description - subject, action, environment, lighting, lens, mood. 25-45 words, stands alone, same subject and world as the plan. No text, logos, watermarks, real celebrities, brands, sexual content, gore or politics inside the image.
 caption: on-screen line, max 45 characters, adds to the image instead of repeating the narration.
 
@@ -1474,17 +1487,22 @@ Return ONLY JSON:
 
   const feed = trends.length
     ? trends.map((t, i) => `${i + 1}. ${t}`).join("\n")
-    : "(the live feed did not answer - use a broad evergreen topic that is blowing up this week)";
+    : theme === "trending"
+      ? "(the live feed did not answer - use a broad evergreen topic that is blowing up this week)"
+      : "";
 
   const pixels = AI_FRAME_PIXELS[frame];
   if (mode === "series") {
     let plan;
+    const planAsk = theme === "trending"
+      ? `The angle from the user (may be empty, then pick freely):\n${prompt || "(none)"}\n\nLive trending right now:\n${feed}`
+      : `The theme the user chose: ${themeBrief}\nThe angle from the user (may be empty, then pick freely inside the theme):\n${prompt || "(none)"}\n\nBuild exactly ${partCount} standalone parts inside this theme.`;
     try {
-      plan = await askDevJson(seriesPlanSystem, `The angle from the user (may be empty, then pick freely):\n${prompt || "(none)"}\n\nLive trending right now:\n${feed}`);
+      plan = await askDevJson(seriesPlanSystem, planAsk);
     } catch (err) {
       return devToolError(res, 502, `The series plan came back unusable: ${String(err?.message || err)}`);
     }
-    const planned = Array.isArray(plan?.parts) ? plan.parts.slice(0, 3) : [];
+    const planned = Array.isArray(plan?.parts) ? plan.parts.slice(0, partCount) : [];
     if (!planned.length) return devToolError(res, 502, "She came back without a series. Try Auto series again.");
     const parts = [];
     for (let i = 0; i < planned.length; i += 1) {
@@ -1522,6 +1540,8 @@ Return ONLY JSON:
       hashtags: (Array.isArray(plan.hashtags) ? plan.hashtags : []).slice(0, 10),
       trends,
       parts,
+      partCount,
+      theme,
       prompt,
       style,
       frame,
