@@ -1464,6 +1464,7 @@
     a.story = null;
     a.series = null;
     a.results = [];
+    dev.els.aiResultBox.textContent = "";
     dev.els.aiResultBox.classList.add("hidden");
     paintAiBoard(null);
     paintAi();
