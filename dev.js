@@ -1679,7 +1679,7 @@
   function tradeUsd(n) {
     const v = Number(n) || 0;
     const abs = Math.abs(v);
-    const digits = abs >= 1 ? 2 : 4;
+    const digits = abs === 0 || abs >= 1 ? 2 : 4;
     return `${v < 0 ? "-" : ""}$${abs.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
   }
 
@@ -2388,7 +2388,7 @@
     if (!dev.logInit) {
       dev.logInit = true;
       sysLine("developer mode armed · this never shows up in settings");
-      sysLine("open a folder, point her at a video in CONTENT, or switch AI VIDEO to Auto series and choose a part count and theme - trending or a themed run like Fruits");
+      sysLine("open a folder, point her at a video in CONTENT, switch AI VIDEO to Auto series and choose a part count and theme - trending or a themed run like Fruits - or switch to TRADING for the paper-trading desk");
     }
     initRoot();
     setTimeout(() => dev.els.input?.focus(), 80);
