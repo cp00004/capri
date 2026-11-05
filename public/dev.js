@@ -1234,7 +1234,8 @@
     els.aiLength.textContent = `${Math.round(out?.seconds || a.seconds)}s`;
     els.aiFrame.textContent = `${frame.name} · ${frame.w}x${frame.h} · ${frame.note}`;
     els.aiStyle.textContent = AI_STYLES[a.style];
-    els.aiScenes.textContent = story?.scenes?.length ? `${story.scenes.length} scenes` : "-";
+    const planned = Math.max(3, Math.min(5, Math.round(a.seconds / 12)));
+    els.aiScenes.textContent = story?.scenes?.length ? `${story.scenes.length} scenes` : `${planned} planned`;
     els.aiOutput.textContent = dev.root ? `${dev.root}\\videos` : "open a workspace folder first";
     const ready = Boolean(dev.root) && !a.busy && Boolean(String(els.aiPrompt.value || "").trim());
     els.aiRun.disabled = !ready;
