@@ -1505,7 +1505,7 @@
     const frame = AI_FRAMES[a.frame];
     aiProgress(
       seriesMode
-        ? `${a.theme === "trending" ? "FINDING WHAT IS TRENDING" : `BUILDING A ${AI_THEMES[a.theme].toUpperCase()} SERIES`}\n${AI_STYLES[a.style]} · ${frame.name} · ${a.parts} parts`
+        ? `${a.theme === "trending" ? "FINDING WHAT IS TRENDING" : `BUILDING ${a.theme === "ai" ? "AN AI" : `A ${AI_THEMES[a.theme].toUpperCase()}`} SERIES`}\n${AI_STYLES[a.style]} · ${frame.name} · ${a.parts} parts`
         : `WRITING THE SCRIPT\n${AI_STYLES[a.style]} · ${frame.name} · length set by the script`,
     );
     try {
