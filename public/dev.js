@@ -1914,7 +1914,7 @@
       const b = bridge();
       if (!b?.api) throw new Error("the page bridge is not ready");
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 70_000);
+      const timer = setTimeout(() => ctrl.abort(), 120_000);
       let pick = null;
       try {
         const res = await b.api("/api/dev/trading/pick", {
@@ -1943,7 +1943,18 @@
     } catch (err) {
       const message = String(err?.message || err);
       t.error = message;
-      tradeLog(`SCAN FAILED · ${message}`, "error");
+      const live = (t.market?.coins || []).slice(0, 25);
+      if (live.length >= 5) {
+        const holding = account.positions
+          .slice()
+          .sort((a, b) => (b.qty * (tradeCoin(b.symbol)?.price || b.entry)) - (a.qty * (tradeCoin(a.symbol)?.price || a.entry)))[0] || null;
+        const pick = tradeFallback(live, holding, t.risk);
+        t.lastPick = { ...pick, provider: "capri-rules", at: Date.now() };
+        tradeApplyPick(t.lastPick);
+        tradeLog(`SCAN FELL BACK to local rules · ${message}`, "info");
+      } else {
+        tradeLog(`SCAN FAILED · ${message}`, "error");
+      }
     } finally {
       t.busy = false;
       paintTrading();
