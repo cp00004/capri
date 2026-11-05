@@ -1366,8 +1366,282 @@ async function fetchTrendingTopics(limit = 18) {
     .map((item) => item.text);
 }
 
-async function askDevJson(system, user, attempts = 2) {
-  let last = "empty reply";
+// ------------------------------------------------------------ paper trading
+// Live prices come from keyless public feeds. Nothing here places a real order:
+// the bot trades a virtual USD account that lives in the renderer.
+const TRADING_CACHE_MS = 60_000;
+const MINING_CACHE_MS = 5 * 60_000;
+let tradingCache = { at: 0, data: null };
+let miningCache = { at: 0, data: null };
+let btcPriceCache = { at: 0, usd: 0 };
+const TRADING_BASE_STABLE = new Set(["USDT", "USDC", "FDUSD", "TUSD", "BUSD", "DAI", "USDP", "USDE", "USD1", "XUSD", "AEUR", "EUR", "GBP", "TRY", "BRL", "ARS", "PYUSD", "USDD", "FRAX"]);
+const TRADING_STABLE_NAME = /\b(tether|usd coin|dai|trueusd|first digital|paypal usd|ethena|frax|staked ether|wrapped bitcoin|wrapped ether|liquid staking|bitcoin cash|bitcoin sv)\b/i;
+const TRADING_LEVERAGED = /(UP|DOWN|BULL|BEAR)$/;
+
+function tradingSafeCoin(raw) {
+  const price = Number(raw?.price) || 0;
+  const symbol = String(raw?.symbol || "").toUpperCase();
+  if (!price || !symbol || TRADING_BASE_STABLE.has(symbol) || TRADING_LEVERAGED.test(symbol)) return null;
+  const name = String(raw?.name || symbol);
+  if (TRADING_STABLE_NAME.test(name)) return null;
+  return {
+    id: String(raw?.id || symbol.toLowerCase()),
+    symbol,
+    name,
+    image: /^https:\/\//.test(String(raw?.image || "")) ? String(raw.image) : "",
+    price,
+    marketCap: Number(raw?.marketCap) || 0,
+    volume: Number(raw?.volume) || 0,
+    change1h: Number.isFinite(Number(raw?.change1h)) ? Number(raw.change1h) : 0,
+    change24h: Number.isFinite(Number(raw?.change24h)) ? Number(raw.change24h) : 0,
+    change7d: Number.isFinite(Number(raw?.change7d)) ? Number(raw.change7d) : 0,
+    spark: Array.isArray(raw?.spark) ? raw.spark.map(Number).filter((n) => Number.isFinite(n) && n > 0).slice(-96) : [],
+  };
+}
+
+async function fetchCoinGeckoMarkets() {
+  const url = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=60&page=1&sparkline=true&price_change_percentage=1h%2C24h%2C7d";
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(12_000),
+    headers: { Accept: "application/json", "User-Agent": "Capri/1.0" },
+  });
+  if (!res.ok) throw new Error(`coingecko ${res.status}`);
+  const list = await res.json();
+  if (!Array.isArray(list)) throw new Error("coingecko shape");
+  return list
+    .map((c) => tradingSafeCoin({
+      id: c.id,
+      symbol: c.symbol,
+      name: c.name,
+      image: c.image,
+      price: c.current_price,
+      marketCap: c.market_cap,
+      volume: c.total_volume,
+      change1h: c.price_change_percentage_1h_in_currency,
+      change24h: c.price_change_percentage_24h_in_currency ?? c.price_change_percentage_24h,
+      change7d: c.price_change_percentage_7d_in_currency,
+      spark: c.sparkline_in_7d?.price,
+    }))
+    .filter(Boolean);
+}
+
+async function fetchBinanceMarkets() {
+  const res = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
+    signal: AbortSignal.timeout(12_000),
+    headers: { Accept: "application/json", "User-Agent": "Capri/1.0" },
+  });
+  if (!res.ok) throw new Error(`binance ${res.status}`);
+  const list = await res.json();
+  if (!Array.isArray(list)) throw new Error("binance shape");
+  const coins = [];
+  for (const row of list) {
+    const pair = String(row?.symbol || "");
+    if (!pair.endsWith("USDT")) continue;
+    const symbol = pair.slice(0, -4);
+    if (TRADING_BASE_STABLE.has(symbol) || TRADING_LEVERAGED.test(symbol)) continue;
+    const price = Number(row.lastPrice);
+    const volume = Number(row.quoteVolume);
+    if (!(price > 0) || !(volume > 5_000_000)) continue;
+    coins.push(tradingSafeCoin({
+      id: symbol.toLowerCase(),
+      symbol,
+      name: symbol,
+      price,
+      volume,
+      change24h: row.priceChangePercent,
+    }));
+  }
+  return coins.filter(Boolean).sort((a, b) => b.volume - a.volume).slice(0, 60);
+}
+
+async function fetchTradingMarket() {
+  if (tradingCache.data && Date.now() - tradingCache.at < TRADING_CACHE_MS) return tradingCache.data;
+  let coins = [];
+  let source = "";
+  try {
+    coins = await fetchCoinGeckoMarkets();
+    source = "coingecko";
+  } catch { /* fall through to the exchange feed */ }
+  if (coins.length < 10) {
+    coins = await fetchBinanceMarkets();
+    source = "binance";
+  }
+  if (!coins.length) throw new Error("The market feeds did not answer.");
+  const data = { at: new Date().toISOString(), source, coins: coins.slice(0, 60) };
+  tradingCache = { at: Date.now(), data };
+  return data;
+}
+
+async function fetchBtcUsd() {
+  if (btcPriceCache.usd && Date.now() - btcPriceCache.at < 60_000) return btcPriceCache.usd;
+  let usd = 0;
+  try {
+    const res = await fetch("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", {
+      signal: AbortSignal.timeout(9000),
+      headers: { "User-Agent": "Capri/1.0" },
+    });
+    if (res.ok) usd = Number((await res.json()).price) || 0;
+  } catch { /* keyless feeds wobble */ }
+  if (!usd) {
+    try {
+      const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd", {
+        signal: AbortSignal.timeout(9000),
+        headers: { "User-Agent": "Capri/1.0" },
+      });
+      if (res.ok) usd = Number((await res.json())?.bitcoin?.usd) || 0;
+    } catch { /* leave it zero */ }
+  }
+  if (usd) btcPriceCache = { at: Date.now(), usd };
+  return usd;
+}
+
+async function fetchMiningBoard() {
+  if (miningCache.data && Date.now() - miningCache.at < MINING_CACHE_MS) return miningCache.data;
+  const res = await fetch("https://whattomine.com/coins.json", {
+    signal: AbortSignal.timeout(15_000),
+    headers: { Accept: "application/json", "User-Agent": "Capri/1.0" },
+  });
+  if (!res.ok) throw new Error(`whattomine ${res.status}`);
+  const raw = await res.json();
+  const btcUsd = await fetchBtcUsd().catch(() => 0);
+  const coins = Object.entries(raw?.coins || {})
+    .map(([name, c]) => {
+      const btcPerDay = Number(c?.btc_revenue24 ?? c?.btc_revenue) || 0;
+      return {
+        name,
+        tag: String(c?.tag || ""),
+        algorithm: String(c?.algorithm || ""),
+        marketCap: String(c?.market_cap || ""),
+        btcPerDay,
+        usdPerDay: btcUsd ? btcPerDay * btcUsd : 0,
+        profitability: Number(c?.profitability24 ?? c?.profitability) || 0,
+      };
+    })
+    .filter((c) => c.usdPerDay > 0)
+    .sort((a, b) => b.usdPerDay - a.usdPerDay)
+    .slice(0, 12);
+  const data = {
+    at: new Date().toISOString(),
+    source: "whattomine",
+    btcUsd,
+    coins,
+    note: "Reference rig, revenue before electricity. Capri does not run a miner on this device.",
+  };
+  miningCache = { at: Date.now(), data };
+  return data;
+}
+
+const TRADING_RISK_BRIEF = {
+  conservative: "large caps only (top 15 by market cap), avoid anything moving more than 8% in 24h either way, prefer HOLD when unsure",
+  balanced: "top 40 by market cap, favour steady momentum, accept one volatile pick, size positions at 25% of cash",
+  aggressive: "chase the strongest 24h and 7d momentum anywhere in the top 60, but cut anything down more than 6% in 24h",
+};
+
+function fallbackTradePick(coins, holding, risk) {
+  const pool = coins.filter((c) => c && c.price > 0);
+  const capLimit = risk === "conservative" ? 15 : risk === "balanced" ? 40 : pool.length;
+  const ranked = pool
+    .slice(0, capLimit)
+    .map((c) => ({
+      c,
+      score: c.change1h * 0.15 + c.change24h * 0.5 + c.change7d * 0.2 + Math.log10(1 + c.volume / 10_000_000) * 0.08,
+    }))
+    .sort((a, b) => b.score - a.score);
+  if (holding?.symbol) {
+    const live = pool.find((c) => c.symbol === holding.symbol);
+    if (live) {
+      const pnl = holding.entry > 0 ? ((live.price - holding.entry) / holding.entry) * 100 : 0;
+      const stop = risk === "conservative" ? -3 : risk === "balanced" ? -5 : -8;
+      const take = risk === "conservative" ? 5 : risk === "balanced" ? 9 : 14;
+      if (live.change24h <= stop || pnl <= stop || pnl >= take) {
+        return {
+          action: "SELL",
+          symbol: holding.symbol,
+          confidence: 62,
+          reason: pnl <= stop
+            ? `${holding.symbol} is down ${pnl.toFixed(1)}% from entry - cutting the loss at the ${risk} stop.`
+            : pnl >= take
+              ? `${holding.symbol} is up ${pnl.toFixed(1)}% from entry - taking the paper profit.`
+              : `${holding.symbol} rolled over ${live.change24h.toFixed(1)}% in 24h - momentum is gone.`,
+        };
+      }
+      return {
+        action: "HOLD",
+        symbol: holding.symbol,
+        confidence: 55,
+        reason: `${holding.symbol} is still inside the ${risk} band (${pnl.toFixed(1)}% from entry, ${live.change24h.toFixed(1)}% in 24h).`,
+      };
+    }
+  }
+  const best = ranked[0];
+  if (!best) return { action: "HOLD", symbol: "", confidence: 40, reason: "No market data worth touching right now." };
+  return {
+    action: "BUY",
+    symbol: best.c.symbol,
+    confidence: Math.max(45, Math.min(88, Math.round(55 + best.score * 2))),
+    reason: `${best.c.symbol} leads the ${risk} scan: ${best.c.change24h.toFixed(1)}% in 24h, ${best.c.change7d.toFixed(1)}% in 7d on $${Math.round(best.c.volume / 1_000_000)}M volume.`,
+  };
+}
+
+async function handleDevTradingPick(req, res) {
+  let body;
+  try { body = await readBody(req, 300_000); } catch (err) { return devToolError(res, 400, err.message); }
+  const risk = TRADING_RISK_BRIEF[String(body.risk)] ? String(body.risk) : "balanced";
+  const coins = (Array.isArray(body.coins) ? body.coins : [])
+    .map(tradingSafeCoin)
+    .filter(Boolean)
+    .slice(0, 30);
+  if (!coins.length) return devToolError(res, 400, "No market data to work with.");
+  const holding = body.holding && typeof body.holding === "object" && body.holding.symbol
+    ? {
+        symbol: String(body.holding.symbol).toUpperCase().slice(0, 12),
+        entry: Number(body.holding.entry) || 0,
+        qty: Number(body.holding.qty) || 0,
+      }
+    : null;
+  const pick = fallbackTradePick(coins, holding, risk);
+  const system = `You are Capri's paper-trading desk. You decide one move per scan: BUY one coin, SELL the current paper holding, or HOLD.
+Rules:
+- Risk profile: ${risk} - ${TRADING_RISK_BRIEF[risk]}.
+- Only BUY a symbol that appears in the supplied list. Only SELL the supplied holding. Never invent prices.
+- Paper money only: this is a simulation, no real orders. Judge momentum, volume, drawdown and risk.
+- Be decisive, but HOLD is correct when nothing is compelling. No guarantees, no hype.
+Return ONLY JSON:
+{"action":"BUY"|"SELL"|"HOLD","symbol":string,"confidence":number,"reason":string}`;
+  const user = [
+    `Risk profile: ${risk}`,
+    `Cash available: $${(Number(body.cash) || 0).toFixed(2)}`,
+    holding ? `Current paper holding: ${holding.symbol}, entry $${holding.entry}, quantity ${holding.qty}` : "Current paper holding: none",
+    "Live market:",
+    ...coins.map((c) => `${c.symbol} (${c.name}): $${c.price} · 1h ${c.change1h.toFixed(2)}% · 24h ${c.change24h.toFixed(2)}% · 7d ${c.change7d.toFixed(2)}% · vol $${Math.round(c.volume / 1_000_000)}M`),
+  ].join("\n");
+  try {
+    const out = await collectDevCompletion({
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      tools: undefined,
+    });
+    const raw = parseJsonLoose(out.content);
+    const action = ["BUY", "SELL", "HOLD"].includes(String(raw?.action).toUpperCase()) ? String(raw.action).toUpperCase() : "HOLD";
+    const symbol = String(raw?.symbol || "").toUpperCase().slice(0, 12);
+    const known = coins.some((c) => c.symbol === symbol);
+    const sellable = holding && symbol === holding.symbol;
+    const safeAction = action === "BUY" && !known ? "HOLD" : action === "SELL" && !sellable ? "HOLD" : action;
+    return json(res, 200, {
+      action: safeAction,
+      symbol: safeAction === "HOLD" ? "" : symbol,
+      confidence: Math.max(0, Math.min(100, Math.round(Number(raw?.confidence) || pick.confidence))),
+      reason: String(raw?.reason || pick.reason).replace(/\s+/g, " ").trim().slice(0, 240),
+      provider: out.provider || "capri",
+    });
+  } catch {
+    return json(res, 200, { ...pick, provider: "capri-rules", fallback: true });
+  }
+}
+
+async function askDevJson(system, user, attempts = 2) {  let last = "empty reply";
   for (let i = 0; i < attempts; i += 1) {
     const out = await collectDevCompletion({
       messages: [
@@ -3856,6 +4130,26 @@ const handler = async (req, res) => {
     if (req.method === "POST" && pathname === "/api/dev/aivideo") {
       if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
       return handleDevAiVideo(req, res);
+    }
+    if (req.method === "GET" && pathname === "/api/dev/trading/market") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      try {
+        return json(res, 200, await fetchTradingMarket());
+      } catch (err) {
+        return devToolError(res, 502, String(err?.message || err));
+      }
+    }
+    if (req.method === "GET" && pathname === "/api/dev/trading/mining") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      try {
+        return json(res, 200, await fetchMiningBoard());
+      } catch (err) {
+        return devToolError(res, 502, String(err?.message || err));
+      }
+    }
+    if (req.method === "POST" && pathname === "/api/dev/trading/pick") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      return handleDevTradingPick(req, res);
     }
     if (req.method === "POST" && pathname === "/api/tts") return handleTts(req, res);
     if (req.method === "POST" && pathname === "/api/stt") return handleStt(req, res);
