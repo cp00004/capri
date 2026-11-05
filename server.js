@@ -1343,7 +1343,10 @@ async function handleDevAiVideo(req, res) {
   const style = AI_STYLE_DIRECTIONS[String(body.style)] ? String(body.style) : "cinematic";
   const frame = AI_FRAME_PIXELS[String(body.frame)] ? String(body.frame) : "vertical";
   const seconds = Math.round(clampNum(body.seconds, 10, 90));
-  const wantScenes = Math.max(3, Math.min(10, Math.round(seconds / 6)));
+  // One painted image per scene, and the keyless painter allows one image
+  // every 45 seconds. Five shots keeps a full minute of video under five
+  // minutes of painting; each shot is long enough to breathe.
+  const wantScenes = Math.max(3, Math.min(5, Math.round(seconds / 12)));
   // Roughly 2.4 spoken words a second leaves room for the beats between lines.
   const words = Math.max(7, Math.round((seconds * 2.4) / wantScenes));
 
