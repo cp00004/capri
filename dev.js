@@ -39,6 +39,20 @@
       series: null,
       results: [],
     },
+    trading: {
+      account: null,
+      risk: "balanced",
+      market: null,
+      marketAt: 0,
+      mining: null,
+      miningAt: 0,
+      busy: false,
+      auto: false,
+      refreshTimer: null,
+      autoTimer: null,
+      lastPick: null,
+      error: "",
+    },
     nameMode: "",
     mainView: "chat",
   };
@@ -98,6 +112,30 @@
       aiTheme: $("aiFactTheme"),
       aiSeriesRows: $("aiSeriesRows"),
       aiOutput: $("aiFactOutput"),
+      tradingView: $("devTradingView"),
+      trScanTop: $("trScanTop"),
+      trScan: $("trScan"),
+      trAuto: $("trAuto"),
+      trReset: $("trReset"),
+      trTitle: $("trTitle"),
+      trMeta: $("trMeta"),
+      trEquity: $("trEquity"),
+      trCash: $("trCash"),
+      trOpen: $("trOpen"),
+      trRealized: $("trRealized"),
+      trDeposited: $("trDeposited"),
+      trMarket: $("trMarket"),
+      trBot: $("trBot"),
+      trChart: $("trChart"),
+      trChartMeta: $("trChartMeta"),
+      trPick: $("trPick"),
+      trLog: $("trLog"),
+      trPositions: $("trPositions"),
+      trPosMeta: $("trPosMeta"),
+      trMarketTable: $("trMarketTable"),
+      trMarketMeta: $("trMarketMeta"),
+      trMining: $("trMining"),
+      trMiningMeta: $("trMiningMeta"),
     };
   }
 
@@ -181,16 +219,25 @@
   }
 
   function showContentPage(name) {
-    dev.contentPage = name === "ai" ? "ai" : "shorts";
+    dev.contentPage = name === "ai" ? "ai" : name === "trading" ? "trading" : "shorts";
     for (const b of document.querySelectorAll("[data-content-page]")) {
       b.classList.toggle("active", b.getAttribute("data-content-page") === dev.contentPage);
     }
     $("devContentShorts").classList.toggle("hidden", dev.contentPage !== "shorts");
     $("devContentAi").classList.toggle("hidden", dev.contentPage !== "ai");
+    $("devContentTrading").classList.toggle("hidden", dev.contentPage !== "trading");
     dev.els.ytView.classList.toggle("hidden", dev.contentPage !== "shorts");
     dev.els.aiView.classList.toggle("hidden", dev.contentPage !== "ai");
-    if (dev.contentPage === "shorts") paintStudio();
-    else paintAi();
+    dev.els.tradingView.classList.toggle("hidden", dev.contentPage !== "trading");
+    if (dev.contentPage === "shorts") {
+      tradeLeave();
+      paintStudio();
+    } else if (dev.contentPage === "ai") {
+      tradeLeave();
+      paintAi();
+    } else {
+      tradeEnter();
+    }
   }
 
   function showTab(name) {
@@ -207,8 +254,10 @@
       $("devTerminalView").classList.add("hidden");
       showContentPage(dev.contentPage || "shorts");
     } else {
+      tradeLeave();
       dev.els.ytView.classList.add("hidden");
       dev.els.aiView.classList.add("hidden");
+      dev.els.tradingView.classList.add("hidden");
       showView(dev.mainView || "chat");
     }
   }
@@ -1583,6 +1632,752 @@
     return data?.seriesTitle || `Part ${index + 1}`;
   }
 
+  /* ------------------------------------------------------------ paper trading */
+
+  const TRADE_KEY = "capri.dev.trading.v3";
+  const TRADE_RISK_LABELS = { conservative: "Low", balanced: "Balanced", aggressive: "High" };
+  const TRADE_MAX_POSITIONS = 4;
+
+  function tradeSeed() {
+    return { cash: 0, deposited: 0, realized: 0, risk: "balanced", positions: [], history: [], trades: [], log: [] };
+  }
+
+  function tradeLoad() {
+    const t = dev.trading;
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(TRADE_KEY) || "null"); } catch { saved = null; }
+    const account = tradeSeed();
+    if (saved && typeof saved === "object") {
+      account.cash = Math.max(0, Number(saved.cash) || 0);
+      account.deposited = Math.max(0, Number(saved.deposited) || 0);
+      account.realized = Number(saved.realized) || 0;
+      account.risk = TRADE_RISK_LABELS[saved.risk] ? saved.risk : "balanced";
+      account.positions = (Array.isArray(saved.positions) ? saved.positions : [])
+        .filter((p) => p && p.symbol && Number(p.qty) > 0 && Number(p.entry) > 0)
+        .map((p) => ({ symbol: String(p.symbol).toUpperCase(), name: String(p.name || p.symbol), qty: Number(p.qty), entry: Number(p.entry), at: Number(p.at) || Date.now() }))
+        .slice(0, 12);
+      account.history = (Array.isArray(saved.history) ? saved.history : [])
+        .filter((h) => h && Number(h.v) >= 0)
+        .map((h) => ({ at: Number(h.at) || Date.now(), v: Number(h.v) }))
+        .slice(-180);
+      account.trades = (Array.isArray(saved.trades) ? saved.trades : []).slice(-200);
+      account.log = (Array.isArray(saved.log) ? saved.log : []).filter((l) => l && l.text).slice(0, 60);
+    }
+    t.account = account;
+    t.risk = account.risk;
+  }
+
+  function tradeAccount() {
+    if (!dev.trading.account) tradeLoad();
+    return dev.trading.account;
+  }
+
+  function tradeSave() {
+    try { localStorage.setItem(TRADE_KEY, JSON.stringify(tradeAccount())); } catch { /* storage is optional */ }
+  }
+
+  function tradeUsd(n) {
+    const v = Number(n) || 0;
+    const abs = Math.abs(v);
+    const digits = abs >= 1 ? 2 : 4;
+    return `${v < 0 ? "-" : ""}$${abs.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+  }
+
+  function tradePriceText(n) {
+    const v = Number(n) || 0;
+    if (v >= 1000) return `$${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+    if (v >= 1) return `$${v.toFixed(2)}`;
+    if (v >= 0.01) return `$${v.toFixed(4)}`;
+    return `$${v.toFixed(6)}`;
+  }
+
+  function tradePct(n) {
+    const v = Number(n) || 0;
+    return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+  }
+
+  function tradeConfidence(n) {
+    let v = Number(n);
+    if (!Number.isFinite(v) || v <= 0) return 0;
+    if (v <= 1) v *= 100;
+    return Math.max(0, Math.min(100, Math.round(v)));
+  }
+
+  function tradeQty(n) {
+    const v = Number(n) || 0;
+    if (v >= 1000) return v.toFixed(2);
+    if (v >= 1) return v.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+    return v.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+  }
+
+  function tradeCoin(symbol) {
+    return (dev.trading.market?.coins || []).find((c) => c.symbol === symbol) || null;
+  }
+
+  function tradeEquity() {
+    const account = tradeAccount();
+    return account.cash + account.positions.reduce((sum, p) => sum + p.qty * (tradeCoin(p.symbol)?.price || p.entry), 0);
+  }
+
+  function tradeSample() {
+    const account = tradeAccount();
+    const v = tradeEquity();
+    const last = account.history[account.history.length - 1];
+    if (last && Math.abs(last.v - v) < 0.005 && Date.now() - last.at < 4 * 60_000) return;
+    account.history.push({ at: Date.now(), v });
+    if (account.history.length > 180) account.history = account.history.slice(-180);
+  }
+
+  function tradeLog(text, kind) {
+    const account = tradeAccount();
+    account.log.unshift({ at: Date.now(), text: String(text), kind: kind || "info" });
+    if (account.log.length > 60) account.log.length = 60;
+    tradeSave();
+    paintTradeLog();
+  }
+
+  async function tradeFetchMarket(force) {
+    const t = dev.trading;
+    if (!force && t.market && Date.now() - t.marketAt < 55_000) return t.market;
+    const b = bridge();
+    if (!b?.api) throw new Error("the page bridge is not ready");
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 25_000);
+    try {
+      const res = await b.api("/api/dev/trading/market", { signal: ctrl.signal });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.message || `market refused (${res.status})`);
+      if (!Array.isArray(data?.coins) || data.coins.length < 5) throw new Error("the market feed came back thin");
+      t.market = data;
+      t.marketAt = Date.now();
+      t.error = "";
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function tradeFetchMining(force) {
+    const t = dev.trading;
+    if (!force && t.mining && Date.now() - t.miningAt < 5 * 60_000) return t.mining;
+    const b = bridge();
+    if (!b?.api) return null;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 25_000);
+    try {
+      const res = await b.api("/api/dev/trading/mining", { signal: ctrl.signal });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data) return null;
+      t.mining = data;
+      t.miningAt = Date.now();
+      return data;
+    } catch { return null; } finally { clearTimeout(timer); }
+  }
+
+  function tradeFallback(coins, holding, risk) {
+    const pool = coins.filter((c) => c && c.price > 0);
+    const capLimit = risk === "conservative" ? 15 : risk === "balanced" ? 40 : pool.length;
+    const ranked = pool
+      .slice(0, capLimit)
+      .map((c) => ({
+        c,
+        score: c.change1h * 0.15 + c.change24h * 0.5 + c.change7d * 0.2 + Math.log10(1 + c.volume / 10_000_000) * 0.08,
+      }))
+      .sort((a, b) => b.score - a.score);
+    if (holding?.symbol) {
+      const live = pool.find((c) => c.symbol === holding.symbol);
+      if (live) {
+        const pnl = holding.entry > 0 ? ((live.price - holding.entry) / holding.entry) * 100 : 0;
+        const stop = risk === "conservative" ? -3 : risk === "balanced" ? -5 : -8;
+        const take = risk === "conservative" ? 5 : risk === "balanced" ? 9 : 14;
+        if (live.change24h <= stop || pnl <= stop || pnl >= take) {
+          return { action: "SELL", symbol: holding.symbol, confidence: 62, reason: pnl <= stop ? `${holding.symbol} is down ${pnl.toFixed(1)}% from entry - cutting at the ${risk} stop.` : pnl >= take ? `${holding.symbol} is up ${pnl.toFixed(1)}% - taking the paper profit.` : `${holding.symbol} rolled over ${live.change24h.toFixed(1)}% in 24h.` };
+        }
+        return { action: "HOLD", symbol: holding.symbol, confidence: 55, reason: `${holding.symbol} is inside the ${risk} band (${pnl.toFixed(1)}% from entry, ${live.change24h.toFixed(1)}% in 24h).` };
+      }
+    }
+    const best = ranked[0];
+    if (!best) return { action: "HOLD", symbol: "", confidence: 40, reason: "No market data worth touching right now." };
+    return {
+      action: "BUY",
+      symbol: best.c.symbol,
+      confidence: Math.max(45, Math.min(88, Math.round(55 + best.score * 2))),
+      reason: `${best.c.symbol} leads: ${best.c.change24h.toFixed(1)}% in 24h, ${best.c.change7d.toFixed(1)}% in 7d on $${Math.round(best.c.volume / 1_000_000)}M volume.`,
+    };
+  }
+
+  function tradeBuy(coin, budget, reason) {
+    const account = tradeAccount();
+    const price = Number(coin?.price) || 0;
+    const spend = Math.min(Math.max(0, Number(budget) || 0), account.cash);
+    if (!price || spend < 0.5) return;
+    const qty = spend / price;
+    const symbol = coin.symbol;
+    const pos = account.positions.find((p) => p.symbol === symbol);
+    if (pos) {
+      const total = pos.qty + qty;
+      pos.entry = (pos.entry * pos.qty + price * qty) / total;
+      pos.qty = total;
+      pos.name = coin.name || pos.name;
+    } else {
+      account.positions.push({ symbol, name: coin.name || symbol, qty, entry: price, at: Date.now() });
+    }
+    account.cash = Math.max(0, account.cash - spend);
+    account.trades.push({ at: Date.now(), side: "BUY", symbol, qty, price, usd: spend });
+    if (account.trades.length > 200) account.trades = account.trades.slice(-200);
+    tradeLog(`${pos ? "ADD" : "BUY"} ${tradeQty(qty)} ${symbol} @ ${tradePriceText(price)} · ${tradeUsd(spend)} virtual${reason ? ` · ${reason}` : ""}`, "buy");
+    tradeSample();
+    tradeSave();
+    paintTrading();
+  }
+
+  function tradeSell(pos, reason) {
+    const account = tradeAccount();
+    if (!pos) return;
+    const price = tradeCoin(pos.symbol)?.price || pos.entry;
+    const qty = pos.qty;
+    const proceeds = qty * price;
+    const pnl = (price - pos.entry) * qty;
+    account.cash += proceeds;
+    account.realized += pnl;
+    account.positions = account.positions.filter((p) => p !== pos);
+    account.trades.push({ at: Date.now(), side: "SELL", symbol: pos.symbol, qty, price, usd: proceeds });
+    if (account.trades.length > 200) account.trades = account.trades.slice(-200);
+    tradeLog(`SELL ${tradeQty(qty)} ${pos.symbol} @ ${tradePriceText(price)} · ${tradeUsd(proceeds)} back${pnl >= 0 ? ` · +${tradeUsd(pnl)} profit` : ` · ${tradeUsd(pnl)} loss`}${reason ? ` · ${reason}` : ""}`, pnl >= 0 ? "sell-win" : "sell-loss");
+    tradeSample();
+    tradeSave();
+    paintTrading();
+  }
+
+  function tradeDeposit(amount) {
+    const account = tradeAccount();
+    const value = Math.max(0, Number(amount) || 0);
+    if (!value) return;
+    account.cash += value;
+    account.deposited += value;
+    tradeLog(`DEPOSIT +${tradeUsd(value)} virtual · no real money moved`, "deposit");
+    tradeSample();
+    tradeSave();
+    paintTrading();
+  }
+
+  function tradeApplyPick(pick) {
+    const account = tradeAccount();
+    const coins = dev.trading.market?.coins || [];
+    const action = String(pick?.action || "HOLD").toUpperCase();
+    const symbol = String(pick?.symbol || "").toUpperCase();
+    const confidence = tradeConfidence(pick?.confidence);
+    const reason = String(pick?.reason || "").replace(/\s+/g, " ").trim().slice(0, 240);
+    if (action === "BUY") {
+      const coin = coins.find((c) => c.symbol === symbol);
+      if (!coin) return tradeLog(`BUY ${symbol || "?"} skipped - that coin is not in the live list.`, "skip");
+      const held = account.positions.some((p) => p.symbol === symbol);
+      if (!held && account.positions.length >= TRADE_MAX_POSITIONS) return tradeLog(`BUY ${symbol} skipped - ${TRADE_MAX_POSITIONS} open positions is the cap.`, "skip");
+      const budget = account.cash * 0.25;
+      if (budget < 1) return tradeLog(`BUY ${symbol} skipped - ${tradeUsd(account.cash)} free cash. Deposit more virtual USD.`, "skip");
+      return tradeBuy(coin, budget, `${confidence}% · ${reason}`);
+    }
+    if (action === "SELL") {
+      const pos = account.positions.find((p) => p.symbol === symbol);
+      if (!pos) return tradeLog(`SELL ${symbol || "?"} skipped - nothing held.`, "skip");
+      return tradeSell(pos, `${confidence}% · ${reason}`);
+    }
+    tradeLog(`HOLD · ${confidence}% confident${reason ? ` · ${reason}` : ""}`, "hold");
+  }
+
+  async function tradeScan() {
+    const t = dev.trading;
+    if (t.busy) return;
+    const account = tradeAccount();
+    if (!account.cash && !account.positions.length) {
+      tradeLog("Deposit virtual USD in the rail first - deposits here are simulated.", "skip");
+      return;
+    }
+    t.busy = true;
+    t.error = "";
+    paintTrading();
+    try {
+      await tradeFetchMarket();
+      const coins = (t.market?.coins || []).slice(0, 25).map((c) => ({
+        symbol: c.symbol,
+        name: c.name,
+        price: c.price,
+        volume: c.volume,
+        change1h: c.change1h,
+        change24h: c.change24h,
+        change7d: c.change7d,
+      }));
+      if (coins.length < 5) throw new Error("the market feed came back thin");
+      const holding = account.positions
+        .slice()
+        .sort((a, b) => (b.qty * (tradeCoin(b.symbol)?.price || b.entry)) - (a.qty * (tradeCoin(a.symbol)?.price || a.entry)))[0] || null;
+      const b = bridge();
+      if (!b?.api) throw new Error("the page bridge is not ready");
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 120_000);
+      let pick = null;
+      try {
+        const res = await b.api("/api/dev/trading/pick", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            risk: t.risk,
+            cash: account.cash,
+            coins,
+            holding: holding ? { symbol: holding.symbol, entry: holding.entry, qty: holding.qty } : null,
+          }),
+          signal: ctrl.signal,
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(data?.message || `scan refused (${res.status})`);
+        pick = data;
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!pick || !["BUY", "SELL", "HOLD"].includes(String(pick.action).toUpperCase())) {
+        pick = tradeFallback(coins, holding, t.risk);
+        pick.provider = "capri-rules";
+      }
+      t.lastPick = { ...pick, at: Date.now() };
+      tradeApplyPick(pick);
+    } catch (err) {
+      const message = String(err?.message || err);
+      t.error = message;
+      const live = (t.market?.coins || []).slice(0, 25);
+      if (live.length >= 5) {
+        const holding = account.positions
+          .slice()
+          .sort((a, b) => (b.qty * (tradeCoin(b.symbol)?.price || b.entry)) - (a.qty * (tradeCoin(a.symbol)?.price || a.entry)))[0] || null;
+        const pick = tradeFallback(live, holding, t.risk);
+        t.lastPick = { ...pick, provider: "capri-rules", at: Date.now() };
+        tradeApplyPick(t.lastPick);
+        tradeLog(`SCAN FELL BACK to local rules · ${message}`, "info");
+      } else {
+        tradeLog(`SCAN FAILED · ${message}`, "error");
+      }
+    } finally {
+      t.busy = false;
+      paintTrading();
+    }
+  }
+
+  function tradeSpark(coin) {
+    const spark = Array.isArray(coin?.spark) ? coin.spark.filter((n) => Number.isFinite(n) && n > 0) : [];
+    if (spark.length < 2) return null;
+    const vals = spark.slice(-48);
+    const W = 90;
+    const H = 26;
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    const span = Math.max(hi - lo, lo * 0.0001, 1e-9);
+    const pts = vals.map((v, i) => `${((i / (vals.length - 1)) * W).toFixed(1)},${(H - 3 - ((v - lo) / span) * (H - 6)).toFixed(1)}`).join(" ");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("class", `trade-spark ${vals[vals.length - 1] >= vals[0] ? "pos" : "neg"}`);
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    line.setAttribute("points", pts);
+    svg.appendChild(line);
+    return svg;
+  }
+
+  function paintTradeChart() {
+    const box = dev.els?.trChart;
+    if (!box) return;
+    box.textContent = "";
+    const account = tradeAccount();
+    const pts = account.history.slice(-120);
+    if (pts.length < 2) {
+      const p = document.createElement("p");
+      p.className = "dev-empty";
+      p.textContent = "The curve starts after your first deposit and scan.";
+      box.appendChild(p);
+      dev.els.trChartMeta.textContent = "no history yet";
+      return;
+    }
+    const W = 640;
+    const H = 160;
+    const PAD = 10;
+    const vals = pts.map((p) => p.v);
+    const lo = Math.min(...vals);
+    const hi = Math.max(...vals);
+    const span = Math.max(hi - lo, 0.01);
+    const at = (i) => PAD + (i / (pts.length - 1)) * (W - PAD * 2);
+    const value = (v) => H - PAD - ((v - lo) / span) * (H - PAD * 2);
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("class", "trade-chart-svg");
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+    line.setAttribute("points", pts.map((p, i) => `${at(i).toFixed(1)},${value(p.v).toFixed(1)}`).join(" "));
+    line.setAttribute("class", "trade-chart-line");
+    svg.appendChild(line);
+    box.appendChild(svg);
+    const start = pts[0].v;
+    const end = pts[pts.length - 1].v;
+    const pct = start > 0 ? ((end - start) / start) * 100 : 0;
+    dev.els.trChartMeta.textContent = `${tradeUsd(end)} · ${tradePct(pct)}`;
+    dev.els.trChartMeta.className = pct >= 0 ? "pos" : "neg";
+  }
+
+  function paintTradeLog() {
+    const box = dev.els?.trLog;
+    if (!box) return;
+    const account = tradeAccount();
+    box.textContent = "";
+    const log = account.log || [];
+    if (!log.length) {
+      const p = document.createElement("p");
+      p.className = "dev-empty";
+      p.textContent = "Deposit virtual USD in the rail, then run a scan. Every decision lands here with its reason.";
+      box.appendChild(p);
+      return;
+    }
+    for (const entry of log.slice(0, 40)) {
+      const row = document.createElement("div");
+      row.className = `trade-log-item ${entry.kind || "info"}`;
+      const time = document.createElement("span");
+      time.className = "trade-log-time";
+      time.textContent = new Date(entry.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const text = document.createElement("span");
+      text.textContent = entry.text;
+      row.append(time, text);
+      box.appendChild(row);
+    }
+  }
+
+  function paintTradePositions() {
+    const box = dev.els?.trPositions;
+    if (!box) return;
+    const account = tradeAccount();
+    box.textContent = "";
+    dev.els.trPosMeta.textContent = `${account.positions.length} open`;
+    if (!account.positions.length) {
+      const p = document.createElement("p");
+      p.className = "dev-empty";
+      p.textContent = "No open positions. A scan buys one coin at a time with 25% of free cash.";
+      box.appendChild(p);
+      return;
+    }
+    for (const pos of account.positions) {
+      const live = tradeCoin(pos.symbol);
+      const price = live?.price || pos.entry;
+      const value = pos.qty * price;
+      const pnl = (price - pos.entry) * pos.qty;
+      const pnlPct = pos.entry > 0 ? ((price - pos.entry) / pos.entry) * 100 : 0;
+      const card = document.createElement("article");
+      card.className = "trade-position";
+      const head = document.createElement("div");
+      head.className = "trade-position-head";
+      const sym = document.createElement("strong");
+      sym.textContent = pos.symbol;
+      const pct = document.createElement("span");
+      pct.className = `trade-delta ${pnl >= 0 ? "pos" : "neg"}`;
+      pct.textContent = tradePct(pnlPct);
+      head.append(sym, pct);
+      const facts = document.createElement("div");
+      facts.className = "trade-position-facts";
+      facts.textContent = `${tradeQty(pos.qty)} @ ${tradePriceText(pos.entry)} · now ${tradePriceText(price)} · ${tradeUsd(value)}${pnl >= 0 ? " · +" : " · "}${tradeUsd(pnl)}`;
+      const actions = document.createElement("div");
+      actions.className = "trade-position-actions";
+      const sell = document.createElement("button");
+      sell.type = "button";
+      sell.className = "dev-mini";
+      sell.textContent = "SELL ALL";
+      sell.addEventListener("click", () => tradeSell(pos, "manual close"));
+      actions.appendChild(sell);
+      card.append(head, facts, actions);
+      box.appendChild(card);
+    }
+  }
+
+  function paintTradeMarket() {
+    const box = dev.els?.trMarketTable;
+    if (!box) return;
+    const t = dev.trading;
+    const account = tradeAccount();
+    box.textContent = "";
+    if (!t.market?.coins?.length) {
+      const p = document.createElement("p");
+      p.className = "dev-empty";
+      p.textContent = t.error ? `The market feed did not answer: ${t.error}` : "Loading live prices...";
+      box.appendChild(p);
+      dev.els.trMarketMeta.textContent = t.error ? "offline" : "loading";
+      return;
+    }
+    dev.els.trMarketMeta.textContent = `${t.market.source} · ${t.market.coins.length} coins · ${new Date(t.marketAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    const table = document.createElement("table");
+    table.className = "trade-table";
+    const thead = document.createElement("thead");
+    const hrow = document.createElement("tr");
+    for (const label of ["COIN", "PRICE", "24H", "7D", "VOLUME", "TREND", ""]) {
+      const th = document.createElement("th");
+      th.textContent = label;
+      hrow.appendChild(th);
+    }
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    for (const coin of t.market.coins.slice(0, 40)) {
+      const row = document.createElement("tr");
+      const coinCell = document.createElement("td");
+      const sym = document.createElement("strong");
+      sym.textContent = coin.symbol;
+      const name = document.createElement("span");
+      name.className = "trade-coin-name";
+      name.textContent = coin.name;
+      coinCell.append(sym, name);
+      row.appendChild(coinCell);
+      const priceCell = document.createElement("td");
+      priceCell.textContent = tradePriceText(coin.price);
+      row.appendChild(priceCell);
+      const d24 = document.createElement("td");
+      d24.className = coin.change24h >= 0 ? "pos" : "neg";
+      d24.textContent = tradePct(coin.change24h);
+      row.appendChild(d24);
+      const d7 = document.createElement("td");
+      d7.className = coin.change7d >= 0 ? "pos" : "neg";
+      d7.textContent = coin.change7d ? tradePct(coin.change7d) : "-";
+      row.appendChild(d7);
+      const vol = document.createElement("td");
+      vol.textContent = `$${Math.round(coin.volume / 1_000_000)}M`;
+      row.appendChild(vol);
+      const trend = document.createElement("td");
+      const spark = tradeSpark(coin);
+      if (spark) trend.appendChild(spark);
+      else trend.textContent = "-";
+      row.appendChild(trend);
+      const actionCell = document.createElement("td");
+      const held = account.positions.find((p) => p.symbol === coin.symbol);
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = `dev-mini trade-action${held ? " sell" : ""}`;
+      action.textContent = held ? "SELL" : "BUY";
+      action.addEventListener("click", () => {
+        if (held) {
+          tradeSell(held, "manual close");
+          return;
+        }
+        const live = tradeAccount();
+        const budget = live.cash * 0.25;
+        if (budget < 1) {
+          tradeLog(`BUY ${coin.symbol} skipped - deposit virtual USD first.`, "skip");
+          return;
+        }
+        if (live.positions.length >= TRADE_MAX_POSITIONS) {
+          tradeLog(`BUY ${coin.symbol} skipped - ${TRADE_MAX_POSITIONS} open positions is the cap.`, "skip");
+          return;
+        }
+        tradeBuy(coin, budget, "manual buy 25%");
+      });
+      actionCell.appendChild(action);
+      row.appendChild(actionCell);
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    box.appendChild(table);
+  }
+
+  function paintTradeMining() {
+    const box = dev.els?.trMining;
+    if (!box) return;
+    const mining = dev.trading.mining;
+    box.textContent = "";
+    if (!mining?.coins?.length) {
+      const p = document.createElement("p");
+      p.className = "dev-empty";
+      p.textContent = "Loading the mining board...";
+      box.appendChild(p);
+      dev.els.trMiningMeta.textContent = "-";
+      return;
+    }
+    dev.els.trMiningMeta.textContent = `whattomine · BTC ${tradeUsd(mining.btcUsd)} · ${new Date(mining.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    const table = document.createElement("table");
+    table.className = "trade-table trade-mining-table";
+    const thead = document.createElement("thead");
+    const hrow = document.createElement("tr");
+    for (const label of ["COIN", "ALGO", "USD / DAY", "PROFIT"]) {
+      const th = document.createElement("th");
+      th.textContent = label;
+      hrow.appendChild(th);
+    }
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    for (const coin of mining.coins) {
+      const row = document.createElement("tr");
+      const nameCell = document.createElement("td");
+      const sym = document.createElement("strong");
+      sym.textContent = coin.tag || coin.name;
+      const name = document.createElement("span");
+      name.className = "trade-coin-name";
+      name.textContent = coin.tag ? coin.name : "";
+      nameCell.append(sym, name);
+      row.appendChild(nameCell);
+      const algo = document.createElement("td");
+      algo.textContent = coin.algorithm || "-";
+      row.appendChild(algo);
+      const usd = document.createElement("td");
+      usd.className = "pos";
+      usd.textContent = tradeUsd(coin.usdPerDay);
+      row.appendChild(usd);
+      const profit = document.createElement("td");
+      profit.textContent = Number.isFinite(coin.profitability) && coin.profitability ? coin.profitability.toFixed(2) : "-";
+      row.appendChild(profit);
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    box.appendChild(table);
+    const note = document.createElement("p");
+    note.className = "trade-note";
+    note.textContent = mining.note || "";
+    box.appendChild(note);
+  }
+
+  function paintTradePick() {
+    const box = dev.els?.trPick;
+    if (!box) return;
+    const pick = dev.trading.lastPick;
+    if (!pick) {
+      box.classList.add("hidden");
+      box.textContent = "";
+      return;
+    }
+    box.classList.remove("hidden");
+    box.textContent = "";
+    const action = String(pick.action || "HOLD").toUpperCase();
+    box.className = `trade-pick ${action.toLowerCase()}`;
+    const head = document.createElement("div");
+    head.className = "trade-pick-head";
+    const label = document.createElement("strong");
+    label.textContent = `${action}${pick.symbol ? ` · ${pick.symbol}` : ""}`;
+    const conf = document.createElement("span");
+    conf.textContent = `${tradeConfidence(pick.confidence)}% · ${pick.provider || "capri"}`;
+    head.append(label, conf);
+    const reason = document.createElement("p");
+    reason.textContent = pick.reason || "";
+    box.append(head, reason);
+  }
+
+  function paintTrading() {
+    const els = dev.els;
+    if (!els?.trTitle) return;
+    const t = dev.trading;
+    const account = tradeAccount();
+    const equity = tradeEquity();
+    const openPnl = account.positions.reduce((sum, p) => sum + (p.qty * (tradeCoin(p.symbol)?.price || p.entry) - p.qty * p.entry), 0);
+    els.trTitle.textContent = `Virtual account · ${tradeUsd(equity)}`;
+    els.trEquity.textContent = tradeUsd(equity);
+    els.trCash.textContent = tradeUsd(account.cash);
+    els.trOpen.textContent = `${openPnl >= 0 ? "+" : ""}${tradeUsd(openPnl)}`;
+    els.trOpen.className = openPnl >= 0 ? "pos" : "neg";
+    els.trRealized.textContent = `${account.realized >= 0 ? "+" : ""}${tradeUsd(account.realized)}`;
+    els.trRealized.className = account.realized >= 0 ? "pos" : "neg";
+    els.trDeposited.textContent = tradeUsd(account.deposited);
+    els.trMarket.textContent = t.market ? `${t.market.source} · ${t.market.coins.length} coins` : t.error ? "offline" : "loading";
+    els.trBot.textContent = t.busy ? "scanning..." : t.auto ? "auto · 5 min" : "idle";
+    const scanLabel = t.busy ? "SCANNING..." : "RUN A SCAN";
+    for (const b of [els.trScan, els.trScanTop]) {
+      if (!b) continue;
+      b.disabled = t.busy;
+      b.textContent = scanLabel;
+    }
+    if (els.trAuto) els.trAuto.textContent = t.auto ? "AUTO: ON" : "AUTO: OFF";
+    els.trAuto?.classList.toggle("accent", t.auto);
+    els.trMeta.textContent = t.error
+      ? `The last scan or feed failed: ${t.error}. The desk keeps the last good data.`
+      : "Live coin prices and a bot that picks one move per scan, trading virtual USD. Nothing here touches real money, real orders or an exchange.";
+    for (const b of document.querySelectorAll("[data-tr-risk]")) {
+      b.classList.toggle("active", b.getAttribute("data-tr-risk") === account.risk);
+    }
+    paintTradeChart();
+    paintTradePick();
+    paintTradeLog();
+    paintTradePositions();
+    paintTradeMarket();
+    paintTradeMining();
+  }
+
+  function tradeEnter() {
+    const t = dev.trading;
+    if (!t.account) tradeLoad();
+    t.risk = t.account.risk;
+    paintTrading();
+    tradeFetchMarket()
+      .then(() => {
+        tradeSample();
+        tradeSave();
+        paintTrading();
+      })
+      .catch((err) => {
+        t.error = String(err?.message || err);
+        paintTrading();
+      });
+    tradeFetchMining().then(() => paintTrading());
+    if (!t.refreshTimer) {
+      t.refreshTimer = setInterval(() => {
+        if (!dev.open || dev.contentPage !== "trading") return;
+        tradeFetchMarket(true)
+          .then(() => {
+            tradeSample();
+            tradeSave();
+            paintTrading();
+          })
+          .catch(() => {});
+      }, 60_000);
+    }
+    if (t.auto && !t.autoTimer) {
+      t.autoTimer = setInterval(() => {
+        if (!dev.open || dev.contentPage !== "trading") return;
+        tradeScan();
+      }, 5 * 60_000);
+    }
+  }
+
+  function tradeLeave() {
+    const t = dev.trading;
+    if (t.refreshTimer) { clearInterval(t.refreshTimer); t.refreshTimer = null; }
+    if (t.autoTimer) { clearInterval(t.autoTimer); t.autoTimer = null; }
+  }
+
+  function tradeToggleAuto() {
+    const t = dev.trading;
+    t.auto = !t.auto;
+    if (t.autoTimer) { clearInterval(t.autoTimer); t.autoTimer = null; }
+    if (t.auto) {
+      tradeLog("AUTO ON · she scans every 5 minutes while this tab is open.", "info");
+      if (dev.contentPage === "trading") {
+        t.autoTimer = setInterval(() => {
+          if (!dev.open || dev.contentPage !== "trading") return;
+          tradeScan();
+        }, 5 * 60_000);
+      }
+    } else {
+      tradeLog("AUTO OFF · no more timed scans.", "info");
+    }
+    paintTrading();
+  }
+
+  function tradeSetRisk(name) {
+    if (!TRADE_RISK_LABELS[name]) return;
+    const account = tradeAccount();
+    account.risk = name;
+    dev.trading.risk = name;
+    tradeSave();
+    paintTrading();
+  }
+
+  function tradeReset() {
+    const keep = tradeAccount().risk;
+    dev.trading.account = tradeSeed();
+    dev.trading.account.risk = keep;
+    dev.trading.risk = keep;
+    dev.trading.lastPick = null;
+    tradeLog("Account reset · every balance, position and curve point cleared. Nothing real changed.", "info");
+    tradeSave();
+    paintTrading();
+  }
+
   /* ------------------------------------------------------------ open/close */
 
   function open() {
@@ -1604,6 +2399,7 @@
     if (!dev.els?.screen) return;
     dev.open = false;
     dev.els.screen.classList.add("hidden");
+    tradeLeave();
     closeNameForm();
     if (dev.promptResolve) dev.promptResolve("deny");
     try { window.capriNative?.log?.("dev: closed"); } catch { /* browser */ }
@@ -1690,6 +2486,16 @@
     dev.els.aiPrompt.addEventListener("input", () => paintAi());
     dev.els.aiRun.addEventListener("click", runAiVideo);
     dev.els.aiRunMain.addEventListener("click", runAiVideo);
+    dev.els.trScan?.addEventListener("click", tradeScan);
+    dev.els.trScanTop?.addEventListener("click", tradeScan);
+    dev.els.trAuto?.addEventListener("click", tradeToggleAuto);
+    dev.els.trReset?.addEventListener("click", tradeReset);
+    document.querySelectorAll("[data-tr-deposit]").forEach((b) => {
+      b.addEventListener("click", () => tradeDeposit(Number(b.getAttribute("data-tr-deposit"))));
+    });
+    document.querySelectorAll("[data-tr-risk]").forEach((b) => {
+      b.addEventListener("click", () => tradeSetRisk(b.getAttribute("data-tr-risk")));
+    });
     D.onAiProgress?.((p) => {
       if (!p) return;
       if (p.message) aiProgress(p.message);
