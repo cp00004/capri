@@ -39,6 +39,20 @@
       series: null,
       results: [],
     },
+    trading: {
+      account: null,
+      risk: "balanced",
+      market: null,
+      marketAt: 0,
+      mining: null,
+      miningAt: 0,
+      busy: false,
+      auto: false,
+      refreshTimer: null,
+      autoTimer: null,
+      lastPick: null,
+      error: "",
+    },
     nameMode: "",
     mainView: "chat",
   };
@@ -98,6 +112,30 @@
       aiTheme: $("aiFactTheme"),
       aiSeriesRows: $("aiSeriesRows"),
       aiOutput: $("aiFactOutput"),
+      tradingView: $("devTradingView"),
+      trScanTop: $("trScanTop"),
+      trScan: $("trScan"),
+      trAuto: $("trAuto"),
+      trReset: $("trReset"),
+      trTitle: $("trTitle"),
+      trMeta: $("trMeta"),
+      trEquity: $("trEquity"),
+      trCash: $("trCash"),
+      trOpen: $("trOpen"),
+      trRealized: $("trRealized"),
+      trDeposited: $("trDeposited"),
+      trMarket: $("trMarket"),
+      trBot: $("trBot"),
+      trChart: $("trChart"),
+      trChartMeta: $("trChartMeta"),
+      trPick: $("trPick"),
+      trLog: $("trLog"),
+      trPositions: $("trPositions"),
+      trPosMeta: $("trPosMeta"),
+      trMarketTable: $("trMarketTable"),
+      trMarketMeta: $("trMarketMeta"),
+      trMining: $("trMining"),
+      trMiningMeta: $("trMiningMeta"),
     };
   }
 
@@ -181,16 +219,25 @@
   }
 
   function showContentPage(name) {
-    dev.contentPage = name === "ai" ? "ai" : "shorts";
+    dev.contentPage = name === "ai" ? "ai" : name === "trading" ? "trading" : "shorts";
     for (const b of document.querySelectorAll("[data-content-page]")) {
       b.classList.toggle("active", b.getAttribute("data-content-page") === dev.contentPage);
     }
     $("devContentShorts").classList.toggle("hidden", dev.contentPage !== "shorts");
     $("devContentAi").classList.toggle("hidden", dev.contentPage !== "ai");
+    $("devContentTrading").classList.toggle("hidden", dev.contentPage !== "trading");
     dev.els.ytView.classList.toggle("hidden", dev.contentPage !== "shorts");
     dev.els.aiView.classList.toggle("hidden", dev.contentPage !== "ai");
-    if (dev.contentPage === "shorts") paintStudio();
-    else paintAi();
+    dev.els.tradingView.classList.toggle("hidden", dev.contentPage !== "trading");
+    if (dev.contentPage === "shorts") {
+      tradeLeave();
+      paintStudio();
+    } else if (dev.contentPage === "ai") {
+      tradeLeave();
+      paintAi();
+    } else {
+      tradeEnter();
+    }
   }
 
   function showTab(name) {
@@ -207,8 +254,10 @@
       $("devTerminalView").classList.add("hidden");
       showContentPage(dev.contentPage || "shorts");
     } else {
+      tradeLeave();
       dev.els.ytView.classList.add("hidden");
       dev.els.aiView.classList.add("hidden");
+      dev.els.tradingView.classList.add("hidden");
       showView(dev.mainView || "chat");
     }
   }

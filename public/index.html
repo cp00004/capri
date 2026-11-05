@@ -446,6 +446,7 @@
         <div class="dev-pages">
           <button type="button" class="dev-page active" data-content-page="shorts">SHORTS</button>
           <button type="button" class="dev-page" data-content-page="ai">AI VIDEO</button>
+          <button type="button" class="dev-page" data-content-page="trading">TRADING</button>
         </div>
         <div id="devContentShorts" class="dev-subpane">
           <p class="dev-kicker">PLATFORM</p>
@@ -504,6 +505,24 @@
           </div>
           <button id="aiRun" class="dev-btn accent wide" type="button">GENERATE VIDEO</button>
           <p class="dev-hint">One video: she turns your idea into a cut with no timer - the script decides its own length. Auto series: choose how many parts and a theme (Trending now pulls what is hot online; Fruits, Animals, Space or AI runs one themed series; Fruit drama writes a 3D-animated story about a fruit family), then she makes every part back to back. Each part is also its own complete video with its own title, tags and file. The 3D movie style paints Pixar-style characters with short uppercase captions.</p>
+        </div>
+        <div id="devContentTrading" class="dev-subpane hidden">
+          <p class="dev-kicker">VIRTUAL DEPOSIT</p>
+          <div class="dev-chips">
+            <button type="button" class="dev-chip" data-tr-deposit="100">$100</button>
+            <button type="button" class="dev-chip" data-tr-deposit="500">$500</button>
+            <button type="button" class="dev-chip" data-tr-deposit="1000">$1,000</button>
+          </div>
+          <p class="dev-kicker">RISK</p>
+          <div class="dev-chips">
+            <button type="button" class="dev-chip" data-tr-risk="conservative">Low</button>
+            <button type="button" class="dev-chip active" data-tr-risk="balanced">Balanced</button>
+            <button type="button" class="dev-chip" data-tr-risk="aggressive">High</button>
+          </div>
+          <button id="trScan" class="dev-btn accent wide" type="button">RUN A SCAN</button>
+          <button id="trAuto" class="dev-btn wide" type="button">AUTO: OFF</button>
+          <button id="trReset" class="dev-btn ghost wide" type="button">RESET ACCOUNT</button>
+          <p class="dev-hint">Virtual USD only. Capri never holds, deposits or moves real money, and does not promise profit. Trading live from Trinidad means opening and funding your own licensed exchange account (KYC required) - Capri can study the market with you, but it will not trade your real funds.</p>
         </div>
       </div>
       <button id="devExit" class="dev-btn ghost wide dev-exit" type="button">&times; CLOSE DEV MODE</button>
@@ -565,6 +584,50 @@
           </div>
           <div id="aiProgress" class="dev-progress hidden"></div>
           <div id="aiResult" class="yt-results hidden"></div>
+        </div>
+      </div>
+      <div id="devTradingView" class="dev-view hidden">
+        <div class="yt-scroll">
+          <header class="yt-head">
+            <div class="yt-head-text">
+              <p class="dev-kicker">PAPER TRADING DESK</p>
+              <h3 id="trTitle">Virtual account · $0.00</h3>
+              <p id="trMeta" class="yt-meta">Live coin prices and a bot that picks one move per scan, trading virtual USD. Nothing here touches real money, real orders or an exchange.</p>
+            </div>
+            <button id="trScanTop" class="dev-btn accent" type="button">RUN A SCAN</button>
+          </header>
+          <div class="yt-context trade-context">
+            <dl class="yt-facts">
+              <div><dt>EQUITY</dt><dd id="trEquity">$0.00</dd></div>
+              <div><dt>CASH</dt><dd id="trCash">$0.00</dd></div>
+              <div><dt>OPEN P&amp;L</dt><dd id="trOpen">$0.00</dd></div>
+              <div><dt>REALIZED</dt><dd id="trRealized">$0.00</dd></div>
+              <div><dt>DEPOSITED</dt><dd id="trDeposited">$0.00</dd></div>
+              <div><dt>MARKET</dt><dd id="trMarket">loading</dd></div>
+              <div><dt>BOT</dt><dd id="trBot">idle</dd></div>
+            </dl>
+            <div class="trade-right">
+              <div class="trade-chartbox">
+                <div class="trade-chart-head"><span>EQUITY CURVE</span><span id="trChartMeta">no history yet</span></div>
+                <div id="trChart" class="trade-chart"></div>
+              </div>
+              <div id="trPick" class="trade-pick hidden"></div>
+            </div>
+          </div>
+          <div id="trLog" class="trade-log"><p class="dev-empty">Deposit virtual USD in the rail, then run a scan. Every decision lands here with its reason.</p></div>
+          <section class="trade-section">
+            <div class="trade-section-head"><h4>OPEN POSITIONS</h4><span id="trPosMeta">0 open</span></div>
+            <div id="trPositions" class="trade-positions"></div>
+          </section>
+          <section class="trade-section">
+            <div class="trade-section-head"><h4>LIVE MARKET</h4><span id="trMarketMeta">loading</span></div>
+            <div id="trMarketTable" class="trade-market"></div>
+          </section>
+          <section class="trade-section">
+            <div class="trade-section-head"><h4>MINING PROFITABILITY</h4><span id="trMiningMeta">-</span></div>
+            <div id="trMining" class="trade-mining"></div>
+          </section>
+          <p class="trade-note">Mining numbers are live reference-rig revenue before electricity, hardware and pool fees - a PC or phone will not mine profitably at these rates, so Capri never starts a miner. Live trading in Trinidad requires your own licensed exchange account and KYC; this desk stays simulated.</p>
         </div>
       </div>
       <div id="devChat" class="dev-view">
