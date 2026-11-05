@@ -1320,11 +1320,13 @@ function stripXml(value) {
 // actually clicking today. Either one can fail without stopping the series.
 async function fetchTrendingTopics(limit = 18) {
   const topics = [];
+  const skip = /\b(dead|death|killed|kill|murder|shooting|shooter|war|genocide|rape|suicide|hostage|earthquake toll|death toll|election|senate|congress|ballot|trump|biden|democrat|republican|impeach|vote count)\b|democratic|supreme court|justices|landslide|parliament|prime minister|president/i;
+  const boost = /\b(ai|robot|space|nasa|science|ocean|animal|discover|record|first ever|viral|internet|meme|game|movie|music|phone|apple|google|openai|tesla|moon|mars|quantum|brain|ancient|shipwreck|volcano|deep sea)\b/i;
   const add = (value) => {
     const text = stripXml(value).replace(/\s*[-|]\s*[^-|]{2,40}$/, "").slice(0, 160);
-    if (text.length < 12) return;
+    if (text.length < 12 || skip.test(text)) return;
     if (topics.some((t) => t.toLowerCase() === text.toLowerCase())) return;
-    topics.push(text);
+    topics.push({ text, score: boost.test(text) ? 1 : 0 });
   };
   await Promise.all([
     (async () => {
@@ -1346,7 +1348,11 @@ async function fetchTrendingTopics(limit = 18) {
       for (const child of data?.data?.children || []) add(child?.data?.title);
     })().catch(() => {}),
   ]);
-  return topics.slice(0, limit);
+  return topics
+    .map((item, index) => ({ ...item, index }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, limit)
+    .map((item) => item.text);
 }
 
 async function askDevJson(system, user, attempts = 2) {
@@ -1447,6 +1453,7 @@ Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
 Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
 
 - Choose ONE story or subject from the live feed (or the user's angle if they gave one) that people are already curious about. Never invent news; if the feed is unavailable, pick a broad evergreen topic that travels.
+- Prefer wonder, tech, AI, space, science, animals, internet culture and weird true stories. Skip tragedy, war, crime victims, death tolls, elections and politics.
 - Split it into exactly 3 parts. Part 1 hooks and sets the question. Part 2 escalates with the twist nobody saw coming. Part 3 pays it off and lands the takeaway. Each part must stand alone and tease the next.
 - For each part give a title (under 70 characters, end with "| Part N"), a 2-sentence description with one question that invites comments, 6-8 lowercase hashtags, and a one-line outline of the 3 scenes.
 - No real celebrities, no brands, no sexual content, no gore, no politics.
