@@ -1469,6 +1469,7 @@ Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
 - Prefer wonder, tech, AI, space, science, animals, internet culture and weird true stories. Skip tragedy, war, crime victims, death tolls, elections and politics.
 - Split it into exactly ${partCount} parts. Part 1 hooks and sets the question. Every middle part escalates with a new twist nobody saw coming. The final part pays it off and lands the takeaway. Each part must stand alone as its own complete video and still tease the next.
 - For each part give a title (under 70 characters, end with "| Part N"), a 2-sentence description with one question that invites comments, 6-8 lowercase hashtags, and a one-line outline of the 3 scenes.
+- topic: a short human-readable series name in normal title case, never a slug, hyphenated identifier or all-lowercase phrase.
 - No real celebrities, no brands, no sexual content, no gore, no politics.
 
 Return ONLY JSON:
@@ -1532,10 +1533,14 @@ Return ONLY JSON:
       } catch { /* skip an unusable part */ }
     }
     if (!parts.length) return devToolError(res, 502, "The series had no usable shots. Try again.");
+    const rawTopic = String(plan.topic || trends[0] || parts[0].title || "").slice(0, 160);
+    const topic = /[-_]/.test(rawTopic)
+      ? rawTopic.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim().replace(/\b[a-z]/g, (c) => c.toUpperCase())
+      : rawTopic;
     return json(res, 200, {
       mode,
-      topic: String(plan.topic || trends[0] || parts[0].title || "").slice(0, 160),
-      title: String(plan.title || plan.topic || "Capri series").slice(0, 160),
+      topic,
+      title: String(plan.title || topic || "Capri series").slice(0, 160),
       description: String(plan.description || "").slice(0, 700),
       hashtags: (Array.isArray(plan.hashtags) ? plan.hashtags : []).slice(0, 10),
       trends,
