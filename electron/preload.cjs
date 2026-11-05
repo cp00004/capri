@@ -82,6 +82,11 @@ contextBridge.exposeInMainWorld("capriDev", {
   wav: (args) => ipcRenderer.invoke("capri-dev-wav", args || {}),
   frame: (args) => ipcRenderer.invoke("capri-dev-frame", args || {}),
   cut: (args) => ipcRenderer.invoke("capri-dev-cut", args || {}),
+  aiVideo: (args) => ipcRenderer.invoke("capri-dev-ai-video", args || {}),
+  onAiProgress: (cb) => {
+    if (typeof cb !== "function") return;
+    ipcRenderer.on("capri-dev-ai-progress", (_event, data) => cb(data || {}));
+  },
   reveal: (p) => ipcRenderer.invoke("capri-dev-reveal", String(p || "")),
   open: (p) => ipcRenderer.invoke("capri-dev-open", String(p || "")),
   ffmpeg: () => ipcRenderer.invoke("capri-dev-ffmpeg"),

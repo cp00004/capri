@@ -27,6 +27,15 @@
     videos: [],
     shortsBusy: false,
     platform: "youtube",
+    contentPage: "shorts",
+    ai: {
+      style: "cinematic",
+      frame: "vertical",
+      seconds: 30,
+      busy: false,
+      story: null,
+      result: null,
+    },
     nameMode: "",
     mainView: "chat",
   };
@@ -68,6 +77,20 @@
       ytPlatform: $("ytFactPlatform"),
       ytSource: $("ytFactSource"),
       ytOutput: $("ytFactOutput"),
+      aiView: $("devAiView"),
+      aiPrompt: $("aiPrompt"),
+      aiRun: $("aiRun"),
+      aiRunMain: $("aiRunMain"),
+      aiTitle: $("aiTitle"),
+      aiMeta: $("aiMeta"),
+      aiBoard: $("aiBoard"),
+      aiProgress: $("aiProgress"),
+      aiResultBox: $("aiResult"),
+      aiLength: $("aiFactLength"),
+      aiFrame: $("aiFactFrame"),
+      aiStyle: $("aiFactStyle"),
+      aiScenes: $("aiFactScenes"),
+      aiOutput: $("aiFactOutput"),
     };
   }
 
@@ -150,21 +173,35 @@
     $("devTerminalView").classList.toggle("hidden", name !== "terminal");
   }
 
+  function showContentPage(name) {
+    dev.contentPage = name === "ai" ? "ai" : "shorts";
+    for (const b of document.querySelectorAll("[data-content-page]")) {
+      b.classList.toggle("active", b.getAttribute("data-content-page") === dev.contentPage);
+    }
+    $("devContentShorts").classList.toggle("hidden", dev.contentPage !== "shorts");
+    $("devContentAi").classList.toggle("hidden", dev.contentPage !== "ai");
+    dev.els.ytView.classList.toggle("hidden", dev.contentPage !== "shorts");
+    dev.els.aiView.classList.toggle("hidden", dev.contentPage !== "ai");
+    if (dev.contentPage === "shorts") paintStudio();
+    else paintAi();
+  }
+
   function showTab(name) {
     for (const b of document.querySelectorAll("[data-dev-tab]")) {
       b.classList.toggle("active", b.getAttribute("data-dev-tab") === name);
     }
     $("devExplorer").classList.toggle("hidden", name !== "explorer");
-    $("devShorts").classList.toggle("hidden", name !== "shorts");
-    const youtube = name === "shorts";
-    dev.els.viewTabs.classList.toggle("hidden", youtube);
-    dev.els.ytView.classList.toggle("hidden", !youtube);
-    if (youtube) {
+    $("devContent").classList.toggle("hidden", name !== "content");
+    const content = name === "content";
+    dev.els.viewTabs.classList.toggle("hidden", content);
+    if (content) {
       $("devChat").classList.add("hidden");
       $("devEditorView").classList.add("hidden");
       $("devTerminalView").classList.add("hidden");
-      paintStudio();
+      showContentPage(dev.contentPage || "shorts");
     } else {
+      dev.els.ytView.classList.add("hidden");
+      dev.els.aiView.classList.add("hidden");
       showView(dev.mainView || "chat");
     }
   }
@@ -1112,6 +1149,276 @@
     if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  /* ------------------------------------------------------------ ai video */
+
+  const AI_STYLES = {
+    cinematic: "Cinematic",
+    anime: "Anime",
+    cyberpunk: "Cyberpunk",
+    realistic: "Realistic",
+  };
+  const AI_FRAMES = {
+    vertical: { name: "9:16", note: "Shorts, Reels, TikTok", w: 1080, h: 1920 },
+    landscape: { name: "16:9", note: "YouTube, widescreen", w: 1920, h: 1080 },
+    square: { name: "1:1", note: "feed posts", w: 1080, h: 1080 },
+  };
+  const AI_LENGTHS = new Set([15, 30, 60]);
+
+  function aiProgress(text) {
+    const box = dev.els.aiProgress;
+    box.classList.remove("hidden");
+    box.innerHTML = "";
+    for (const line of String(text).split("\n")) {
+      const p = document.createElement("div");
+      p.textContent = line;
+      box.appendChild(p);
+    }
+  }
+
+  function paintAiBoard(story) {
+    const box = dev.els.aiBoard;
+    if (!box) return;
+    box.textContent = "";
+    const scenes = Array.isArray(story?.scenes) ? story.scenes : [];
+    if (!scenes.length) {
+      const p = document.createElement("p");
+      p.className = "dev-empty";
+      p.textContent = "Every generated video starts as a board here: the hook, each shot, the line she says over it, and the caption burned into the frame.";
+      box.appendChild(p);
+      return;
+    }
+    scenes.forEach((scene, i) => {
+      const row = document.createElement("div");
+      row.className = "ai-scene";
+      const num = document.createElement("div");
+      num.className = "ai-scene-num";
+      num.textContent = String(i + 1).padStart(2, "0");
+      const body = document.createElement("div");
+      const line = document.createElement("div");
+      line.className = "ai-scene-line";
+      line.textContent = scene.narration || "";
+      body.appendChild(line);
+      if (scene.caption) {
+        const cap = document.createElement("div");
+        cap.className = "ai-scene-cap";
+        cap.textContent = `ON SCREEN · ${scene.caption}`;
+        body.appendChild(cap);
+      }
+      row.append(num, body);
+      box.appendChild(row);
+    });
+  }
+
+  function paintAi() {
+    const a = dev.ai;
+    const els = dev.els;
+    if (!els?.aiTitle) return;
+    for (const b of document.querySelectorAll("[data-ai-style]")) {
+      b.classList.toggle("active", b.getAttribute("data-ai-style") === a.style);
+    }
+    for (const b of document.querySelectorAll("[data-ai-frame]")) {
+      b.classList.toggle("active", b.getAttribute("data-ai-frame") === a.frame);
+    }
+    for (const b of document.querySelectorAll("[data-ai-seconds]")) {
+      b.classList.toggle("active", Number(b.getAttribute("data-ai-seconds")) === a.seconds);
+    }
+    const frame = AI_FRAMES[a.frame] || AI_FRAMES.vertical;
+    const story = a.story;
+    const out = a.result;
+    els.aiTitle.textContent = story?.title || (a.busy ? "Writing the script…" : "No prompt yet");
+    els.aiMeta.textContent = out
+      ? `${Math.round(out.seconds)}s finished · ${(out.bytes / 1048576).toFixed(1)} MB · ${frame.name} ${frame.note} · ${AI_STYLES[a.style]}`
+      : story
+        ? story.description || "The board is ready. Painting the shots and cutting them together now."
+        : `Write the idea in the rail. She turns it into a ${frame.name} video ${frame.note ? `for ${frame.note}` : ""}, ${AI_STYLES[a.style].toLowerCase()}, about ${a.seconds} seconds long.`;
+    els.aiLength.textContent = `${Math.round(out?.seconds || a.seconds)}s`;
+    els.aiFrame.textContent = `${frame.name} · ${frame.w}x${frame.h} · ${frame.note}`;
+    els.aiStyle.textContent = AI_STYLES[a.style];
+    els.aiScenes.textContent = story?.scenes?.length ? `${story.scenes.length} scenes` : "-";
+    els.aiOutput.textContent = dev.root ? `${dev.root}\\videos` : "open a workspace folder first";
+    const ready = Boolean(dev.root) && !a.busy && Boolean(String(els.aiPrompt.value || "").trim());
+    els.aiRun.disabled = !ready;
+    els.aiRunMain.disabled = !ready;
+    els.aiRun.textContent = a.busy ? "..." : "GENERATE VIDEO";
+    els.aiRunMain.textContent = a.busy ? "..." : "GENERATE VIDEO";
+  }
+
+  function setAiStyle(name) {
+    if (!AI_STYLES[name] || dev.ai.busy) return;
+    dev.ai.style = name;
+    paintAi();
+  }
+
+  function setAiFrame(name) {
+    if (!AI_FRAMES[name] || dev.ai.busy) return;
+    dev.ai.frame = name;
+    paintAi();
+  }
+
+  function setAiSeconds(n) {
+    const seconds = Number(n);
+    if (!AI_LENGTHS.has(seconds) || dev.ai.busy) return;
+    dev.ai.seconds = seconds;
+    paintAi();
+  }
+
+  function renderAiResult(out, story) {
+    const box = dev.els.aiResultBox;
+    box.textContent = "";
+    box.classList.remove("hidden");
+    const head = document.createElement("div");
+    head.className = "yt-results-head";
+    const h = document.createElement("h4");
+    h.textContent = story?.title || "Generated video";
+    head.appendChild(h);
+    const reveal = document.createElement("button");
+    reveal.type = "button";
+    reveal.className = "dev-mini";
+    reveal.textContent = "OPEN VIDEO";
+    reveal.addEventListener("click", () => D.reveal(out.path));
+    head.appendChild(reveal);
+    box.appendChild(head);
+
+    const card = document.createElement("article");
+    card.className = "yt-short";
+    const frame = document.createElement("div");
+    frame.className = "yt-short-frame";
+    const player = document.createElement("video");
+    player.className = "yt-short-video ai-result-frame";
+    player.controls = true;
+    player.preload = "metadata";
+    player.playsInline = true;
+    player.style.aspectRatio = `${AI_FRAMES[dev.ai.frame]?.w || 1080} / ${AI_FRAMES[dev.ai.frame]?.h || 1920}`;
+    player.src = out.abs ? mediaUrl(out.abs) : "";
+    frame.appendChild(player);
+    card.appendChild(frame);
+
+    const body = document.createElement("div");
+    body.className = "yt-short-body";
+    const title = document.createElement("h4");
+    title.textContent = story?.title || "Untitled video";
+    body.appendChild(title);
+    const when = document.createElement("div");
+    when.className = "dev-when";
+    when.textContent = `${Math.round(out.seconds)}s · ${AI_FRAMES[dev.ai.frame]?.name} · ${AI_STYLES[dev.ai.style]} · ${story?.scenes?.length || 0} scenes · ${(out.bytes / 1048576).toFixed(1)} MB`;
+    body.appendChild(when);
+    if (story?.description) {
+      const desc = document.createElement("div");
+      desc.textContent = story.description;
+      body.appendChild(desc);
+    }
+    const tags = document.createElement("div");
+    tags.className = "dev-tags";
+    tags.textContent = (story?.hashtags || []).map((t) => `#${t}`).join(" ");
+    body.appendChild(tags);
+    const actions = document.createElement("div");
+    actions.className = "dev-actions";
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "dev-mini";
+    openBtn.textContent = "OPEN FILE";
+    openBtn.addEventListener("click", () => D.open(out.path).catch((e) => sysLine(String(e.message || e))));
+    actions.appendChild(openBtn);
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "dev-mini";
+    copyBtn.textContent = "COPY TITLE + TAGS";
+    copyBtn.addEventListener("click", () => {
+      const text = `${story?.title || ""}\n${(story?.hashtags || []).map((t) => `#${t}`).join(" ")}`;
+      navigator.clipboard?.writeText(text).then(() => sysLine("title and hashtags copied")).catch(() => {});
+    });
+    actions.appendChild(copyBtn);
+    if (out.script) {
+      const copyInfo = document.createElement("button");
+      copyInfo.type = "button";
+      copyInfo.className = "dev-mini";
+      copyInfo.textContent = "COPY INFO FILE";
+      copyInfo.addEventListener("click", () => {
+        navigator.clipboard?.writeText(out.script).then(() => sysLine("info file copied")).catch(() => {});
+      });
+      actions.appendChild(copyInfo);
+    }
+    body.appendChild(actions);
+
+    if (out.infoPath) {
+      const info = document.createElement("details");
+      info.className = "yt-short-info";
+      const sum = document.createElement("summary");
+      sum.textContent = `${out.infoPath} · written next to the video`;
+      info.appendChild(sum);
+      const pre = document.createElement("pre");
+      pre.className = "yt-short-txt";
+      pre.textContent = out.script || "";
+      info.appendChild(pre);
+      body.appendChild(info);
+    }
+    card.appendChild(body);
+    box.appendChild(card);
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  async function runAiVideo() {
+    const a = dev.ai;
+    if (a.busy) return;
+    const prompt = String(dev.els.aiPrompt.value || "").trim();
+    if (!prompt) {
+      aiProgress("Give her the idea first - one line in THE IDEA is enough.");
+      return;
+    }
+    if (!dev.root) {
+      aiProgress("Open a workspace folder first - the video and its script are written into it.");
+      return;
+    }
+    a.busy = true;
+    a.story = null;
+    a.result = null;
+    dev.els.aiResultBox.classList.add("hidden");
+    paintAiBoard(null);
+    paintAi();
+    const frame = AI_FRAMES[a.frame];
+    aiProgress(`WRITING THE SCRIPT\n${AI_STYLES[a.style]} · ${frame.name} · ${a.seconds}s`);
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 180_000);
+      let res;
+      let data;
+      try {
+        res = await bridge().api("/api/dev/aivideo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            style: a.style,
+            frame: a.frame,
+            seconds: a.seconds,
+          }),
+          signal: ctrl.signal,
+        });
+        data = await res.json().catch(() => null);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (!res.ok) throw new Error(data?.message || `script refused (${res.status})`);
+      if (!Array.isArray(data?.scenes) || !data.scenes.length) throw new Error("She could not find a story in that prompt.");
+      a.story = data;
+      paintAiBoard(data);
+      paintAi();
+      aiProgress(`SCRIPT READY\n${data.scenes.length} scenes · painting every shot now`);
+      const out = await D.aiVideo({ storyboard: data, style: a.style, frame: a.frame, seconds: a.seconds });
+      a.result = out;
+      renderAiResult(out, data);
+      aiProgress(`DONE\n${out.path}\n${Math.round(out.seconds)}s · ${(out.bytes / 1048576).toFixed(1)} MB`);
+      sysLine(`video ready: ${out.path}`);
+    } catch (err) {
+      const message = String(err?.message || err);
+      aiProgress(`FAILED\n${message}`);
+      sysLine(`ai video: ${message}`);
+    } finally {
+      a.busy = false;
+      paintAi();
+    }
+  }
+
   /* ------------------------------------------------------------ open/close */
 
   function open() {
@@ -1122,7 +1429,7 @@
     if (!dev.logInit) {
       dev.logInit = true;
       sysLine("developer mode armed · this never shows up in settings");
-      sysLine("open a folder, add images, or point her at a video in YOUTUBE");
+      sysLine("open a folder, add images, point her at a video in CONTENT, or hand her a prompt to generate one");
     }
     initRoot();
     setTimeout(() => dev.els.input?.focus(), 80);
@@ -1197,6 +1504,26 @@
     $("shortsRun").addEventListener("click", runShorts);
     document.querySelectorAll("[data-platform]").forEach((b) => {
       b.addEventListener("click", () => setPlatform(b.getAttribute("data-platform")));
+    });
+    document.querySelectorAll("[data-content-page]").forEach((b) => {
+      b.addEventListener("click", () => showContentPage(b.getAttribute("data-content-page")));
+    });
+    document.querySelectorAll("[data-ai-style]").forEach((b) => {
+      b.addEventListener("click", () => setAiStyle(b.getAttribute("data-ai-style")));
+    });
+    document.querySelectorAll("[data-ai-frame]").forEach((b) => {
+      b.addEventListener("click", () => setAiFrame(b.getAttribute("data-ai-frame")));
+    });
+    document.querySelectorAll("[data-ai-seconds]").forEach((b) => {
+      b.addEventListener("click", () => setAiSeconds(b.getAttribute("data-ai-seconds")));
+    });
+    dev.els.aiPrompt.addEventListener("input", () => paintAi());
+    dev.els.aiRun.addEventListener("click", runAiVideo);
+    dev.els.aiRunMain.addEventListener("click", runAiVideo);
+    D.onAiProgress?.((p) => {
+      if (!p) return;
+      if (p.message) aiProgress(p.message);
+      else aiProgress(`${String(p.stage || "working").toUpperCase()}\n${Number(p.done) || 0} of ${Number(p.total) || 0}`);
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && dev.open) {

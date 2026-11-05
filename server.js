@@ -1286,6 +1286,119 @@ Return ONLY JSON:
   });
 }
 
+// ---------------------------------------------------------------- ai video
+const AI_STYLE_DIRECTIONS = {
+  cinematic: "shot on 35mm film, anamorphic lens, shallow depth of field, dramatic rim light, muted teal-and-amber grade",
+  anime: "hand-drawn 2D anime, crisp linework, vibrant cel shading, expressive faces, dynamic camera angles",
+  cyberpunk: "neon-drenched cyberpunk, rain-slick surfaces, chrome, holograms, magenta and cyan light, dense night city",
+  realistic: "photorealistic, natural skin texture, documentary realism, real lens bokeh, believable practical light",
+};
+const AI_COMPOSITIONS = {
+  vertical: "vertical 9:16 portrait framing, the subject alive in the middle third, strong headroom, tight enough to read on a phone",
+  landscape: "wide 16:9 cinematic framing, subject offset from center, deep layered background",
+  square: "centered 1:1 framing with balanced negative space around the subject",
+};
+const AI_FRAME_PIXELS = {
+  vertical: { w: 768, h: 1360 },
+  landscape: { w: 1344, h: 768 },
+  square: { w: 1024, h: 1024 },
+};
+
+function cleanAiStory(raw, wantScenes, seconds) {
+  if (!raw || typeof raw !== "object") throw new Error("The script came back empty.");
+  const list = Array.isArray(raw.scenes) ? raw.scenes : Array.isArray(raw.shots) ? raw.shots : [];
+  const scenes = [];
+  for (const item of list.slice(0, 12)) {
+    if (!item || typeof item !== "object") continue;
+    const imagePrompt = String(item.imagePrompt ?? item.image_prompt ?? item.prompt ?? "")
+      .replace(/\s+/g, " ").trim().slice(0, 700);
+    if (!imagePrompt) continue;
+    const narration = String(item.narration ?? item.voiceover ?? item.line ?? "")
+      .replace(/\s+/g, " ").trim().slice(0, 420);
+    const caption = String(item.caption ?? "")
+      .replace(/\s+/g, " ").replace(/^["']|["']$/g, "").trim().slice(0, 90);
+    scenes.push({ narration: narration || caption, imagePrompt, caption: caption || narration.slice(0, 60) });
+  }
+  if (!scenes.length) throw new Error("The script had no usable shots.");
+  if (scenes.length > wantScenes) scenes.length = wantScenes;
+  const hashtags = Array.isArray(raw.hashtags)
+    ? raw.hashtags
+        .map((h) => String(h || "").replace(/^#/, "").replace(/[^A-Za-z0-9_]/g, "").slice(0, 30))
+        .filter(Boolean)
+        .slice(0, 10)
+    : [];
+  return {
+    title: String(raw.title || "Capri cut").replace(/\s+/g, " ").trim().slice(0, 120),
+    description: String(raw.description || "").replace(/\s+/g, " ").trim().slice(0, 700),
+    hashtags,
+    scenes,
+  };
+}
+
+async function handleDevAiVideo(req, res) {
+  let body;
+  try { body = await readBody(req, 200_000); } catch (err) { return devToolError(res, 400, err.message); }
+  const prompt = String(body.prompt || "").replace(/\s+/g, " ").trim().slice(0, 1200);
+  if (prompt.length < 4) return devToolError(res, 400, "Give her the idea first.");
+  const style = AI_STYLE_DIRECTIONS[String(body.style)] ? String(body.style) : "cinematic";
+  const frame = AI_FRAME_PIXELS[String(body.frame)] ? String(body.frame) : "vertical";
+  const seconds = Math.round(clampNum(body.seconds, 10, 90));
+  const wantScenes = Math.max(3, Math.min(10, Math.round(seconds / 6)));
+  // Roughly 2.4 spoken words a second leaves room for the beats between lines.
+  const words = Math.max(7, Math.round((seconds * 2.4) / wantScenes));
+
+  const system = `You are Capri, directing a short AI-generated video from one prompt.
+Style: ${style} - ${AI_STYLE_DIRECTIONS[style]}.
+Framing: ${frame} - ${AI_COMPOSITIONS[frame]}.
+Target: about ${seconds} seconds, split into ${wantScenes} scenes of roughly equal length.
+
+Write it like a director who knows the feed:
+- Scene 1 is the hook: the strongest image and the first line land inside the first two seconds. No greetings, no slow wind-up.
+- Every scene moves: a new image, a new beat, never a static repeat of the same shot.
+- The narration, read in order, is one tight script that builds and pays off at the end. It is spoken by Capri, first person when it fits, no stage directions, no emojis, no quotation marks, no camera language.
+- Each narration is about ${words} words and sounds natural out loud.
+- Each imagePrompt is pure visual description: subject, action, environment, lighting, lens, mood. 25-50 words. It must stand alone because each shot is illustrated separately.
+- Keep one consistent look for the subject and world across every imagePrompt (same person, same colors, same place if the story has one).
+- No words, letters, signs, captions, logos, watermarks, UI or text of any kind inside the images. No real celebrities, no brands, no sexual content, no gore.
+- Caption: the short on-screen line for that shot, max 45 characters, adds to the image instead of repeating the narration.
+
+Upload package:
+- title: under 70 characters, concrete, front-load the searchable subject, no fake claims.
+- description: 2-3 plain sentences with the context a new viewer needs and one question that invites comments.
+- hashtags: 6-10 lowercase, no spaces, no #fyp or #viral filler; specific topic first, then the niche, then one or two broad tags.
+
+Return ONLY JSON:
+{"title":string,"description":string,"hashtags":[string],"scenes":[{"narration":string,"imagePrompt":string,"caption":string}]}`;
+
+  let out;
+  try {
+    out = await collectDevCompletion({
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: `The prompt:\n${prompt}` },
+      ],
+      tools: undefined,
+    });
+  } catch (err) {
+    return devToolError(res, 502, String(err?.message || "the relays ran dry"));
+  }
+  let story;
+  try {
+    story = cleanAiStory(parseJsonLoose(out.content), wantScenes, seconds);
+  } catch (err) {
+    return devToolError(res, 502, `The script came back unusable: ${String(err?.message || err)}`);
+  }
+  return json(res, 200, {
+    ...story,
+    prompt,
+    style,
+    frame,
+    seconds,
+    pixels: AI_FRAME_PIXELS[frame],
+    provider: out.provider,
+  });
+}
+
 function actionLabel(name, args) {
   if (name === "call_me") return `call them ${String(args?.name || "").slice(0, 40)}`;
   if (name === "remember_fact") return String(args?.fact || "remembering").slice(0, 90);
@@ -3510,6 +3623,10 @@ const handler = async (req, res) => {
     if (req.method === "POST" && pathname === "/api/dev/shorts") {
       if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
       return handleDevShorts(req, res);
+    }
+    if (req.method === "POST" && pathname === "/api/dev/aivideo") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      return handleDevAiVideo(req, res);
     }
     if (req.method === "POST" && pathname === "/api/tts") return handleTts(req, res);
     if (req.method === "POST" && pathname === "/api/stt") return handleStt(req, res);
