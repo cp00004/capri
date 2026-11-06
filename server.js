@@ -1101,6 +1101,10 @@ function cleanShortsClip(raw, ws, we, duration) {
         .filter(Boolean)
         .slice(0, 12)
     : [];
+  // The algorithm wants these on every short, model or no model.
+  for (const tag of ["shorts", "youtubeshorts"]) {
+    if (!hashtags.some((h) => h.toLowerCase() === tag)) hashtags.unshift(tag);
+  }
   return {
     start,
     end,

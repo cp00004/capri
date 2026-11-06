@@ -44,7 +44,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=4.8.2" />
+<link rel="stylesheet" href="styles.css?v=4.8.3" />
 </head>
 <body data-state="idle">
 <div class="grain" aria-hidden="true"></div>
@@ -57,12 +57,19 @@
   <span class="dot" id="stateDot" aria-hidden="true"></span>
   <span class="tag" id="stateTag">online</span>
   <button id="nnnBadge" class="nnn-badge hidden" type="button" title="No Nut November">NNN</button>
-  <button id="settingsBtn" class="icon" type="button" aria-label="Settings" aria-expanded="false">
+  <button id="updatesBtn" class="icon" type="button" aria-label="Update log" title="Update log">
+    <svg class="scroll-svg" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 4h9a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+      <path class="scroll-roll" d="M7 4a2 2 0 0 0-2 2v1h4V4H7Zm0 13v3h9a3 3 0 0 0 3-3h-12Z" fill="currentColor" opacity="0.85"/>
+      <path d="M9 9h6M9 12.5h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="scroll-lines"/>
+    </svg>
+  </button>
+  <button id="settingsBtn" class="icon gear-icon" type="button" aria-label="Settings" aria-expanded="false">
     <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h9M4 12h6M4 17h11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-      <circle cx="17" cy="7" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
-      <circle cx="13" cy="12" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
-      <circle cx="18" cy="17" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7"/>
+      <g class="gear-spin">
+        <path d="M12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Zm8.4 3.4c0-.5 0-1-.1-1.5l2-1.5-2-3.4-2.3 1a8 8 0 0 0-2.6-1.5L14.9 2h-4l-.5 2.6a8 8 0 0 0-2.6 1.5l-2.3-1-2 3.4 2 1.5a8.3 8.3 0 0 0 0 3l-2 1.5 2 3.4 2.3-1a8 8 0 0 0 2.6 1.5l.5 2.6h4l.5-2.6a8 8 0 0 0 2.6-1.5l2.3 1 2-3.4-2-1.5c.1-.5.1-1 .1-1.5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <circle cx="12" cy="12" r="1.6" fill="currentColor"/>
+      </g>
     </svg>
   </button>
 </header>
@@ -114,9 +121,21 @@
     <button class="icon" type="button" data-close="settings" aria-label="Close">&times;</button>
   </div>
 
+  <nav class="sheet-tabs" aria-label="Settings sections">
+    <button type="button" class="sheet-tab active" data-sheet-tab="appearance">APPEARANCE</button>
+    <button type="button" class="sheet-tab" data-sheet-tab="features">CAPRI</button>
+    <button type="button" class="sheet-tab" data-sheet-tab="access">FULL ACCESS</button>
+    <button type="button" class="sheet-tab" data-sheet-tab="account">ACCOUNT</button>
+  </nav>
+
   <div class="sheet-body">
-    <div class="field">
+    <div class="field" data-sheet-tab="account">
       <span class="label">account</span>
+      <div class="row wrap">
+        <img id="accountAvatar" class="account-avatar hidden" alt="account icon" />
+        <button id="avatarBtn" class="pill" type="button">CHANGE ICON</button>
+        <input id="avatarInput" type="file" accept="image/*" class="hidden" />
+      </div>
       <div class="row wrap" id="accountRow">
         <span class="value" id="accountName">this pc</span>
         <button id="googleBtn" class="pill accent" type="button">SIGN IN WITH GOOGLE</button>
@@ -127,7 +146,7 @@
       <p class="hint" id="accountHint">Sign in once and your memory follows you to any device.</p>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="account">
       <span class="label">your model key</span>
       <div class="row">
         <input id="userKeyInput" class="text" type="password" autocomplete="off" spellcheck="false" placeholder="gsk_... AIza... ftai_... mstrl_..." />
@@ -136,7 +155,7 @@
       <p class="hint" id="userKeyHint">Optional. Bring your own free key — console.groq.com/keys or aistudio.google.com/apikey — and your questions stop sharing this server’s quota. Kept on this device only.</p>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="account">
       <span class="label">what she calls you</span>
       <div class="row">
         <input id="prefName" class="text" type="text" maxlength="48" placeholder="your name" autocomplete="nickname" />
@@ -145,12 +164,12 @@
       <p class="hint">Say "call me ..." out loud, or set it here. It is remembered.</p>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="features">
       <span class="label">voice</span>
       <p class="hint" id="voiceHint">One voice, everywhere. Capri's own. Nothing to pick.</p>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="features">
       <span class="label">voice output</span>
       <div class="row">
         <button id="voiceBtn" class="pill is-on" type="button"><span class="led"></span><span id="voiceLabel">ON</span></button>
@@ -158,7 +177,7 @@
       </div>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="features">
       <span class="label">wake word</span>
       <div class="row">
         <button id="wakeWordBtn" class="pill" type="button" aria-pressed="false">OFF</button>
@@ -167,7 +186,7 @@
       <p class="hint" id="wakeWordHint">When enabled, say “Capri” while this page is open and visible. Background listening needs native app support.</p>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="appearance">
       <span class="label">clock</span>
       <div class="row">
         <select id="timeFormat" aria-label="Clock format">
@@ -180,7 +199,7 @@
       <p class="hint">PC SETTING follows the Windows taskbar clock. She reads it like a person, never military time.</p>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="appearance">
       <span class="label">glitch</span>
       <div class="row">
         <select id="glitchLevel" aria-label="Glitch level">
@@ -193,7 +212,41 @@
       <p class="hint">Neon arcs, torn frames and signal corruption. Off is calmer for photosensitive eyes.</p>
     </div>
 
-    <div class="field">
+    <div class="field mobile-only" data-sheet-tab="appearance">
+      <span class="label">accent color</span>
+      <div class="row wrap">
+        <input id="accentWheel" type="color" class="color-wheel" aria-label="Pick an accent color" />
+        <input id="accentHex" class="text hex" type="text" maxlength="7" spellcheck="false" placeholder="#ff0b52" />
+        <button id="accentApply" class="pill" type="button">APPLY</button>
+        <button id="accentReset" class="pill" type="button">DEFAULT</button>
+      </div>
+      <p class="hint">Phone only. Pick any color - red, dark red, navy blue, anything - or paste a hex code, and her whole look shifts to it. DEFAULT brings back signature pink.</p>
+    </div>
+
+    <div class="field mobile-only" data-sheet-tab="appearance">
+      <span class="label">holiday themed icons</span>
+      <div class="row wrap">
+        <select id="holidayTheme" aria-label="Holiday theme">
+          <option value="none">OFF</option>
+          <option value="christmas">CHRISTMAS</option>
+          <option value="halloween">HALLOWEEN</option>
+          <option value="easter">EASTER</option>
+          <option value="valentine">VALENTINE</option>
+          <option value="patrick">ST. PATRICK</option>
+        </select>
+      </div>
+      <p class="hint">Phone only. Dressed-up neon icon frames in the holiday's colors - Santa hats and snow for Christmas, webs and pumpkins for Halloween, bunnies and eggs for Easter, hearts and roses for Valentine, clovers and gold for St. Patrick. Off is the classic Capri pink.</p>
+    </div>
+
+    <div class="field" data-sheet-tab="account">
+      <span class="label">reset</span>
+      <div class="row wrap">
+        <button id="settingsResetBtn" class="pill" type="button">RESET SETTINGS</button>
+      </div>
+      <p class="hint">Clears the look choices on this device - accent color, holiday theme, icon - and reloads. Memory and your account stay untouched.</p>
+    </div>
+
+    <div class="field" data-sheet-tab="account">
       <span class="label">memory</span>
       <div class="row wrap">
         <span class="value" id="memoryCount">0 saved</span>
@@ -203,7 +256,7 @@
       <p class="hint">Everything you tell her - facts, notes, favourites and every conversation turn - stays in your profile on your Google account, not in the repo. The vault searches all of it, forgets single items, and exports a copy. Sign in on the PC or the phone and she remembers the same you.</p>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="features">
       <span class="label">app banter</span>
       <div class="row">
         <button id="appBanterBtn" class="pill is-on" type="button"><span class="led"></span><span id="appBanterLabel">ON</span></button>
@@ -211,7 +264,7 @@
       <p class="hint">She reads the window in front - the site, the video title, the track on Spotify, who you are messaging, the game - and comments on that instead of the browser. An app she has never seen gets the third degree. Off means no comments and no peeking.</p>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="features">
       <span class="label">eye spy</span>
       <div class="row">
         <button id="eyeSpyBtn" class="pill is-on" type="button"><span class="led"></span><span id="eyeSpyLabel">ON</span></button>
@@ -220,7 +273,7 @@
       <p class="hint">When Capri is out of the way she keeps watch. On the PC that is a floating eye: it drifts, trails your cursor, drags anywhere, and answers when you say “Capri …”. On the phone there is no eye - she replies as a notification about the exact thing you are doing. Off means no watching.</p>
     </div>
 
-    <div class="field" id="phoneField" style="display:none">
+    <div class="field" data-sheet-tab="access"  id="phoneField" style="display:none">
       <span class="label">phone access</span>
       <div class="row wrap">
         <span class="value" id="phoneState">checking…</span>
@@ -239,7 +292,7 @@
       <p class="hint" id="phoneHint">Android asks for these one screen at a time. Tap a chip to open its screen.</p>
     </div>
 
-    <div class="field" id="nnnField">
+    <div class="field" data-sheet-tab="features" id="nnnField">
       <span class="label">no nut november</span>
       <div class="row wrap">
         <span class="value bad" id="nnnState">checking…</span>
@@ -261,7 +314,7 @@
       <p class="hint" id="nnnHint">Runs by itself from November 1st to December 1st on your local clock, on this PC and every phone signed to Capri, even while Capri is closed. It closes the offending tab (never the whole browser), blocks the site list, and emails a loss report. There is no pause button while the season is live; the only way out is the recovery code, which is the one you use to cancel by voice.</p>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="access">
       <span class="label">auto-publish</span>
       <div class="row wrap">
         <span class="value" id="publishState">on</span>
@@ -270,7 +323,7 @@
       <p class="hint" id="publishHint">Every tracked update is committed and pushed to GitHub automatically.</p>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="access">
       <span class="label">her hands</span>
       <div class="row">
         <span class="value" id="pcState">voice only</span>
@@ -296,7 +349,7 @@
       <div id="handsRecent" class="decision-list"></div>
     </div>
 
-    <div class="field">
+    <div class="field" data-sheet-tab="account">
       <span class="label">link</span>
       <div class="row wrap">
         <button id="stopBtn" class="pill" type="button">CUT VOICE</button>
@@ -304,7 +357,7 @@
       </div>
     </div>
 
-    <div class="field" id="backendField" style="display:none">
+    <div class="field" data-sheet-tab="access"  id="backendField" style="display:none">
       <span class="label">pc address / backend</span>
       <div class="row">
         <input id="apiBase" class="text" type="url" inputmode="url" spellcheck="false" placeholder="https://YOUR-PC-IP:4174 or http://192.168.1.10:4173" />
@@ -313,10 +366,21 @@
       <p class="hint">Required for the Android app. Point to your running Capri server on your PC (LAN or tunnel). Keep keys on the server only.</p>
     </div>
 
-    <div class="field" id="auditField">
+    <div class="field" data-sheet-tab="access" id="auditField">
       <span class="label">last actions</span>
       <div id="auditList" class="audit"><p class="hint">nothing yet</p></div>
     </div>
+  </div>
+</section>
+
+<!-- ================================================= update log -->
+<section id="updates" class="sheet hidden" aria-label="Update log">
+  <div class="sheet-head">
+    <h2>UPDATE LOG</h2>
+    <button class="icon" type="button" data-close="updates" aria-label="Close">&times;</button>
+  </div>
+  <div class="sheet-body">
+    <div id="updatesList" class="updates-list"></div>
   </div>
 </section>
 
@@ -524,7 +588,7 @@
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
-<script src="dev.js?v=4.8.2"></script>
-<script src="app.js?v=4.8.2"></script>
+<script src="dev.js?v=4.8.3"></script>
+<script src="app.js?v=4.8.3"></script>
 </body>
 </html>

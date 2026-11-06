@@ -25,6 +25,18 @@ const el = {
   kbInput: $("#kbInput"),
   settingsBtn: $("#settingsBtn"),
   settings: $("#settings"),
+  updatesBtn: $("#updatesBtn"),
+  updates: $("#updates"),
+  updatesList: $("#updatesList"),
+  accentWheel: $("#accentWheel"),
+  accentHex: $("#accentHex"),
+  accentApply: $("#accentApply"),
+  accentReset: $("#accentReset"),
+  holidayTheme: $("#holidayTheme"),
+  settingsResetBtn: $("#settingsResetBtn"),
+  avatarBtn: $("#avatarBtn"),
+  avatarInput: $("#avatarInput"),
+  accountAvatar: $("#accountAvatar"),
   voiceBtn: $("#voiceBtn"),
   voiceLabel: $("#voiceLabel"),
   wakeWordBtn: $("#wakeWordBtn"),
@@ -3260,6 +3272,231 @@ document.querySelectorAll("[data-close]").forEach((btn) => {
     else if (target) { const n = document.getElementById(target); if (n) closeSheet(n); }
   });
 });
+
+/* ---------------------------------------------------------------- settings tabs */
+
+const SHEET_TAB_DEFAULT = "appearance";
+
+function showSheetTab(name) {
+  document.querySelectorAll(".sheet-tab").forEach((b) => {
+    b.classList.toggle("active", b.getAttribute("data-sheet-tab") === name);
+  });
+  document.querySelectorAll("#settings .field[data-sheet-tab]").forEach((f) => {
+    f.classList.toggle("tab-hidden", f.getAttribute("data-sheet-tab") !== name);
+  });
+}
+
+document.querySelectorAll(".sheet-tab").forEach((b) => {
+  b.addEventListener("click", () => showSheetTab(b.getAttribute("data-sheet-tab")));
+});
+showSheetTab(SHEET_TAB_DEFAULT);
+
+/* ----------------------------------------------------- appearance engine */
+
+const ACCENT_DEFAULT = "#ff0b52";
+const ACCENT_KEY = "capri.accent";
+const HOLIDAY_KEY = "capri.holiday";
+
+function hexToRgb(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || "").trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+function applyAccent(hex) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return false;
+  const root = document.documentElement;
+  root.style.setProperty("--pink", hex);
+  root.style.setProperty("--accent-soft", `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.16)`);
+  root.style.setProperty("--accent", hex);
+  if (el.accentWheel) el.accentWheel.value = hex;
+  if (el.accentHex) el.accentHex.value = hex;
+  return true;
+}
+
+function setAccent(hex, persist = true) {
+  const clean = String(hex || "").trim().toLowerCase();
+  if (!applyAccent(clean)) {
+    showNotice("That color code doesn't parse. Try #ff0b52 format.", null, null, 4000);
+    return;
+  }
+  if (persist) localStorage.setItem(ACCENT_KEY, clean);
+}
+
+(function initAppearance() {
+  const saved = localStorage.getItem(ACCENT_KEY);
+  if (saved) applyAccent(saved);
+  if (el.accentWheel) {
+    el.accentWheel.value = saved || ACCENT_DEFAULT;
+    el.accentWheel.addEventListener("input", () => setAccent(el.accentWheel.value));
+  }
+  if (el.accentHex) el.accentHex.value = saved || "";
+  if (el.accentApply) {
+    el.accentApply.addEventListener("click", () => {
+      const typed = el.accentHex?.value.trim() || el.accentWheel?.value || "";
+      setAccent(typed);
+    });
+  }
+  if (el.accentHex) {
+    el.accentHex.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); el.accentApply?.click(); }
+    });
+  }
+  if (el.accentReset) {
+    el.accentReset.addEventListener("click", () => {
+      localStorage.removeItem(ACCENT_KEY);
+      applyAccent(ACCENT_DEFAULT);
+      if (el.accentHex) el.accentHex.value = "";
+      showNotice("Back to signature pink.", null, null, 2500);
+    });
+  }
+  const holiday = localStorage.getItem(HOLIDAY_KEY) || "none";
+  el.body.dataset.holiday = holiday;
+  if (el.holidayTheme) {
+    el.holidayTheme.value = holiday;
+    el.holidayTheme.addEventListener("change", () => {
+      const name = el.holidayTheme.value || "none";
+      el.body.dataset.holiday = name;
+      localStorage.setItem(HOLIDAY_KEY, name);
+      if (name === "none") {
+        const saved = localStorage.getItem(ACCENT_KEY);
+        applyAccent(saved || ACCENT_DEFAULT);
+      }
+    });
+  }
+})();
+
+/* ----------------------------------------------------------- account icon */
+
+const AVATAR_KEY = "capri.avatar";
+
+function paintAvatar(dataUrl) {
+  if (!el.accountAvatar) return;
+  if (dataUrl) {
+    el.accountAvatar.src = dataUrl;
+    el.accountAvatar.classList.remove("hidden");
+  } else {
+    el.accountAvatar.removeAttribute("src");
+    el.accountAvatar.classList.add("hidden");
+  }
+}
+
+(function initAvatar() {
+  paintAvatar(localStorage.getItem(AVATAR_KEY));
+  if (el.avatarBtn && el.avatarInput) {
+    el.avatarBtn.addEventListener("click", () => el.avatarInput.click());
+    el.avatarInput.addEventListener("change", () => {
+      const file = el.avatarInput.files && el.avatarInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || "");
+        if (!dataUrl.startsWith("data:image/")) return;
+        try {
+          localStorage.setItem(AVATAR_KEY, dataUrl);
+        } catch {
+          showNotice("That image is too big to keep on this device.", null, null, 4000);
+          return;
+        }
+        paintAvatar(dataUrl);
+        saveProfile({ settings: { avatar: dataUrl } });
+        showNotice("Account icon updated.", null, null, 2500);
+      };
+      reader.readAsDataURL(file);
+      el.avatarInput.value = "";
+    });
+  }
+  if (el.settingsResetBtn) {
+    el.settingsResetBtn.addEventListener("click", () => {
+      localStorage.removeItem(ACCENT_KEY);
+      localStorage.removeItem(HOLIDAY_KEY);
+      localStorage.removeItem(AVATAR_KEY);
+      showNotice("Settings reset. Reloading…", null, null, 2000);
+      setTimeout(() => location.reload(), 900);
+    });
+  }
+})();
+
+/* -------------------------------------------------------------- update log */
+
+const UPDATE_LOG = [
+  {
+    version: "4.8.3", date: "2026-11-05", platform: "both",
+    title: "Settings rework + appearance engine",
+    points: [
+      "Settings now live in tabs: Appearance, Capri, Full Access, Account",
+      "Phone: pick any accent color from a wheel or paste a hex code",
+      "Phone: holiday themed icons - Christmas, Halloween, Easter, Valentine, St. Patrick",
+      "New update log - this panel, next to the settings gear",
+      "Account: change your account icon, reset settings",
+      "Every short now always tags #shorts and #youtubeshorts",
+      "Smoother, cleaner UI across the app",
+    ],
+  },
+  {
+    version: "4.8.2", date: "2026-11-05", platform: "both",
+    title: "Back to the shorts maker",
+    points: [
+      "Removed the paper-trading desk and the AI video generator",
+      "CONTENT is just the shorts studio again",
+    ],
+  },
+  {
+    version: "4.8.1", date: "2026-11-05", platform: "pc",
+    title: "Paper-trading desk",
+    points: [
+      "Live coin prices, AI picks, virtual deposits and P&L",
+      "Mining-profitability board",
+    ],
+  },
+  {
+    version: "4.8.0", date: "2026-11-04", platform: "both",
+    title: "3D fruit-drama AI video",
+    points: ["AI VIDEO studio learned the viral fruit-drama style"],
+  },
+];
+
+function renderUpdateLog() {
+  if (!el.updatesList) return;
+  el.updatesList.textContent = "";
+  for (const entry of UPDATE_LOG) {
+    const card = document.createElement("article");
+    card.className = "update-entry";
+    const head = document.createElement("div");
+    head.className = "update-head";
+    const version = document.createElement("span");
+    version.className = "update-version";
+    version.textContent = `v${entry.version}`;
+    const badge = document.createElement("span");
+    badge.className = `update-badge ${entry.platform}`;
+    badge.textContent = entry.platform === "both" ? "MOBILE & PC" : entry.platform.toUpperCase();
+    const date = document.createElement("span");
+    date.className = "update-date";
+    date.textContent = entry.date;
+    head.append(version, badge, date);
+    const title = document.createElement("p");
+    title.className = "update-title";
+    title.textContent = entry.title;
+    const list = document.createElement("ul");
+    for (const point of entry.points) {
+      const li = document.createElement("li");
+      li.textContent = point;
+      list.appendChild(li);
+    }
+    card.append(head, title, list);
+    el.updatesList.appendChild(card);
+  }
+}
+renderUpdateLog();
+
+if (el.updatesBtn) {
+  el.updatesBtn.addEventListener("click", () => {
+    if (el.updates.classList.contains("hidden")) openSheet(el.updates);
+    else closeSheet(el.updates);
+  });
+}
 
 /* ---------------------------------------------------------------- download */
 function toggleDownloadSheet() {
