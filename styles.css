@@ -1442,3 +1442,11 @@ body[data-holiday]:not([data-holiday="none"]) .hex-glow {
 .hex-frame { transition: filter .3s ease; }
 #portraitImg { transition: filter .25s ease; }
 .sheet-body { scroll-behavior: smooth; }
+
+/* top bar: buttons right, NNN centered */
+.top .icon { margin-left: 0; }
+.top-right { display: flex; gap: 10px; margin-left: auto; }
+.top .nnn-badge {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  margin: 0;
+}
