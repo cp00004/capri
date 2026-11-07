@@ -140,7 +140,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.8.1";
+const APP_VERSION = "4.8.4";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -4999,10 +4999,18 @@ function initUpdates() {
   }
   if (!IS_NATIVE || updateUi.checked) return;
   updateUi.checked = true;
-  fetch(`${UPDATE_FEED}?t=${Date.now()}`, { cache: "no-store" })
+  // The APK's real version lives in its bundled version.json, which ships with
+  // every build - the APP_VERSION constant is only a fallback for old shells.
+  const localVersion = fetch(`version.json?t=${Date.now()}`, { cache: "no-store" })
     .then((res) => (res.ok ? res.json() : null))
-    .then((feed) => {
-      if (!feed?.version || !newerVersion(feed.version, APP_VERSION)) return;
+    .then((data) => data?.version || APP_VERSION)
+    .catch(() => APP_VERSION);
+  Promise.all([
+    fetch(`${UPDATE_FEED}?t=${Date.now()}`, { cache: "no-store" }).then((res) => (res.ok ? res.json() : null)),
+    localVersion,
+  ])
+    .then(([feed, current]) => {
+      if (!feed?.version || !newerVersion(feed.version, current)) return;
       const bridge = window.CapriDevice?.installUpdate && feed.apk ? window.CapriDevice : null;
       showUpdateScreen({
         kicker: `CAPRI v${feed.version} IS OUT`,
