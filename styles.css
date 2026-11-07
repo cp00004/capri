@@ -1396,19 +1396,43 @@ input.hex { width: 92px; font-family: var(--mono); letter-spacing: 1px; text-tra
 @keyframes scroll-glow { 0%, 100% { opacity: 0.85; } 50% { opacity: 0.45; } }
 
 /* holiday themed icons (mobile) */
-body[data-holiday="christmas"] { --pink: #ff2d55; --mint: #6dffbe; }
-body[data-holiday="halloween"] { --pink: #ff8a1e; --mint: #b06bff; }
-body[data-holiday="easter"]    { --pink: #ff7ad9; --mint: #7dffb0; }
-body[data-holiday="valentine"] { --pink: #ff0b52; --mint: #ff9ad5; }
-body[data-holiday="patrick"]   { --pink: #2fd465; --mint: #ffd23f; }
-body[data-holiday]:not([data-holiday="none"]) .icon,
+body[data-holiday="christmas"] { --pink: #ff1e3c; --mint: #3ddc84; --accent: #ff1e3c; --accent-soft: rgba(255, 30, 60, 0.18); }
+body[data-holiday="halloween"] { --pink: #ff8a1e; --mint: #b06bff; --accent: #ff8a1e; --accent-soft: rgba(255, 138, 30, 0.18); }
+body[data-holiday="easter"]    { --pink: #ff7ad9; --mint: #7dffb0; --accent: #ff7ad9; --accent-soft: rgba(255, 122, 217, 0.18); }
+body[data-holiday="valentine"] { --pink: #ff2e63; --mint: #ff9ad5; --accent: #ff2e63; --accent-soft: rgba(255, 46, 99, 0.2); }
+body[data-holiday="patrick"]   { --pink: #2fd465; --mint: #ffd23f; --accent: #2fd465; --accent-soft: rgba(47, 212, 101, 0.18); }
+body[data-holiday]:not([data-holiday="none"]) .icon {
+  color: var(--pink);
+  border-color: var(--pink);
+  background: color-mix(in srgb, var(--pink) 12%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--pink) 55%, transparent),
+    inset 0 0 8px rgba(255, 255, 255, 0.05);
+}
+body[data-holiday]:not([data-holiday="none"]) .icon:hover {
+  color: var(--white);
+  border-color: var(--pink);
+  background: color-mix(in srgb, var(--pink) 22%, transparent);
+}
 body[data-holiday]:not([data-holiday="none"]) .mic {
   border-color: var(--pink);
-  box-shadow: 0 0 10px var(--accent-soft), inset 0 0 8px rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 0 6px var(--accent-soft), 0 12px 38px rgba(0, 0, 0, 0.6);
 }
 body[data-holiday]:not([data-holiday="none"]) .hex-frame,
 body[data-holiday]:not([data-holiday="none"]) .hex-glow {
   filter: drop-shadow(0 0 18px var(--accent-soft));
+}
+
+/* mic states win over the holiday frame while they are active */
+body[data-state="listening"] { --accent: var(--mint); --accent-soft: rgba(109, 255, 190, 0.15); }
+body[data-state="thinking"]  { --accent: var(--white); --accent-soft: rgba(251, 240, 240, 0.13); }
+body[data-state="speaking"]  { --accent: var(--pink); --accent-soft: rgba(255, 11, 82, 0.2); }
+body[data-state="listening"] .mic {
+  border-color: var(--mint);
+  color: var(--mint);
+}
+body[data-state="thinking"] .mic {
+  border-color: var(--white);
+  color: var(--white);
 }
 
 /* update log */
