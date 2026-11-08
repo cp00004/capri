@@ -1738,7 +1738,7 @@ function nnnCheckSchedule(now = new Date()) {
   // A code release ends the season for this machine: the calendar must not
   // switch it back on a minute later.
   if (!nnn.active && nnn.dismissed !== end) nnnActivate({ auto: true, quiet: true });
-  return { mode: "active", start, end };
+  return { mode: nnn.active ? "active" : "off", start, end };
 }
 
 // The app writes this while it runs; the guard only sweeps when it is stale,
