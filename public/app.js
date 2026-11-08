@@ -2463,6 +2463,7 @@ let nnnGlobal = { armed: false, armedAt: 0, releaseAt: 0, until: "", days: 0, me
 let nnnLocal = null;       // last answer from this machine's shell
 let nnnAwaitingArmCode = false;
 let nnnSyncing = false;
+let nnnSynced = false;
 
 function nnnHasShell() {
   return typeof window.capriNative?.noNut === "function" || Boolean(window.CapriEyes?.noNut);
@@ -2565,6 +2566,7 @@ async function nnnSync() {
   }
   if (!state) return null;
   nnnGlobal = state;
+  nnnSynced = true;
   await nnnRefreshLocal();
   paintNnn();
   if (!nnnHasShell()) return state;
@@ -2614,8 +2616,13 @@ function paintNnn() {
   const localActive = Boolean(nnnLocal?.active);
   // A code release is recorded for the season on every device that hears about
   // it. The calendar must not paint a timer over a switch that is already off.
+  // A page with no native shell can only ask the switch, so an off switch after
+  // the opening days of the season means the code was used.
+  const opening = now - season.start < 48 * 3600 * 1000;
+  const releasedBySwitch = !nnnHasShell() && nnnSynced && cal === "active" && !serverArmed && !opening;
   const dismissed = Number(nnnLocal?.dismissed || 0) === season.end
-    || Number(nnnGlobal?.dismissed || 0) === season.end;
+    || Number(nnnGlobal?.dismissed || 0) === season.end
+    || releasedBySwitch;
   const active = !dismissed && (localActive || serverArmed || (cal === "active" && !nnnHasShell()));
   // An arm made before November 1st is stored, not enforced: the dashboard
   // shows the countdown to the start, not a live lock.
