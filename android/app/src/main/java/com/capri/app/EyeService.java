@@ -467,10 +467,17 @@ public class EyeService extends Service {
 					? "Armed. It switches itself on at midnight on November 1st and opens again on " + niceDate(gate) + "."
 					: "Armed on this phone until " + niceDate(gate) + ".");
 		}
-		if (action.equals("release")) {
-			prefs.edit().putBoolean("armed", false).apply();
+		if (action.equals("release") || action.equals("dismiss")) {
+			// The code was already checked (here, or on another device through the
+			// shared switch), so the season ends for this phone. Without the
+			// dismissal the calendar would arm it again a minute later.
+			boolean was = prefs.getBoolean("armed", false);
+			prefs.edit().putBoolean("armed", false).putBoolean("auto", false)
+					.putLong("dismissed", decemberOne(System.currentTimeMillis())).apply();
 			NnnAdmin.clear(context);
-			return nnnAck(false, false, "Lock is off.");
+			return nnnAck(false, false, was
+					? "Lock is off. It comes back by itself next November."
+					: "Nothing is locked right now.");
 		}
 		if (action.equals("cancel")) {
 			if (!nnnActive(prefs)) return nnnAck(false, false, "Nothing is locked right now.");
@@ -947,9 +954,23 @@ public class EyeService extends Service {
 							.putLong("since", System.currentTimeMillis()).apply();
 				}
 			} else if (!armed) {
-				// The shared switch switched off. That is an announcement, not an
-				// order: the local lock keeps its own state until December 1st.
-				nnnCheckSchedule(EyeService.this);
+				// During the season an off switch that appears after the opening
+				// days is the code being used somewhere else: stand down here too.
+				// Inside the first 48 hours the switch may simply not be armed yet,
+				// so the calendar keeps this phone locked until it is.
+				long now = System.currentTimeMillis();
+				long start = novemberOne(now);
+				boolean season = now >= start && now < decemberOne(now);
+				boolean opening = season && now - start < 48L * 3600L * 1000L;
+				if (season && !opening && !dismissed && local) {
+					prefs.edit().putBoolean("armed", false).putBoolean("auto", false)
+							.putLong("dismissed", decemberOne(now)).apply();
+					NnnAdmin.clear(EyeService.this);
+					Alerts.show(EyeService.this, "Capri // NO NUT NOVEMBER",
+							"NNN Mode is off. The code was used, so the lock is gone until next November.");
+				} else {
+					nnnCheckSchedule(EyeService.this);
+				}
 			}
 		}).start();
 	}

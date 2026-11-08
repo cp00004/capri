@@ -1655,11 +1655,15 @@ function fallbackBanter(ctx) {
    words could seal shut everybody else's machine. */
 const NNN_FILE = path.join(DATA_DIR, ".capri-nnn.json");
 const NNN_PASSCODE = String(process.env.CAPRI_NNN_CODE || "34872");
-const NNN_NAH = "NAH UH YOU GOONER. The lock stays on until December 1st.";
 
-// During the season there is no switch to flip, not even with the old code.
+// The season is November 1st to December 1st. The code works all year: a wrong
+// code still changes nothing, a right one opens every device until next season.
 function nnnSeasonActive(now = new Date()) {
-  return now.getMonth() === 10; // November
+  return now.getTime() >= nnnNovemberOne(now) && now.getTime() < nnnDecemberOne(now);
+}
+
+function nnnNovemberOne(from = new Date()) {
+  return new Date(from.getFullYear(), 10, 1, 0, 0, 0, 0).getTime();
 }
 
 function nnnDecemberOne(from = new Date()) {
@@ -1668,7 +1672,7 @@ function nnnDecemberOne(from = new Date()) {
 }
 
 function nnnRead() {
-  let state = { armed: false, since: 0, releaseAt: 0, wrong: 0 };
+  let state = { armed: false, since: 0, releaseAt: 0, wrong: 0, dismissed: 0 };
   try { state = { ...state, ...JSON.parse(fs.readFileSync(NNN_FILE, "utf8")) }; } catch { /* first run */ }
   if (state.armed && Date.now() >= Number(state.releaseAt)) state.armed = false;
   return state;
@@ -1682,16 +1686,27 @@ function nnnWrite(state) {
 function nnnPayload(state) {
   const releaseAt = Number(state.releaseAt) || 0;
   const days = state.armed ? Math.max(0, Math.ceil((releaseAt - Date.now()) / 86_400_000)) : 0;
+  const dismissed = Number(state.dismissed) || 0;
+  const off = !state.armed && nnnSeasonActive() && dismissed === nnnDecemberOne();
   return {
     armed: Boolean(state.armed),
     armedAt: Number(state.since) || 0,
     releaseAt,
     until: state.armed ? new Date(releaseAt).toDateString() : "",
     days,
+    dismissed,
     message: state.armed
       ? `No Nut November is on for every device until ${new Date(releaseAt).toDateString()} - ${days} day${days === 1 ? "" : "s"} left.`
-      : "No Nut November is off.",
+      : off
+        ? `No Nut November is off on every device. It comes back by itself on ${new Date(nnnNextNovember()).toDateString()}.`
+        : "No Nut November is off.",
   };
+}
+
+// The next November 1st after today: while the season runs that is next year.
+function nnnNextNovember(from = new Date()) {
+  const year = from.getMonth() === 10 ? from.getFullYear() + 1 : from.getFullYear();
+  return new Date(year, 10, 1, 0, 0, 0, 0).getTime();
 }
 
 // The shared NNN switch lives on the hosted backend. A desktop page cannot
@@ -1702,10 +1717,6 @@ const SHARED_NNN = "https://capricorn.de.deplexo.com";
 async function handleSharedNnn(req, res, action) {
   // Only this machine's own page may relay; a LAN caller gets the local copy.
   if (!isLoopback(req.socket.remoteAddress)) return false;
-  if (action === "release" && nnnSeasonActive()) {
-    json(res, 403, { error: "locked", locked: true, message: NNN_NAH });
-    return true;
-  }
   let target;
   try {
     target = new URL(SHARED_NNN);
@@ -1729,18 +1740,28 @@ async function handleSharedNnn(req, res, action) {
     return false;
   }
   const text = await upstream.text();
-  res.writeHead(upstream.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
-  res.end(text);
-  if (upstream.ok) {
-    try {
-      const shared = JSON.parse(text);
-      if (action === "arm" && shared.armed) {
-        nnnWrite({ armed: true, since: Number(shared.since) || Date.now(), releaseAt: Number(shared.releaseAt) || 0, wrong: 0 });
-      } else if (action === "release" && shared.armed === false) {
-        nnnWrite({ armed: false, since: 0, releaseAt: 0, wrong: 0 });
-      }
-    } catch { /* the answer still stands */ }
+  let answer = null;
+  try { answer = JSON.parse(text); } catch { /* not json */ }
+  if (upstream.ok && answer) {
+    if (action === "arm" && answer.armed) {
+      nnnWrite({ armed: true, since: Number(answer.since) || Date.now(), releaseAt: Number(answer.releaseAt) || 0, wrong: 0, dismissed: 0 });
+    } else if (action === "release" && answer.armed === false) {
+      // The code opens every device for the rest of the season; keep that
+      // decision in the local file so this machine cannot re-arm itself.
+      answer.dismissed = nnnDecemberOne();
+      nnnWrite({ armed: false, since: 0, releaseAt: 0, wrong: 0, dismissed: answer.dismissed });
+      answer.message = answer.message || "Code checked out. Every device is open again.";
+    }
+    // A desktop page reading the shared switch also sees how this machine
+    // answered the code, so the dashboard can show the off state at once.
+    const local = nnnRead();
+    answer.dismissed = Number(local.dismissed) || 0;
+    if (action === "state" && nnnSeasonActive() && answer.dismissed === nnnDecemberOne()) {
+      Object.assign(answer, nnnPayload({ armed: false, dismissed: answer.dismissed, releaseAt: 0, since: 0 }));
+    }
   }
+  res.writeHead(upstream.status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
+  res.end(answer ? JSON.stringify(answer) : text);
   return true;
 }
 
@@ -1750,10 +1771,6 @@ async function handleNoNutGlobal(req, res, action) {
   let body = {};
   try { body = (await readBody(req, 4000)) || {}; } catch (err) { return json(res, 400, { error: err.message }); }
   if (action !== "arm" && action !== "release") return json(res, 404, { error: "unknown_action" });
-
-  if (action === "release" && nnnSeasonActive()) {
-    return json(res, 403, { error: "locked", locked: true, message: NNN_NAH });
-  }
 
   const state = nnnRead();
   const given = String(body.code || "").replace(/\D/g, "").slice(0, 16);
@@ -1770,16 +1787,51 @@ async function handleNoNutGlobal(req, res, action) {
       const off = { ...state, armed: false };
       return json(res, 200, { ...nnnPayload(off), message: "December 1st has come and gone, so there is nothing left to lock." });
     }
-    const next = { armed: true, since: Date.now(), releaseAt, wrong: 0 };
+    const next = { armed: true, since: Date.now(), releaseAt, wrong: 0, dismissed: 0 };
     nnnWrite(next);
     console.log(`nnn: armed for every device until ${new Date(releaseAt).toDateString()}`);
     return json(res, 200, { ...nnnPayload(next), message: `Armed on every device until ${new Date(releaseAt).toDateString()}.` });
   }
 
-  const next = { armed: false, since: 0, releaseAt: 0, wrong: 0 };
+  const next = { armed: false, since: 0, releaseAt: 0, wrong: 0, dismissed: nnnDecemberOne() };
   nnnWrite(next);
   console.log("nnn: released for every device");
   return json(res, 200, { ...nnnPayload(next), message: "Code checked out. Every device is open again." });
+}
+
+// The switch puts itself back on at the start of every season. Only inside the
+// first two days, so a release later in November can never be undone by a
+// machine that wakes up and decides the switch should be on.
+const NNN_ARM_WINDOW = 48 * 3600 * 1000;
+let nnnSeasonTickAt = 0;
+
+async function nnnSeasonTick(now = new Date()) {
+  if (Date.now() - nnnSeasonTickAt < 60_000) return;
+  nnnSeasonTickAt = Date.now();
+  const start = nnnNovemberOne(now);
+  if (now.getTime() < start || now.getTime() >= nnnDecemberOne(now)) return;
+  if (now.getTime() - start > NNN_ARM_WINDOW) return;
+  const local = nnnRead();
+  if (Number(local.dismissed) === nnnDecemberOne(now)) return;
+  try {
+    const res = await fetch(`${SHARED_NNN}/api/nnn`, { signal: AbortSignal.timeout(8000), cache: "no-store" });
+    if (!res.ok) return;
+    const shared = await res.json();
+    if (shared && shared.armed) return;
+    const arm = await fetch(`${SHARED_NNN}/api/nnn/arm`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: NNN_PASSCODE }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (arm.ok) {
+      const answer = await arm.json().catch(() => null);
+      if (answer && answer.armed) {
+        nnnWrite({ armed: true, since: Number(answer.since) || Date.now(), releaseAt: Number(answer.releaseAt) || 0, wrong: 0, dismissed: 0 });
+        console.log("nnn: season started, switch armed for every device");
+      }
+    }
+  } catch { /* offline; the next minute tries again */ }
 }
 
 async function handleBanter(req, res) {
@@ -3585,6 +3637,8 @@ httpServer.on("error", (err) => {
 
 httpServer.listen(PORT, () => {
   const urls = lanUrls();
+  setInterval(() => { void nnnSeasonTick(); }, 60_000);
+  setTimeout(() => { void nnnSeasonTick(); }, 20_000);
   console.log("");
   console.log("  CAPRI // PROJECT CAPRICORN ONLINE");
   console.log(`  this pc:   http://localhost:${PORT}`);

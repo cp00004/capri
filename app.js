@@ -2444,12 +2444,12 @@ const NNN_PHRASE = /no\s*nut\s*november|nut\s*november\s*mode|\bnbnn\b|\bnnn\b/i
 const NNN_CANCEL = /cancel|stop|end|deactivate|disable|abort|release|unlock/i;
 const NNN_STATUS = /status|how\s*(long|much)|still|remaining|until\s*when/i;
 const BARE_CODE = /^[\s"'.,!?-]*(\d{3,8})[\s"'.,!?-]*$/i;
-// The season has no off switch this year, by request. Any attempt gets this
-// line instead of a release.
 const NNN_NAH = "NAH UH YOU GOONER. The lock stays on until December 1st.";
 
-function nnnSealedNow() {
-  return new Date().getMonth() === 10 || Boolean(nnnLocal?.active) || Boolean(nnnGlobal?.armed);
+// The next November 1st after today: while the season runs that is next year.
+function nnnNextNovember(now = new Date()) {
+  const year = now.getMonth() === 10 ? now.getFullYear() + 1 : now.getFullYear();
+  return new Date(year, 10, 1, 0, 0, 0, 0).getTime();
 }
 
 // One switch, on the public backend, for every device running Capri. Each box
@@ -2575,9 +2575,14 @@ async function nnnSync() {
   const dismissed = Number(local.dismissed || 0) === nnnSeasonAt().end;
   const shouldArm = state.armed && Date.now() < Number(state.releaseAt || 0) && !dismissed;
   if (shouldArm && !local.active) await nativeNoNut("arm");
-  // A shared switch that says "off" is an announcement, not an order: the
-  // calendar put this machine in the season and only the code takes it out.
-  // Releasing here is what made the PC guard die a few seconds after it armed.
+  // The switch went off after the opening days of the season: that is the code
+  // being used somewhere else. Let go here too instead of arguing with it.
+  const opening = Date.now() - nnnSeasonAt().start < 48 * 3600 * 1000;
+  if (!state.armed && !dismissed && !opening && nnnModeAt() === "active" && local.active) {
+    const out = await nativeNoNut("dismiss");
+    if (out) nnnLocal = out;
+    paintNnn();
+  }
   return state;
 }
 
@@ -2607,29 +2612,42 @@ function paintNnn() {
   const cal = nnnModeAt();
   const serverArmed = Boolean(nnnGlobal.armed) && now < Number(nnnGlobal.releaseAt || 0);
   const localActive = Boolean(nnnLocal?.active);
-  const active = localActive || serverArmed || (cal === "active" && !nnnHasShell());
+  // A code release is recorded for the season on every device that hears about
+  // it. The calendar must not paint a timer over a switch that is already off.
+  const dismissed = Number(nnnLocal?.dismissed || 0) === season.end
+    || Number(nnnGlobal?.dismissed || 0) === season.end;
+  const active = !dismissed && (localActive || serverArmed || (cal === "active" && !nnnHasShell()));
   // An arm made before November 1st is stored, not enforced: the dashboard
   // shows the countdown to the start, not a live lock.
-  const mode = active ? (String(nnnLocal?.mode || "") === "before" ? "before" : "active") : cal;
+  const mode = dismissed && cal === "active"
+    ? "off"
+    : active ? (String(nnnLocal?.mode || "") === "before" ? "before" : "active") : cal;
+  const nextStart = nnnNextNovember();
   const blocked = Number(nnnLocal?.blocked ?? nnnGlobal.blocked ?? 0);
   const sites = Boolean(nnnLocal?.sites);
 
   if (nnnHeadlineEl) {
     nnnHeadlineEl.textContent = mode === "active"
       ? "NNN MODE ACTIVE"
-      : mode === "after"
-        ? "NNN MODE COMPLETED"
-        : active ? "NNN MODE ARMED" : "NNN MODE ARMS NOVEMBER 1";
+      : mode === "off"
+        ? "NNN MODE OFF"
+        : mode === "after"
+          ? "NNN MODE COMPLETED"
+          : active ? "NNN MODE ARMED" : "NNN MODE ARMS NOVEMBER 1";
   }
   if (nnnTimerEl) {
     const left = mode === "active"
       ? Math.max(0, (Number(nnnLocal?.releaseAt) || Number(nnnGlobal.releaseAt) || season.end) - now)
       : mode === "before" ? Math.max(0, season.start - now) : 0;
-    nnnTimerEl.textContent = mode === "after" ? "season complete" : nnnSpan(left);
+    nnnTimerEl.textContent = mode === "off"
+      ? `back ${new Date(nextStart).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`
+      : mode === "after" ? "season complete" : nnnSpan(left);
   }
   if (nnnDetailEl) {
     nnnDetailEl.textContent = mode === "active"
       ? (nnnLocal?.message || `Closing 18+ tabs and blocking the site list until ${new Date(season.end).toDateString()}. Keeps running with Capri closed.`)
+      : mode === "off"
+        ? `The code was accepted. The lock is off on every device and puts itself back on ${new Date(nextStart).toDateString()}.`
       : mode === "after"
         ? "December 1st has passed. The lock is off and normal controls are back."
         : "It switches itself on at midnight on November 1st in your local time. Set it up now; the countdown does the rest.";
@@ -2649,7 +2667,7 @@ function paintNnn() {
     nnnGuardEl.style.cursor = guardLink && !sites ? "pointer" : "";
   }
   if (nnnStateEl) {
-    nnnStateEl.textContent = mode === "active" ? "LOCKED" : mode === "after" ? "done" : active ? "armed" : "off";
+    nnnStateEl.textContent = mode === "active" ? "LOCKED" : mode === "after" ? "done" : mode === "off" ? "off" : active ? "armed" : "off";
     nnnStateEl.classList.toggle("bad", mode === "active");
   }  // Before the season: the setup button. During: nothing but the disclosed
   // recovery code. After: nothing at all, settings are normal again.
@@ -2705,35 +2723,42 @@ async function nnnOrder(order) {
     return;
   }
 
-  // The season is sealed: the panel refuses before it even reaches the server.
-  if (nnnSealedNow()) {
-    if (nnnCodeEl) nnnCodeEl.value = "";
-    await sayLocally(NNN_NAH, "disable no nut november");
-    return;
-  }
-  // Release is the recovery path only: the code is the whole gate.
+  // The code opens the season everywhere: this machine first, then the shared
+  // switch, so every device that hears about it stands down too.
   if (!code) {
     showNotice("Deactivation needs the recovery code.", null, null, 6000);
     return;
   }
+  let local = null;
+  if (nnnHasShell()) local = await nativeNoNut("code", code);
+  if (local && local.active === false) {
+    nnnLocal = local;
+    nnnGlobal = { ...nnnGlobal, armed: false, dismissed: nnnSeasonAt().end };
+    const out = await nnnServerOrder("release", code);
+    if (out && out.ok) nnnGlobal = { ...nnnGlobal, ...out, dismissed: nnnSeasonAt().end };
+    if (nnnCodeEl) nnnCodeEl.value = "";
+    paintNnn();
+    showNotice(`${local.message || "Code checked out. Every device is open again."} It comes back by itself next November.`, null, null, 9000);
+    return;
+  }
+  if (local && local.active) {
+    showNotice(local.message || "Wrong code. Nothing changes.", null, null, 7000);
+    return;
+  }
+  // Browser only: the shared switch holds the answer.
   const out = await nnnServerOrder("release", code);
-  if (out && out.ok) {
-    nnnGlobal = out;
-    nnnLocal = await nativeNoNut("release", "", "opened by the recovery code");
-  } else if (!out || nnnNoSharedSwitch(out)) {
-    nnnLocal = await nativeNoNut("code", code);
-    if (nnnLocal?.active) {
-      showNotice(nnnLocal.message || "Wrong code. Nothing changes.", null, null, 7000);
-      return;
-    }
-    nnnGlobal = { ...nnnGlobal, armed: false };
-  } else {
+  if (!out) {
+    showNotice("No way to reach the switch just now. Nothing changes.", null, null, 7000);
+    return;
+  }
+  if (!out.ok) {
     showNotice(out.message || "Wrong code. Nothing changes.", null, null, 7000);
     return;
   }
+  nnnGlobal = { ...out, dismissed: nnnSeasonAt().end };
   if (nnnCodeEl) nnnCodeEl.value = "";
   paintNnn();
-  showNotice(nnnLocal?.message || (out?.message) || "Code checked out. The lock is off.", null, null, 8000);
+  showNotice(`${out.message || "Code checked out. Every device is open again."} It comes back by itself next November.`, null, null, 9000);
 }
 
 document.getElementById("nnnArmBtn")?.addEventListener("click", () => nnnOrder("arm"));
@@ -2844,14 +2869,6 @@ async function handleNoNut(userText) {
     return true;
   }
 
-  // Any attempt to switch it off while the season runs gets the line. A
-  // question about the countdown still answers normally.
-  const askingStatus = NNN_STATUS.test(text);
-  if ((code || (NNN_CANCEL.test(text) && !askingStatus)) && nnnSealedNow()) {
-    await sayLocally(NNN_NAH, userText);
-    return true;
-  }
-
   const status = nnnHasShell() ? await nativeNoNut("status") : null;
   if (status) nnnLocal = status;
   const state = nnnGlobal.armed ? nnnGlobal : ((await nnnSync()) || nnnGlobal);
@@ -2859,29 +2876,33 @@ async function handleNoNut(userText) {
   if (code && !phrase && !state.armed && !status?.awaitingCode) return false;
 
   if (code) {
-    const out = await nnnServerOrder("release", code);
-    if (out && out.ok) {
-      nnnGlobal = out;
-      nnnLocal = await nativeNoNut("release", "", "released by the code you said");
-      if (nnnCodeEl) nnnCodeEl.value = "";
-      paintNnn();
-      await sayLocally(out.message || "Code checked out. Every device is open again.", userText);
-      return true;
-    }
-    if (out && out.status === 403) {
-      await sayLocally(out.message || "Wrong code. Nothing changes.", userText);
-      return true;
-    }
-    // No shared switch, or no server at all: the machine in front still holds
-    // the code, and a correct one really turns the lock off here.
-    const local = await nativeNoNut("code", code);
+    // The machine in front checks the code first; a right one ends the season
+    // here and is then announced to every other device through the switch.
+    let local = null;
+    if (nnnHasShell()) local = await nativeNoNut("code", code);
     if (local && local.active === false) {
       nnnLocal = local;
-      nnnGlobal = { ...nnnGlobal, armed: false };
+      nnnGlobal = { ...nnnGlobal, armed: false, dismissed: nnnSeasonAt().end };
+      const out = await nnnServerOrder("release", code);
+      if (out && out.ok) nnnGlobal = { ...nnnGlobal, ...out };
       if (nnnCodeEl) nnnCodeEl.value = "";
       paintNnn();
+      await sayLocally(`${local.message || "Code checked out."} It comes back by itself next November.`, userText);
+      return true;
     }
-    await sayLocally(local?.message || "That did not work. Still locked.", userText);
+    if (local && local.active) {
+      await sayLocally(local.message || "Wrong code. Nothing changes.", userText);
+      return true;
+    }
+    const out = await nnnServerOrder("release", code);
+    if (out && out.ok) {
+      nnnGlobal = { ...out, dismissed: nnnSeasonAt().end };
+      if (nnnCodeEl) nnnCodeEl.value = "";
+      paintNnn();
+      await sayLocally(`${out.message || "Code checked out. Every device is open again."} It comes back by itself next November.`, userText);
+      return true;
+    }
+    await sayLocally(out?.message || "No way to reach the switch just now. Nothing changes.", userText);
     return true;
   }
 

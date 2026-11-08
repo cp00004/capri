@@ -1735,8 +1735,9 @@ function nnnCheckSchedule(now = new Date()) {
     nnnEnsureHosts();
     return { mode: "before", start, end };
   }
-  // Sealed by request: an earlier release does not survive into the season.
-  if (!nnn.active) nnnActivate({ auto: true, quiet: true });
+  // A code release ends the season for this machine: the calendar must not
+  // switch it back on a minute later.
+  if (!nnn.active && nnn.dismissed !== end) nnnActivate({ auto: true, quiet: true });
   return { mode: "active", start, end };
 }
 
@@ -2341,22 +2342,35 @@ function nnnNah() {
 }
 
 function nnnCancel() {
-  if (!nnn.active) return { ok: true, active: false, message: "Nothing is locked right now." };
-  return nnnNah();
+  if (!nnn.active) return { ok: true, active: false, awaitingCode: false, message: "Nothing is locked right now." };
+  // Cancelling is a request for the code, not a lock attempt: the gateway has
+  // to ask, or she says "cancel" and the season simply ends.
+  return { ok: false, active: true, awaitingCode: true, message: "Then give me the cancellation code." };
 }
 
 function nnnCode(value) {
-  if (!nnn.active) return { ok: true, active: false, message: "Nothing is locked right now." };
-  // The old code still exists for the arm step only. A release attempt is just
-  // another gooner trying the front door.
   const given = String(value || "").replace(/\D/g, "").slice(0, 16);
-  if (!given) return { ok: false, active: true, message: "That is not a code. Say the cancel command and give me the five digits." };
+  if (!given) return { ok: false, active: Boolean(nnn.active), message: "That is not a code. Give me the five digits." };
   nnn.awaitingCode = false;
-  nnn.wrongCodes += 1;
-  if (given === NNN_CODE && !nnnSealed()) {
-    nnnRelease("Code accepted.", { manual: true });
-    return { ok: true, active: false, message: "Code checked out. The lock is gone from this machine and stays gone." };
+  // The code is the owner's key, all year. A right code opens this machine for
+  // the rest of the season and records that choice so the calendar cannot undo
+  // it; a wrong code changes nothing.
+  if (given === NNN_CODE) {
+    if (nnn.active) nnnRelease("Code accepted.", { manual: true });
+    else {
+      nnn.dismissed = nnnSeason().end;
+      nnnSave();
+      logLine("nnn: code accepted while nothing was armed");
+    }
+    return {
+      ok: true,
+      active: false,
+      dismissed: Number(nnn.dismissed) || 0,
+      message: "Code checked out. The lock is gone from this machine and stays gone until next November.",
+    };
   }
+  if (!nnn.active) return { ok: false, active: false, message: "That code is wrong, and nothing was locked anyway." };
+  nnn.wrongCodes += 1;
   nnnSave();
   return nnnNah();
 }
@@ -2364,7 +2378,9 @@ function nnnCode(value) {
 function nnnStatus() {
   const now = new Date();
   const { start, end } = nnnSeason(now);
-  const mode = now.getTime() >= end ? "after" : now.getTime() < start ? "before" : "active";
+  const dismissed = Number(nnn.dismissed) === end;
+  const inSeason = now.getTime() >= start && now.getTime() < end;
+  const mode = now.getTime() >= end ? "after" : now.getTime() < start ? "before" : dismissed ? "off" : "active";
   const msLeft = Math.max(0, (mode === "before" ? start : Number(nnn.releaseAt) || end) - now.getTime());
   const days = Math.max(0, Math.ceil(msLeft / 86_400_000));
   const hours = Math.max(0, Math.floor(msLeft / 3_600_000));
@@ -2385,16 +2401,25 @@ function nnnStatus() {
     awaitingCode: nnn.awaitingCode,
     dismissed: Number(nnn.dismissed) || 0,
     completed: Number(nnn.completed) || 0,
+    nextStart: nnnNextNovember(now),
     message: nnn.active && mode === "before"
       ? `NNN Mode is armed and starts by itself on November 1st - ${days} day${days === 1 ? "" : "s"} to go.`
       : nnn.active
       ? `NNN Mode active until ${new Date(Number(nnn.releaseAt) || end).toDateString()} - ${days} day${days === 1 ? "" : "s"} left. ${nnn.blocked} blocked attempt${nnn.blocked === 1 ? "" : "s"}.`
+      : inSeason && dismissed
+        ? `NNN Mode is off. The code was used, and the lock comes back by itself on ${new Date(nnnNextNovember(now)).toDateString()}.`
       : mode === "before"
         ? `NNN Mode starts on November 1st - ${days} day${days === 1 ? "" : "s"} to go.`
         : mode === "after"
           ? "NNN Mode completed. Normal protection is back."
           : "No Nut November is not armed.",
   };
+}
+
+// The next November 1st after today: while the season runs that is next year.
+function nnnNextNovember(from = new Date()) {
+  const year = from.getMonth() === 10 ? from.getFullYear() + 1 : from.getFullYear();
+  return new Date(year, 10, 1, 0, 0, 0, 0).getTime();
 }
 
 // ── The hidden guard ─────────────────────────────────────────────────────────
@@ -2458,9 +2483,21 @@ ipcMain.handle("capri-nnn", async (_event, payload) => {
     return nnn.active ? nnnStatus() : nnnActivate();
   }
   if (action === "release") {
-    if (nnnSealed()) return nnnNah();
-    nnnRelease(String(payload?.reason || "released by Capri's server"));
-    return { ok: true, active: false, message: "Lock is off." };
+    // The code was already checked by the caller (this page or the shared
+    // switch), so a release is an order now, not an attempt.
+    if (nnn.active) nnnRelease(String(payload?.reason || "released with the code"), { manual: true });
+    else if (nnn.dismissed !== nnnSeason().end) { nnn.dismissed = nnnSeason().end; nnnSave(); }
+    return nnnStatus();
+  }
+  // The shared switch was released elsewhere: stand down without asking for
+  // the code again on every device.
+  if (action === "dismiss") {
+    if (nnn.active) nnnRelease(String(payload?.reason || "the switch was turned off"), { manual: true, quiet: true });
+    else {
+      nnn.dismissed = nnnSeason().end;
+      nnnSave();
+    }
+    return nnnStatus();
   }
   // Her own screen test: the cover, over this window, with nothing armed.
   if (action === "veil") {
