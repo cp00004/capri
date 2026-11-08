@@ -4905,6 +4905,7 @@ async function boot() {
     }
   }
   initUpdates();
+  window.__capriBootOk = true;
 }
 
 /* ---------------------------------------------------------------- updates */

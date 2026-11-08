@@ -34,6 +34,43 @@
     }
   })();
 </script>
+<script>
+  // Boot watchdog: a failed boot must never leave a dead black screen.
+  (function () {
+    function snagScreen() {
+      if (document.getElementById('capri-snag')) return;
+      var d = document.createElement('div');
+      d.id = 'capri-snag';
+      d.setAttribute('style', 'position:fixed;inset:0;background:#07000c;color:#fbf0f0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;font:16px system-ui,sans-serif;z-index:99999;padding:24px;text-align:center;');
+      var t = document.createElement('div');
+      t.textContent = 'CAPRI HIT A SNAG';
+      t.setAttribute('style', 'font-size:20px;letter-spacing:.2em;');
+      var n = document.createElement('div');
+      n.textContent = 'She stumbled while loading. Reload her and she comes right back - your sign-in and memory are safe.';
+      n.setAttribute('style', 'color:#a98fa4;max-width:320px;line-height:1.5;');
+      var b = document.createElement('button');
+      b.textContent = 'RELOAD CAPRI';
+      b.setAttribute('style', 'background:#ff0b52;color:#fff;border:0;border-radius:999px;padding:13px 30px;font:700 14px system-ui,sans-serif;letter-spacing:.15em;cursor:pointer;');
+      b.addEventListener('click', function () { location.reload(); });
+      d.appendChild(t); d.appendChild(n); d.appendChild(b);
+      (document.body || document.documentElement).appendChild(d);
+    }
+    window.addEventListener('error', function (e) {
+      if (window.__capriBootOk) return;
+      if (document.readyState !== 'complete') return;
+      snagScreen();
+    }, true);
+    window.addEventListener('load', function () {
+      setTimeout(function () {
+        if (window.__capriBootOk) return;
+        var mic = document.querySelector('.mic');
+        var stage = document.querySelector('.stage');
+        var ok = mic && mic.offsetWidth > 0 && stage && stage.offsetWidth > 0;
+        if (!ok) snagScreen();
+      }, 6000);
+    });
+  })();
+</script>
 <meta name="mobile-web-app-capable" content="yes" />
 <title>CAPRI // Project Capricorn</title>
 <link rel="canonical" href="https://cp00004.github.io/capri/" />
@@ -44,7 +81,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=4.8.6" />
+<link rel="stylesheet" href="styles.css?v=4.8.7" />
 </head>
 <body data-state="idle">
 <div class="grain" aria-hidden="true"></div>
@@ -590,7 +627,7 @@
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
-<script src="dev.js?v=4.8.6"></script>
-<script src="app.js?v=4.8.6"></script>
+<script src="dev.js?v=4.8.7"></script>
+<script src="app.js?v=4.8.7"></script>
 </body>
 </html>
