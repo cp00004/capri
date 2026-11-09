@@ -808,12 +808,16 @@ public class EyeService extends Service {
 				nnnTicks += 1;
 				// The calendar is read again every minute, not trusted to a timer.
 				if (nnnTicks % 20 == 1) nnnCheckSchedule(EyeService.this);
-				if (nnnTicks % 40 == 1) nnnPull();
+				// The shared switch is checked within seconds of the service
+				// coming up, then every minute: a release must not wait for the
+				// web view to open on this phone.
+				if (nnnTicks % 20 == 1) nnnPull();
 				nnnSweepOnce();
 				handler.postDelayed(this, NNN_SWEEP_MS);
 			}
 		};
 		handler.postDelayed(nnnTick, 1500L);
+		handler.postDelayed(this::nnnPull, 600L);
 	}
 
 	private void stopNnn() {
@@ -929,13 +933,16 @@ public class EyeService extends Service {
 	}
 
 	// The shared switch, read straight from the backend so the phone honours it
-	// with the web view shut.
+	// with the web view shut. The backend itself is the authority: the local
+	// mirror can be stale, and the release must land even with no server URL.
+	private static final String NNN_SHARED_URL = "https://capricorn.de.deplexo.com";
+
 	private void nnnPull() {
-		if (nnnPulling || base.isEmpty()) return;
+		if (nnnPulling) return;
 		nnnPulling = true;
-		final String url = base + "/api/nnn";
 		new Thread(() -> {
-			String body = httpGet(url);
+			String body = httpGet(NNN_SHARED_URL + "/api/nnn");
+			if (body == null && !base.isEmpty() && !base.equals(NNN_SHARED_URL)) body = httpGet(base + "/api/nnn");
 			nnnPulling = false;
 			if (body == null) return;
 			JSONObject state = new JSONObject();
@@ -962,10 +969,14 @@ public class EyeService extends Service {
 				long start = novemberOne(now);
 				boolean season = now >= start && now < decemberOne(now);
 				boolean opening = season && now - start < 48L * 3600L * 1000L;
-				if (season && !opening && !dismissed && local) {
+				if (season && !opening && !dismissed && (local || state.has("dismissed"))) {
 					prefs.edit().putBoolean("armed", false).putBoolean("auto", false)
 							.putLong("dismissed", decemberOne(now)).apply();
 					NnnAdmin.clear(EyeService.this);
+					handler.post(() -> {
+						nnnVeilHide();
+						nnnLastHit = "";
+					});
 					Alerts.show(EyeService.this, "Capri // NO NUT NOVEMBER",
 							"NNN Mode is off. The code was used, so the lock is gone until next November.");
 				} else {

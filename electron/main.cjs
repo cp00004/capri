@@ -1184,10 +1184,16 @@ function nnnEyeLine() {
   const { start, end } = nnnSeason(new Date());
   const mode = now >= end ? "after" : now < start ? "before" : "active";
   if (mode === "after") return "";
+  // The timer is a promise about the lock, so it only belongs on screen while
+  // the lock is really on. A released season has nothing left to count down.
+  if (Number(nnn.dismissed) === end && !nnn.active) {
+    return mode === "active" ? `NNN off - back ${new Date(nnnNextNovember(new Date(now))).toDateString()}` : "";
+  }
   const left = (mode === "before" ? start : end) - now;
   const days = Math.floor(left / 86_400_000);
   const hours = Math.floor((left % 86_400_000) / 3_600_000);
   if (mode === "before") return nnn.active ? `NNN armed - starts in ${days}d ${hours}h` : `NNN starts in ${days}d ${hours}h`;
+  if (!nnn.active) return "";
   return `NNN ${days}d ${hours}h left - ${nnn.blocked} blocked`;
 }
 
@@ -2271,6 +2277,7 @@ function nnnRelease(reason, opts = {}) {
   nnnSave();
   logLine(`nnn: released (${reason})`);
   setTimeout(nnnEnsureHosts, 1500);
+  sendEyeNnn();
   if (!opts.quiet) notify("Capri // NO NUT NOVEMBER", opts.completed ? `${reason} NNN Mode completed.` : reason);
 }
 
@@ -2486,7 +2493,7 @@ ipcMain.handle("capri-nnn", async (_event, payload) => {
     // The code was already checked by the caller (this page or the shared
     // switch), so a release is an order now, not an attempt.
     if (nnn.active) nnnRelease(String(payload?.reason || "released with the code"), { manual: true });
-    else if (nnn.dismissed !== nnnSeason().end) { nnn.dismissed = nnnSeason().end; nnnSave(); }
+    else if (nnn.dismissed !== nnnSeason().end) { nnn.dismissed = nnnSeason().end; nnnSave(); sendEyeNnn(); }
     return nnnStatus();
   }
   // The shared switch was released elsewhere: stand down without asking for
@@ -2496,6 +2503,7 @@ ipcMain.handle("capri-nnn", async (_event, payload) => {
     else {
       nnn.dismissed = nnnSeason().end;
       nnnSave();
+      sendEyeNnn();
     }
     return nnnStatus();
   }
