@@ -2357,3 +2357,13 @@ body[data-holiday] .hex-glow { filter: none; }
   .toast { top: calc(68px + env(safe-area-inset-top, 0px)); bottom: auto; }
 }
 .nnn-badge { white-space: nowrap; }
+
+/* very narrow: status chip yields to NNN so the owner recorder fits */
+@media (max-width: 400px) {
+  .top-status .status-chip { display: none; }
+  .top { gap: 6px; }
+  .top-right { gap: 5px; }
+  .icon { width: 32px; height: 32px; border-radius: 10px; }
+  .rec-sheet .rec-hero { gap: 8px; }
+  .rec-time { font-size: 22px; }
+}
