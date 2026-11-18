@@ -3465,6 +3465,17 @@ function paintAvatar(dataUrl) {
 
 const UPDATE_LOG = [
   {
+    version: "4.9.0", date: "2026-11-18", platform: "both",
+    title: "Studio glass restyle + my side recorder",
+    points: [
+      "Every screen rebuilt - header, portrait frame, dock, settings, vault, download, update log",
+      "New type system (Outfit + JetBrains Mono) and calmer glass surfaces",
+      "PC owner tool: MY SIDE records your mic and everything playing on the PC into one file",
+      "Recordings save to Videos\\Capri with open and folder buttons",
+      "Download sheet and narrow phone header fixed so nothing crowds",
+    ],
+  },
+  {
     version: "4.8.3", date: "2026-11-05", platform: "both",
     title: "Settings rework + appearance engine",
     points: [
