@@ -2699,7 +2699,9 @@ function paintNnn() {
     nnnBadgeEl.classList.toggle("hidden", !show);
     if (show) {
       const left = nnnTimerEl?.textContent || "";
-      nnnBadgeEl.textContent = mode === "before" ? `NNN IN ${left}` : `NNN ${left}`;
+      // Narrow headers only have room for the leading unit.
+      const compact = window.innerWidth < 560 ? left.split(/\s+/)[0] : left;
+      nnnBadgeEl.textContent = mode === "before" ? `NNN IN ${compact}` : `NNN ${compact}`;
       nnnBadgeEl.title = mode === "before"
         ? "No Nut November starts at midnight. Tap to set it up."
         : "No Nut November is live. Tap for the dashboard.";

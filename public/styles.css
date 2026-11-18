@@ -2344,3 +2344,16 @@ body[data-holiday]:not([data-holiday="none"]) .mic {
 }
 body[data-holiday] .hex-frame,
 body[data-holiday] .hex-glow { filter: none; }
+
+/* header compression + mobile toast: keep the dock reachable */
+@media (max-width: 560px) {
+  .brand-sub { display: none; }
+  .top-status .status-chip { padding: 0 8px; gap: 6px; }
+  .top-status .status-chip .tag { display: none; }
+  .top { gap: 8px; padding-left: 14px; padding-right: 14px; }
+  .top-right { gap: 6px; }
+  .icon { width: 34px; height: 34px; }
+  .nnn-badge { font-size: 9px; padding: 0 9px; }
+  .toast { top: calc(68px + env(safe-area-inset-top, 0px)); bottom: auto; }
+}
+.nnn-badge { white-space: nowrap; }
