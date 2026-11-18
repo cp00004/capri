@@ -112,6 +112,18 @@ const el = {
   updateFill: $("#updateFill"),
   updatePct: $("#updatePct"),
   updateAction: $("#updateAction"),
+  recBtn: $("#recBtn"),
+  recorder: $("#recorder"),
+  recHero: $("#recHero"),
+  recTimer: $("#recTimer"),
+  recStatus: $("#recStatus"),
+  recMicBar: $("#recMicBar"),
+  recSysBar: $("#recSysBar"),
+  recStart: $("#recStart"),
+  recPause: $("#recPause"),
+  recStop: $("#recStop"),
+  recFolder: $("#recFolder"),
+  recList: $("#recList"),
 };
 
 // Where the API lives. The Node build serves this page, so it can use its own
@@ -140,7 +152,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.8.4";
+const APP_VERSION = "4.9.0";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -3321,7 +3333,7 @@ showSheetTab(SHEET_TAB_DEFAULT);
 
 /* ----------------------------------------------------- appearance engine */
 
-const ACCENT_DEFAULT = "#ff0b52";
+const ACCENT_DEFAULT = "#ff2f63";
 const ACCENT_KEY = "capri.accent";
 const HOLIDAY_KEY = "capri.holiday";
 
@@ -5078,5 +5090,332 @@ window.capriDevBridge = {
   say: (text, userText) => sayLocally(text, userText),
 };
 
+/* ---------------------------------------------------------------- my side */
+
+// Owner-only capture: microphone plus every sound coming out of the PC, mixed
+// into one file. The button stays hidden on builds whose profile has no owner
+// gate, and the main process refuses the IPC anyway.
+const mySide = {
+  owner: false,
+  active: false,
+  paused: false,
+  starting: false,
+  recorder: null,
+  chunks: [],
+  streams: [],
+  ctx: null,
+  dest: null,
+  analysers: {},
+  bars: {},
+  startedAt: 0,
+  pausedAt: 0,
+  pausedTotal: 0,
+  elapsed: 0,
+  tick: null,
+  raf: null,
+};
+
+const MY_SIDE_MIME = (() => {
+  if (typeof MediaRecorder === "undefined") return "";
+  return ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus"]
+    .find((m) => MediaRecorder.isTypeSupported(m)) || "";
+})();
+
+function mySideClock(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const p = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${p(m)}:${p(s)}` : `${p(m)}:${p(s)}`;
+}
+
+function mySideNow() {
+  if (!mySide.active) return mySide.elapsed;
+  const now = mySide.paused ? mySide.pausedAt : performance.now();
+  return now - mySide.startedAt - mySide.pausedTotal;
+}
+
+function mySideStatus(text) {
+  if (el.recStatus) el.recStatus.textContent = text;
+}
+
+function mySideSetTimer(ms) {
+  if (el.recTimer) el.recTimer.textContent = mySideClock(ms);
+}
+
+function mySideMix(ctx, stream, key) {
+  const source = ctx.createMediaStreamSource(stream);
+  source.connect(mySide.dest);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.smoothingTimeConstant = 0.7;
+  source.connect(analyser);
+  mySide.analysers[key] = { analyser, data: new Uint8Array(analyser.fftSize) };
+}
+
+function mySideMeterLoop() {
+  for (const key of ["mic", "sys"]) {
+    const node = mySide.analysers[key];
+    const bar = key === "mic" ? el.recMicBar : el.recSysBar;
+    if (!node || !bar) continue;
+    node.analyser.getByteTimeDomainData(node.data);
+    let sum = 0;
+    for (let i = 0; i < node.data.length; i += 1) {
+      const v = (node.data[i] - 128) / 128;
+      sum += v * v;
+    }
+    const rms = Math.sqrt(sum / node.data.length);
+    const level = Math.min(1, rms * 3.4);
+    bar.style.width = `${Math.round(level * 100)}%`;
+  }
+  mySide.raf = requestAnimationFrame(mySideMeterLoop);
+}
+
+function mySideTeardown() {
+  if (mySide.raf) cancelAnimationFrame(mySide.raf);
+  if (mySide.tick) clearInterval(mySide.tick);
+  mySide.raf = null;
+  mySide.tick = null;
+  for (const stream of mySide.streams) {
+    try { stream.getTracks().forEach((t) => t.stop()); } catch { /* already gone */ }
+  }
+  mySide.streams = [];
+  mySide.analysers = {};
+  try { mySide.ctx?.close(); } catch { /* already closed */ }
+  mySide.ctx = null;
+  mySide.dest = null;
+  mySide.recorder = null;
+  if (el.recMicBar) el.recMicBar.style.width = "0%";
+  if (el.recSysBar) el.recSysBar.style.width = "0%";
+  el.recBtn?.classList.remove("recording");
+  el.recHero?.classList.remove("live", "paused");
+  el.recStart?.classList.remove("hidden");
+  el.recPause?.classList.add("hidden");
+  el.recStop?.classList.add("hidden");
+  if (el.recPause) el.recPause.textContent = "Pause";
+  mySide.active = false;
+  mySide.paused = false;
+  mySide.starting = false;
+}
+
+async function mySideFinish() {
+  const type = mySide.recorder?.mimeType || MY_SIDE_MIME || "audio/webm";
+  const chunks = mySide.chunks.slice();
+  const ms = mySide.elapsed;
+  mySide.chunks = [];
+  mySideTeardown();
+  mySideSetTimer(ms);
+
+  if (!chunks.length) {
+    mySideStatus("Nothing was captured.");
+    return;
+  }
+  mySideStatus("Saving…");
+  try {
+    const blob = new Blob(chunks, { type });
+    const data = await blob.arrayBuffer();
+    const saved = await window.capriNative.recSave({ data, mime: type, seconds: Math.round(ms / 1000) });
+    if (!saved?.ok) {
+      mySideStatus(`Could not save: ${saved?.error || "unknown"}`);
+      return;
+    }
+    mySideStatus(`${saved.name} saved`);
+    mySideSetTimer(0);
+    showNotice(`Saved ${mySideClock(ms)} of your side to Videos\\Capri.`, null, null, 6000);
+    mySideRefresh();
+  } catch (err) {
+    mySideStatus(`Could not save: ${err?.message || err}`);
+  }
+}
+
+async function mySideStart() {
+  if (!mySide.owner || mySide.active || mySide.starting) return;
+  mySide.starting = true;
+  mySide.elapsed = 0;
+  mySideSetTimer(0);
+  if (el.recStart) el.recStart.disabled = true;
+  mySideStatus("Opening the microphone…");
+
+  let mic = null;
+  try {
+    mic = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
+  } catch { /* keep going with PC audio alone */ }
+
+  mySideStatus("Capturing PC audio…");
+  let sys = null;
+  let missing = "";
+  try {
+    const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    display.getVideoTracks().forEach((track) => track.stop());
+    const audio = display.getAudioTracks();
+    if (audio.length) sys = new MediaStream(audio);
+    else {
+      display.getTracks().forEach((track) => track.stop());
+      missing = "PC audio unavailable";
+    }
+  } catch (err) {
+    missing = String(err?.message || "PC audio unavailable");
+  }
+
+  if (!mic && !sys) {
+    mySideStatus(missing || "No audio source could be opened.");
+    if (el.recStart) el.recStart.disabled = false;
+    mySide.starting = false;
+    return;
+  }
+
+  mySide.streams = [mic, sys].filter(Boolean);
+  mySide.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  try { await mySide.ctx.resume(); } catch { /* already running */ }
+  mySide.dest = mySide.ctx.createMediaStreamDestination();
+  if (mic) mySideMix(mySide.ctx, mic, "mic");
+  if (sys) mySideMix(mySide.ctx, sys, "sys");
+
+  try {
+    mySide.recorder = MY_SIDE_MIME
+      ? new MediaRecorder(mySide.dest.stream, { mimeType: MY_SIDE_MIME, audioBitsPerSecond: 160000 })
+      : new MediaRecorder(mySide.dest.stream);
+  } catch (err) {
+    mySideStatus(`Recorder unavailable: ${err?.message || err}`);
+    mySideTeardown();
+    if (el.recStart) el.recStart.disabled = false;
+    return;
+  }
+
+  mySide.chunks = [];
+  mySide.recorder.ondataavailable = (event) => {
+    if (event.data && event.data.size) mySide.chunks.push(event.data);
+  };
+  mySide.recorder.onstop = () => {
+    if (!mySide.elapsed) {
+      mySide.elapsed = Math.max(0, performance.now() - mySide.startedAt - mySide.pausedTotal);
+    }
+    mySideFinish();
+  };
+  mySide.recorder.start(1000);
+
+  mySide.active = true;
+  mySide.paused = false;
+  mySide.starting = false;
+  mySide.startedAt = performance.now();
+  mySide.pausedTotal = 0;
+  if (el.recStart) el.recStart.disabled = false;
+
+  el.recStart?.classList.add("hidden");
+  el.recPause?.classList.remove("hidden");
+  el.recStop?.classList.remove("hidden");
+  el.recBtn?.classList.add("recording");
+  el.recHero?.classList.add("live");
+  el.recHero?.classList.remove("paused");
+
+  mySideStatus(
+    mic && sys ? "Recording mic + PC audio"
+      : mic ? "Recording mic · PC audio unavailable"
+        : "Recording PC audio · mic unavailable"
+  );
+
+  mySide.tick = setInterval(() => {
+    const now = mySideNow();
+    mySideSetTimer(now);
+  }, 250);
+  mySideMeterLoop();
+}
+
+function mySidePause() {
+  if (!mySide.active || !mySide.recorder) return;
+  if (mySide.paused) {
+    mySide.recorder.resume();
+    mySide.pausedTotal += performance.now() - mySide.pausedAt;
+    mySide.paused = false;
+    el.recHero?.classList.remove("paused");
+    el.recHero?.classList.add("live");
+    if (el.recPause) el.recPause.textContent = "Pause";
+    mySideStatus("Recording mic + PC audio");
+  } else {
+    mySide.recorder.pause();
+    mySide.pausedAt = performance.now();
+    mySide.paused = true;
+    el.recHero?.classList.add("paused");
+    el.recHero?.classList.remove("live");
+    if (el.recPause) el.recPause.textContent = "Resume";
+    mySideStatus("Paused");
+  }
+}
+
+function mySideStop() {
+  if (!mySide.active || !mySide.recorder) return;
+  mySide.elapsed = mySideNow();
+  mySide.active = false;
+  mySideStatus("Finishing…");
+  try { mySide.recorder.stop(); } catch { mySideTeardown(); }
+}
+
+async function mySideRefresh() {
+  if (!mySide.owner || !el.recList || !window.capriNative?.recList) return;
+  let rows = [];
+  try { rows = await window.capriNative.recList(); } catch { rows = []; }
+  el.recList.replaceChildren();
+  if (!rows.length) {
+    const empty = document.createElement("p");
+    empty.className = "hint";
+    empty.textContent = "No recordings yet.";
+    el.recList.appendChild(empty);
+    return;
+  }
+  for (const row of rows) {
+    const line = document.createElement("div");
+    line.className = "rec-row";
+
+    const name = document.createElement("span");
+    name.className = "rec-name";
+    name.textContent = row.name;
+
+    const when = new Date(row.mtime);
+    const meta = document.createElement("span");
+    meta.className = "rec-meta";
+    meta.textContent = `${(row.size / 1048576).toFixed(1)} MB · ${when.toLocaleDateString([], { month: "short", day: "numeric" })} ${when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "pill";
+    open.textContent = "Open";
+    open.addEventListener("click", () => window.capriNative.recOpen(row.file));
+
+    const reveal = document.createElement("button");
+    reveal.type = "button";
+    reveal.className = "pill";
+    reveal.textContent = "Folder";
+    reveal.addEventListener("click", () => window.capriNative.recReveal(row.file));
+
+    line.append(name, meta, open, reveal);
+    el.recList.appendChild(line);
+  }
+}
+
+async function initMySide() {
+  if (!IS_DESKTOP_APP || !window.capriNative?.recOwner) return;
+  try { mySide.owner = await window.capriNative.recOwner(); } catch { mySide.owner = false; }
+  if (!mySide.owner) return;
+
+  el.recBtn?.classList.remove("hidden");
+  el.recBtn?.addEventListener("click", () => {
+    openSheet(el.recorder);
+    if (!mySide.active) mySideStatus("Ready · microphone + PC audio");
+    mySideRefresh();
+  });
+  el.recStart?.addEventListener("click", mySideStart);
+  el.recPause?.addEventListener("click", mySidePause);
+  el.recStop?.addEventListener("click", mySideStop);
+  el.recFolder?.addEventListener("click", () => window.capriNative.recReveal(""));
+}
+
 nnnStartSync();
+initMySide();
 boot();

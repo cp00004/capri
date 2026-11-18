@@ -80,36 +80,59 @@
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=4.8.9" />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css?v=4.9.0" />
 </head>
 <body data-state="idle">
 <div class="grain" aria-hidden="true"></div>
 <div class="glow" aria-hidden="true"></div>
 
 <header class="top">
-    <button id="downloadBtn" class="icon" type="button" aria-label="Download Capri" title="Download Capri" data-open="downloadSidebar">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16v-8M8 12l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-    </button>
-  <span class="dot" id="stateDot" aria-hidden="true"></span>
-  <span class="tag" id="stateTag">online</span>
-  <button id="nnnBadge" class="nnn-badge hidden" type="button" title="No Nut November">NNN</button>
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">
+      <svg viewBox="0 0 32 32">
+        <circle cx="16" cy="16" r="13.2" fill="none" stroke="currentColor" stroke-width="1.1" opacity=".35"/>
+        <path d="M21.2 11.4a6.6 6.6 0 1 0 0 9.2" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"/>
+        <circle cx="16" cy="16" r="1.6" fill="currentColor"/>
+      </svg>
+    </span>
+    <span class="brand-copy">
+      <span class="brand-name">Capri</span>
+      <span class="brand-sub">Project Capricorn</span>
+    </span>
+  </div>
+  <div class="top-status">
+    <span class="status-chip">
+      <span class="dot" id="stateDot" aria-hidden="true"></span>
+      <span class="tag" id="stateTag">online</span>
+    </span>
+    <button id="nnnBadge" class="nnn-badge hidden" type="button" title="No Nut November">NNN</button>
+  </div>
   <div class="top-right">
-  <button id="updatesBtn" class="icon" type="button" aria-label="Update log" title="Update log">
-    <svg class="scroll-svg" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M7 4h9a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
-      <path class="scroll-roll" d="M7 4a2 2 0 0 0-2 2v1h4V4H7Zm0 13v3h9a3 3 0 0 0 3-3h-12Z" fill="currentColor" opacity="0.85"/>
-      <path d="M9 9h6M9 12.5h4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" class="scroll-lines"/>
-    </svg>
-  </button>
-  <button id="settingsBtn" class="icon gear-icon" type="button" aria-label="Settings" aria-expanded="false">
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <g class="gear-spin">
-        <path d="M12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Zm8.4 3.4c0-.5 0-1-.1-1.5l2-1.5-2-3.4-2.3 1a8 8 0 0 0-2.6-1.5L14.9 2h-4l-.5 2.6a8 8 0 0 0-2.6 1.5l-2.3-1-2 3.4 2 1.5a8.3 8.3 0 0 0 0 3l-2 1.5 2 3.4 2.3-1a8 8 0 0 0 2.6 1.5l.5 2.6h4l.5-2.6a8 8 0 0 0 2.6-1.5l2.3 1 2-3.4-2-1.5c.1-.5.1-1 .1-1.5Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
-        <circle cx="12" cy="12" r="1.6" fill="currentColor"/>
-      </g>
-    </svg>
-  </button>
+    <button id="recBtn" class="icon rec-btn hidden" type="button" aria-label="My side recorder" title="Record my side">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/>
+        <circle class="rec-dot" cx="12" cy="12" r="3.2" fill="currentColor"/>
+      </svg>
+    </button>
+    <button id="downloadBtn" class="icon" type="button" aria-label="Download Capri" title="Download Capri" data-open="downloadSidebar">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v10M7.8 11.4 12 15.6l4.2-4.2M5 19h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button id="updatesBtn" class="icon" type="button" aria-label="Update log" title="Update log">
+      <svg class="scroll-svg" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 4h9a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+        <path class="scroll-roll" d="M7 4a2 2 0 0 0-2 2v1h4V4H7Zm0 13v3h9a3 3 0 0 0 3-3h-12Z" fill="currentColor" opacity="0.8"/>
+        <path d="M9 9h6M9 12.5h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" class="scroll-lines"/>
+      </svg>
+    </button>
+    <button id="settingsBtn" class="icon gear-icon" type="button" aria-label="Settings" aria-expanded="false">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <g class="gear-spin">
+          <path d="M12 8.6a3.4 3.4 0 1 0 0 6.8 3.4 3.4 0 0 0 0-6.8Zm8.4 3.4c0-.5 0-1-.1-1.5l2-1.5-2-3.4-2.3 1a8 8 0 0 0-2.6-1.5L14.9 2h-4l-.5 2.6a8 8 0 0 0-2.6 1.5l-2.3-1-2 3.4 2 1.5a8.3 8.3 0 0 0 0 3l-2 1.5 2 3.4 2.3-1a8 8 0 0 0 2.6 1.5l.5 2.6h4l.5-2.6a8 8 0 0 0 2.6-1.5l2.3 1 2-3.4-2-1.5c.1-.5.1-1 .1-1.5Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>
+          <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+        </g>
+      </svg>
+    </button>
   </div>
 </header>
 <main class="stage">
@@ -132,25 +155,31 @@
 </main>
 
 <footer class="dock">
-  <div class="heard" id="heard"></div>
-  <div class="subtitle" id="subtitle" aria-live="polite"></div>
-  <button id="micBtn" class="mic" type="button" aria-label="Tap to talk">
-    <span class="mic-rings" aria-hidden="true"></span>
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z"/>
-      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-      <path d="M12 17.5V21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
-    </svg>
-  </button>
-  <div class="dock-row">
-    <button id="signInPill" class="pill accent hidden" type="button">CONTINUE WITH GOOGLE</button>
-    <button id="kbBtn" class="pill" type="button">KEYBOARD</button>
+  <div class="dock-text">
+    <div class="heard" id="heard"></div>
+    <div class="subtitle" id="subtitle" aria-live="polite"></div>
+  </div>
+  <div class="console">
+    <button id="micBtn" class="mic" type="button" aria-label="Tap to talk">
+      <span class="mic-rings" aria-hidden="true"></span>
+      <span class="mic-core">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3.2a2.9 2.9 0 0 0-2.9 2.9v5.6a2.9 2.9 0 0 0 5.8 0V6.1A2.9 2.9 0 0 0 12 3.2Z"/>
+          <path d="M6 10.8a6 6 0 0 0 12 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          <path d="M12 16.8v3.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+      </span>
+    </button>
+    <div class="dock-row">
+      <button id="signInPill" class="pill accent hidden" type="button">Continue with Google</button>
+      <button id="kbBtn" class="pill" type="button">Keyboard</button>
+    </div>
   </div>
 </footer>
 
 <form id="kbForm" class="kb-sheet hidden" autocomplete="off">
-  <input id="kbInput" type="text" placeholder="type it, choom..." enterkeyhint="send" />
-  <button class="pill" type="submit">SEND</button>
+  <input id="kbInput" type="text" placeholder="Message Capri…" enterkeyhint="send" />
+  <button class="pill accent" type="submit">Send</button>
 </form>
 
 <!-- ================================================= settings -->
@@ -248,14 +277,14 @@
         </select>
         <button id="glitchTest" class="pill" type="button">SURGE</button>
       </div>
-      <p class="hint">Neon arcs, torn frames and signal corruption. Off is calmer for photosensitive eyes.</p>
+      <p class="hint">A soft frame jolt when her signal slips. Off keeps her completely still.</p>
     </div>
 
     <div class="field mobile-only" data-sheet-tab="appearance">
       <span class="label">accent color</span>
       <div class="row wrap">
         <input id="accentWheel" type="color" class="color-wheel" aria-label="Pick an accent color" />
-        <input id="accentHex" class="text hex" type="text" maxlength="7" spellcheck="false" placeholder="#ff0b52" />
+        <input id="accentHex" class="text hex" type="text" maxlength="7" spellcheck="false" placeholder="#ff2f63" />
         <button id="accentApply" class="pill" type="button">APPLY</button>
         <button id="accentReset" class="pill" type="button">DEFAULT</button>
       </div>
@@ -420,6 +449,42 @@
   </div>
   <div class="sheet-body">
     <div id="updatesList" class="updates-list"></div>
+  </div>
+</section>
+
+<!-- ================================================= my side recorder (owner only) -->
+<section id="recorder" class="sheet rec-sheet hidden" aria-label="My side recorder">
+  <div class="sheet-head">
+    <h2>MY SIDE</h2>
+    <button class="icon" type="button" data-close="recorder" aria-label="Close">&times;</button>
+  </div>
+  <div class="sheet-body">
+    <div class="rec-hero" id="recHero">
+      <span class="rec-live" id="recPulse" aria-hidden="true"></span>
+      <span class="rec-time" id="recTimer">00:00</span>
+      <span class="rec-state" id="recStatus">Ready · microphone + PC audio</span>
+    </div>
+    <div class="rec-meters" aria-hidden="true">
+      <div class="rec-meter">
+        <span>MIC</span>
+        <div class="rec-bar"><i id="recMicBar"></i></div>
+      </div>
+      <div class="rec-meter">
+        <span>PC AUDIO</span>
+        <div class="rec-bar"><i id="recSysBar"></i></div>
+      </div>
+    </div>
+    <div class="row wrap rec-actions">
+      <button id="recStart" class="pill accent" type="button">Start recording</button>
+      <button id="recPause" class="pill hidden" type="button">Pause</button>
+      <button id="recStop" class="pill hidden" type="button">Stop &amp; save</button>
+      <button id="recFolder" class="pill" type="button">Open folder</button>
+    </div>
+    <div class="field">
+      <span class="label">recordings on this PC</span>
+      <div id="recList" class="rec-list"><p class="hint">No recordings yet.</p></div>
+    </div>
+    <p class="hint">Your microphone and everything playing on this PC are mixed into one file and saved to <span class="mono">Videos\Capri</span>. Only this machine's owner sees this panel.</p>
   </div>
 </section>
 
@@ -627,7 +692,7 @@
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
-<script src="dev.js?v=4.8.9"></script>
-<script src="app.js?v=4.8.9"></script>
+<script src="dev.js?v=4.9.0"></script>
+<script src="app.js?v=4.9.0"></script>
 </body>
 </html>

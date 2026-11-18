@@ -11,10 +11,12 @@
 const {
   app, BrowserWindow, Tray, Menu,
   nativeImage, ipcMain, shell, session, screen, Notification, powerMonitor,
+  desktopCapturer,
   net: electronNet
 } = require("electron");
 
 const { spawn, execFile, execFileSync } = require("child_process");
+const os = require("os");
 
 // Her ear runs on an AudioContext that nobody tapped a button to start. With
 // Chromium's default autoplay policy that context comes up suspended, so the
@@ -149,7 +151,7 @@ function syncShortcuts() {
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler(
     (_webContents, permission, callback) => {
-      const allowed = ["media", "microphone", "camera", "geolocation", "notifications"];
+      const allowed = ["media", "microphone", "camera", "geolocation", "notifications", "display-capture", "speaker-selection"];
       callback(allowed.includes(permission));
     }
   );
@@ -157,9 +159,24 @@ app.whenReady().then(() => {
   // Also allow media device enumeration
   session.defaultSession.setPermissionCheckHandler(
     (_webContents, permission) => {
-      return ["media", "microphone", "camera"].includes(permission);
+      return ["media", "microphone", "camera", "display-capture", "speaker-selection"].includes(permission);
     }
   );
+
+  // The recorder asks for the desktop stream only to borrow its system-audio
+  // track; the video track is dropped in the renderer. No picker: this is a
+  // one-person tool and the owner asked for everything on the PC in one take.
+  session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {
+    try {
+      if (!isOwner()) { callback({}); return; }
+      const sources = await desktopCapturer.getSources({ types: ["screen"] });
+      if (!sources.length) { callback({}); return; }
+      callback({ video: sources[0], audio: "loopback" });
+    } catch (err) {
+      logLine(`display media: ${err?.message || err}`);
+      callback({});
+    }
+  });
 });
 
 // ── Server ───────────────────────────────────────────────────────────────────
@@ -2553,6 +2570,98 @@ ipcMain.handle("capri-session-load", () => String(readJson(sessionFile())?.token
 ipcMain.handle("capri-session-clear", () => {
   try { fs.unlinkSync(sessionFile()); } catch { /* already gone */ }
   return true;
+});
+
+// ── My side recorder (owner only) ────────────────────────────────────────────
+// The gate is a file that exists only in this machine's Capri profile. It never
+// ships in the repo, so a fresh install has no recorder at all.
+const ownerFile = () => path.join(app.getPath("userData"), "owner.json");
+function isOwner() {
+  try {
+    const owner = JSON.parse(fs.readFileSync(ownerFile(), "utf8"));
+    const user = String(os.userInfo().username || "").toLowerCase();
+    const host = os.hostname().toLowerCase();
+    return Boolean(owner?.user) &&
+      String(owner.user).toLowerCase() === user &&
+      String(owner.host || "").toLowerCase() === host;
+  } catch {
+    return false;
+  }
+}
+
+function recDir() {
+  const dir = path.join(app.getPath("videos"), "Capri");
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* created on save */ }
+  return dir;
+}
+
+function recStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `Capri-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+function recPathInside(target) {
+  const dir = recDir().toLowerCase() + path.sep;
+  const full = path.resolve(String(target || ""));
+  return full.toLowerCase().startsWith(dir) && fs.existsSync(full);
+}
+
+ipcMain.handle("capri-rec-owner", () => isOwner());
+
+ipcMain.handle("capri-rec-save", async (_event, payload) => {
+  if (!isOwner()) return { ok: false, error: "not owner" };
+  try {
+    const chunk = payload?.data;
+    const buf = Buffer.from(chunk || []);
+    if (!buf.length) return { ok: false, error: "empty recording" };
+    const name = `${recStamp()}.webm`;
+    const file = path.join(recDir(), name);
+    await fs.promises.writeFile(file, buf);
+    logLine(`rec saved ${name} ${buf.length}b`);
+    return { ok: true, file, name, size: buf.length, dir: recDir() };
+  } catch (err) {
+    return { ok: false, error: String(err?.message || err) };
+  }
+});
+
+ipcMain.handle("capri-rec-list", async () => {
+  if (!isOwner()) return [];
+  try {
+    const dir = recDir();
+    const names = await fs.promises.readdir(dir);
+    const rows = [];
+    for (const name of names) {
+      if (!/\.(webm|ogg|m4a|wav)$/i.test(name)) continue;
+      try {
+        const st = await fs.promises.stat(path.join(dir, name));
+        rows.push({ name, size: st.size, mtime: st.mtimeMs, file: path.join(dir, name) });
+      } catch { /* vanished mid-read */ }
+    }
+    return rows.sort((a, b) => b.mtime - a.mtime).slice(0, 30);
+  } catch {
+    return [];
+  }
+});
+
+ipcMain.handle("capri-rec-reveal", async (_event, target) => {
+  if (!isOwner()) return "err:not-owner";
+  const file = String(target || "");
+  if (file) {
+    if (!recPathInside(file)) return "err:bad-path";
+    shell.showItemInFolder(file);
+    return "ok";
+  }
+  const err = await shell.openPath(recDir());
+  return err ? `err:${err}` : "ok";
+});
+
+ipcMain.handle("capri-rec-open", async (_event, target) => {
+  if (!isOwner()) return "err:not-owner";
+  const file = String(target || "");
+  if (!recPathInside(file)) return "err:bad-path";
+  const err = await shell.openPath(file);
+  return err ? `err:${err}` : "ok";
 });
 
 // ── Hands permission gate ────────────────────────────────────────────────────

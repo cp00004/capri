@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld("capriNative", {
   saveSession: (token) => ipcRenderer.invoke("capri-session-save", String(token || "")),
   loadSession: () => ipcRenderer.invoke("capri-session-load"),
   clearSession: () => ipcRenderer.invoke("capri-session-clear"),
+  // Owner-only recorder. The main process re-checks the gate on every call.
+  recOwner: () => ipcRenderer.invoke("capri-rec-owner"),
+  recSave: (payload) => ipcRenderer.invoke("capri-rec-save", payload || {}),
+  recList: () => ipcRenderer.invoke("capri-rec-list"),
+  recReveal: (file) => ipcRenderer.invoke("capri-rec-reveal", String(file || "")),
+  recOpen: (file) => ipcRenderer.invoke("capri-rec-open", String(file || "")),
   handsPolicy: () => ipcRenderer.invoke("capri-hands-policy"),
   handsPolicySet: (patch) => ipcRenderer.invoke("capri-hands-policy-set", patch || {}),
   handsUndo: () => ipcRenderer.invoke("capri-hands-undo"),
