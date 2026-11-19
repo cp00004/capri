@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<meta name="theme-color" content="#07000c" />
+<meta name="theme-color" content="#05070a" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="Capri" />
@@ -41,16 +41,16 @@
       if (document.getElementById('capri-snag')) return;
       var d = document.createElement('div');
       d.id = 'capri-snag';
-      d.setAttribute('style', 'position:fixed;inset:0;background:#07000c;color:#fbf0f0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;font:16px system-ui,sans-serif;z-index:99999;padding:24px;text-align:center;');
+      d.setAttribute('style', 'position:fixed;inset:0;background:#05070a;color:#d9ffe9;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;font:16px system-ui,sans-serif;z-index:99999;padding:24px;text-align:center;');
       var t = document.createElement('div');
       t.textContent = 'CAPRI HIT A SNAG';
       t.setAttribute('style', 'font-size:20px;letter-spacing:.2em;');
       var n = document.createElement('div');
       n.textContent = 'She stumbled while loading. Reload her and she comes right back - your sign-in and memory are safe.';
-      n.setAttribute('style', 'color:#a98fa4;max-width:320px;line-height:1.5;');
+      n.setAttribute('style', 'color:#7f9087;max-width:320px;line-height:1.5;');
       var b = document.createElement('button');
       b.textContent = 'RELOAD CAPRI';
-      b.setAttribute('style', 'background:#ff0b52;color:#fff;border:0;border-radius:999px;padding:13px 30px;font:700 14px system-ui,sans-serif;letter-spacing:.15em;cursor:pointer;');
+      b.setAttribute('style', 'background:#3dff9e;color:#04130a;border:0;border-radius:2px;padding:13px 30px;font:700 14px system-ui,sans-serif;letter-spacing:.15em;cursor:pointer;');
       b.addEventListener('click', function () { location.reload(); });
       d.appendChild(t); d.appendChild(n); d.appendChild(b);
       (document.body || document.documentElement).appendChild(d);
@@ -80,8 +80,8 @@
 <link rel="manifest" href="manifest.webmanifest" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=4.9.0" />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css?v=5.0.0" />
 </head>
 <body data-state="idle">
 <div class="grain" aria-hidden="true"></div>
@@ -97,8 +97,8 @@
       </svg>
     </span>
     <span class="brand-copy">
-      <span class="brand-name">Capri</span>
-      <span class="brand-sub">Project Capricorn</span>
+      <span class="brand-name">CAPRI</span>
+      <span class="brand-sub">OS // PROJECT CAPRICORN</span>
     </span>
   </div>
   <div class="top-status">
@@ -109,6 +109,11 @@
     <button id="nnnBadge" class="nnn-badge hidden" type="button" title="No Nut November">NNN</button>
   </div>
   <div class="top-right">
+    <div class="os-clock" aria-hidden="true">
+      <span id="osDate" class="os-date">-- --- ----</span>
+      <span id="osTime" class="os-time">--:--</span>
+    </div>
+    <span class="top-sep" aria-hidden="true"></span>
     <button id="recBtn" class="icon rec-btn hidden" type="button" aria-label="My side recorder" title="Record my side">
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/>
@@ -136,21 +141,34 @@
   </div>
 </header>
 <main class="stage">
-  <div class="portrait" id="portraitWrap">
-    <div class="hex-glow" aria-hidden="true"></div>
-    <div class="hex-frame">
-      <div class="hex-inner">
-        <img id="portraitImg" src="assets/capri-portrait.png" alt="Capri" />
-        <img class="ghost ghost-a" id="ghostA" src="assets/capri-portrait.png" alt="" aria-hidden="true" />
-        <img class="ghost ghost-b" id="ghostB" src="assets/capri-portrait.png" alt="" aria-hidden="true" />
-        <canvas class="arcs" id="arcCanvas" aria-hidden="true"></canvas>
-        <div class="hex-tint" aria-hidden="true"></div>
-        <div class="hex-scan" aria-hidden="true"></div>
-        <div class="tear" id="tearA" aria-hidden="true"></div>
-        <div class="tear" id="tearB" aria-hidden="true"></div>
-        <div class="act" id="act" aria-live="polite"></div>
+  <div class="stage-cadre">
+    <span class="stage-tag" aria-hidden="true"><i></i>SUBJECT // CAPRI-01</span>
+    <span class="stage-link" aria-hidden="true">LINK <b id="stageLink">STABLE</b></span>
+    <div class="portrait" id="portraitWrap">
+      <div class="hex-glow" aria-hidden="true"></div>
+      <div class="hex-frame">
+        <div class="hex-inner">
+          <img id="portraitImg" src="assets/capri-portrait.png" alt="Capri" />
+          <img class="ghost ghost-a" id="ghostA" src="assets/capri-portrait.png" alt="" aria-hidden="true" />
+          <img class="ghost ghost-b" id="ghostB" src="assets/capri-portrait.png" alt="" aria-hidden="true" />
+          <canvas class="arcs" id="arcCanvas" aria-hidden="true"></canvas>
+          <div class="hex-tint" aria-hidden="true"></div>
+          <div class="hex-scan" aria-hidden="true"></div>
+          <div class="tear" id="tearA" aria-hidden="true"></div>
+          <div class="tear" id="tearB" aria-hidden="true"></div>
+          <div class="act" id="act" aria-live="polite"></div>
+        </div>
       </div>
     </div>
+    <div class="idplate" aria-hidden="true">
+      <div class="idplate-row"><span class="idplate-key">UNIT</span><span class="idplate-val">CAPRI-01</span></div>
+      <div class="idplate-row"><span class="idplate-key">CORE</span><span class="idplate-val">CAPRICORN</span></div>
+      <div class="idplate-row"><span class="idplate-key">STATE</span><span class="idplate-val lit" id="idplateState">STANDBY</span></div>
+    </div>
+    <span class="cadre-corner tl" aria-hidden="true"></span>
+    <span class="cadre-corner tr" aria-hidden="true"></span>
+    <span class="cadre-corner bl" aria-hidden="true"></span>
+    <span class="cadre-corner br" aria-hidden="true"></span>
   </div>
 </main>
 
@@ -173,6 +191,11 @@
     <div class="dock-row">
       <button id="signInPill" class="pill accent hidden" type="button">Continue with Google</button>
       <button id="kbBtn" class="pill" type="button">Keyboard</button>
+    </div>
+    <div class="console-meta" aria-hidden="true">
+      <span class="console-hint">TAP TO TALK</span>
+      <span class="console-sep"></span>
+      <span class="console-hint dim">HOLD SHIFT + K TYPE</span>
     </div>
   </div>
 </footer>
@@ -284,11 +307,11 @@
       <span class="label">accent color</span>
       <div class="row wrap">
         <input id="accentWheel" type="color" class="color-wheel" aria-label="Pick an accent color" />
-        <input id="accentHex" class="text hex" type="text" maxlength="7" spellcheck="false" placeholder="#ff2f63" />
+        <input id="accentHex" class="text hex" type="text" maxlength="7" spellcheck="false" placeholder="#3dff9e" />
         <button id="accentApply" class="pill" type="button">APPLY</button>
         <button id="accentReset" class="pill" type="button">DEFAULT</button>
       </div>
-      <p class="hint">Phone only. Pick any color - red, dark red, navy blue, anything - or paste a hex code, and her whole look shifts to it. DEFAULT brings back signature pink.</p>
+      <p class="hint">Phone only. Pick any color - red, dark red, navy blue, anything - or paste a hex code, and her whole look shifts to it. DEFAULT brings back signature green.</p>
     </div>
 
     <div class="field mobile-only" data-sheet-tab="appearance">
@@ -692,7 +715,7 @@
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
-<script src="dev.js?v=4.9.0"></script>
-<script src="app.js?v=4.9.0"></script>
+<script src="dev.js?v=5.0.0"></script>
+<script src="app.js?v=5.0.0"></script>
 </body>
 </html>

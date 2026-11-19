@@ -78,6 +78,10 @@ const el = {
   prefNameSave: $("#prefNameSave"),
   timeFormat: $("#timeFormat"),
   clockNow: $("#clockNow"),
+  osTime: $("#osTime"),
+  osDate: $("#osDate"),
+  idplateState: $("#idplateState"),
+  stageLink: $("#stageLink"),
   glitchLevel: $("#glitchLevel"),
   glitchTest: $("#glitchTest"),
   memoryCount: $("#memoryCount"),
@@ -3335,7 +3339,7 @@ showSheetTab(SHEET_TAB_DEFAULT);
 
 /* ----------------------------------------------------- appearance engine */
 
-const ACCENT_DEFAULT = "#ff2f63";
+const ACCENT_DEFAULT = "#3dff9e";
 const ACCENT_KEY = "capri.accent";
 const HOLIDAY_KEY = "capri.holiday";
 
@@ -3361,14 +3365,20 @@ function applyAccent(hex) {
 function setAccent(hex, persist = true) {
   const clean = String(hex || "").trim().toLowerCase();
   if (!applyAccent(clean)) {
-    showNotice("That color code doesn't parse. Try #ff0b52 format.", null, null, 4000);
+    showNotice("That color code doesn't parse. Try #3dff9e format.", null, null, 4000);
     return;
   }
   if (persist) localStorage.setItem(ACCENT_KEY, clean);
 }
 
 (function initAppearance() {
-  const saved = localStorage.getItem(ACCENT_KEY);
+  // old studio-glass defaults retire with the 5.0 identity
+  const LEGACY_DEFAULTS = new Set(["#ff2f63", "#ff0b52"]);
+  let saved = localStorage.getItem(ACCENT_KEY);
+  if (saved && LEGACY_DEFAULTS.has(saved.toLowerCase())) {
+    localStorage.removeItem(ACCENT_KEY);
+    saved = null;
+  }
   if (saved) applyAccent(saved);
   if (el.accentWheel) {
     el.accentWheel.value = saved || ACCENT_DEFAULT;
@@ -3391,7 +3401,7 @@ function setAccent(hex, persist = true) {
       localStorage.removeItem(ACCENT_KEY);
       applyAccent(ACCENT_DEFAULT);
       if (el.accentHex) el.accentHex.value = "";
-      showNotice("Back to signature pink.", null, null, 2500);
+      showNotice("Back to signature green.", null, null, 2500);
     });
   }
   const holiday = localStorage.getItem(HOLIDAY_KEY) || "none";
@@ -4166,20 +4176,61 @@ el.vaultExport?.addEventListener("click", async () => {
 /* ---------------------------------------------------------------- clock */
 
 function applyClock() {
-  if (!el.clockNow) return;
   const mode = state.profile?.settings?.timeFormat || "auto";
   const hour12 = mode === "12" ? true : mode === "24" ? false : state.config?.time?.hour12 !== false;
   const now = new Date();
-  el.clockNow.textContent = new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12,
-  }).format(now);
-  el.clockNow.title = `${state.config?.time?.zone || ""} — follows ${mode === "auto" ? "the Windows clock" : "this setting"}`;
+  if (el.clockNow) {
+    el.clockNow.textContent = new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12,
+    }).format(now);
+    el.clockNow.title = `${state.config?.time?.zone || ""} — follows ${mode === "auto" ? "the Windows clock" : "this setting"}`;
+  }
+  if (el.osTime) {
+    el.osTime.textContent = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(now);
+  }
+  if (el.osDate) {
+    el.osDate.textContent = new Intl.DateTimeFormat("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    }).format(now).toUpperCase();
+  }
 }
 
 clearInterval(state.clockTimer);
 state.clockTimer = setInterval(applyClock, 1000);
+applyClock();
+
+/* ------------------------------------------------------------- os chrome */
+
+const OS_STATE_LABELS = {
+  idle: ["STANDBY", "STABLE"],
+  listening: ["LISTENING", "OPEN"],
+  thinking: ["PROCESSING", "SYNC"],
+  speaking: ["TRANSMITTING", "LIVE"],
+  error: ["FAULT", "DEGRADED"],
+  offline: ["NO SIGNAL", "OFFLINE"],
+};
+
+function applyOsChrome() {
+  const key = document.body.getAttribute("data-state") || "idle";
+  const [stateLabel, linkLabel] = OS_STATE_LABELS[key] || OS_STATE_LABELS.idle;
+  if (el.idplateState) el.idplateState.textContent = stateLabel;
+  if (el.stageLink) el.stageLink.textContent = linkLabel;
+}
+
+applyOsChrome();
+new MutationObserver(applyOsChrome).observe(document.body, {
+  attributes: true,
+  attributeFilter: ["data-state"],
+});
 
 /* ---------------------------------------------------------------- publish */
 
