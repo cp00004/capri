@@ -2835,6 +2835,7 @@ body[data-state="listening"] #portraitImg { filter: saturate(1) contrast(1.08) b
   font-size: 7px;
   letter-spacing: 0.2em;
   color: var(--ink-faint);
+  white-space: nowrap;
 }
 .idplate-val {
   font-family: var(--mono);
@@ -2842,6 +2843,7 @@ body[data-state="listening"] #portraitImg { filter: saturate(1) contrast(1.08) b
   letter-spacing: 0.14em;
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .idplate-val.lit {
   color: var(--accent);
@@ -2995,12 +2997,24 @@ body[data-state="listening"] .mic::before {
 /* ------------------------------------------------------------------ keyboard */
 .kb-sheet {
   gap: 8px;
-  padding: 11px 14px calc(12px + var(--safe-b));
-  background: rgba(4, 7, 9, 0.97);
+  padding: 12px 14px calc(13px + var(--safe-b));
+  background: linear-gradient(180deg, rgba(9, 15, 12, 0.985), rgba(4, 7, 9, 0.995));
   border-top: 1px solid var(--line-2);
-  box-shadow: 0 -18px 50px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 -18px 50px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(61, 255, 158, 0.16);
   animation: kb-up 0.22s var(--ease) both;
 }
+.kb-sheet::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 56px;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.5;
+}
+.kb-sheet .pill { min-width: 92px; justify-content: center; }
 .kb-sheet input {
   font-family: var(--mono);
   font-size: 13px;
@@ -3697,6 +3711,8 @@ input.hex { letter-spacing: 0.08em; }
   .top-right { gap: 5px; }
   .icon { width: 32px; height: 32px; }
   .nnn-badge { font-size: 8px; padding: 0 7px; }
+  .idplate-row { padding: 6px 9px 7px; gap: 6px; }
+  .idplate-val { font-size: 9px; }
 }
 
 /* landscape phones: give the portrait back its height */
