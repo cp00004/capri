@@ -3320,16 +3320,17 @@ function sysNetSample() {
   if (process.platform !== "win32") return Promise.resolve(sysNetRate);
   if (sysNetBusy) return Promise.resolve(sysNetRate);
   sysNetBusy = true;
-  const script = "$s=Get-NetAdapterStatistics; \"$(($s|Measure-Object -Property ReceivedBytes -Sum).Sum) $(($s|Measure-Object -Property SentBytes -Sum).Sum)\"";
   return new Promise((resolve) => {
     execFile(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-Command", script],
-      { timeout: 1800, windowsHide: true },
+      "netstat.exe",
+      ["-e"],
+      { timeout: 3000, windowsHide: true },
       (err, stdout) => {
         sysNetBusy = false;
         if (err) return resolve(sysNetRate);
-        const [rx, tx] = String(stdout).trim().split(/\s+/).map(Number);
+        const line = String(stdout).split(/\r?\n/).find((row) => /^\s*Bytes\s+/i.test(row));
+        const nums = line ? line.trim().split(/\s+/).slice(1).map(Number) : [];
+        const [rx, tx] = nums;
         if (!Number.isFinite(rx) || !Number.isFinite(tx)) return resolve(sysNetRate);
         const now = Date.now();
         const prev = sysNetLast;
