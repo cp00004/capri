@@ -4453,7 +4453,7 @@ pollSystem();
 
 /* --------------------------------------------------------- waveform deck */
 
-const WAVE_LEVEL = { idle: 0.16, listening: 0.58, thinking: 0.36, speaking: 0.76, error: 0.22, offline: 0.08 };
+const WAVE_LEVEL = { idle: 0.24, listening: 0.6, thinking: 0.38, speaking: 0.78, error: 0.22, offline: 0.08 };
 const waveBars = [];
 const sysBarBars = [];
 let waveAmp = WAVE_LEVEL.idle;
@@ -4469,7 +4469,7 @@ function fillBars(node, arr, count) {
   }
 }
 
-document.querySelectorAll(".wave").forEach((node) => fillBars(node, waveBars, 26));
+document.querySelectorAll(".wave").forEach((node) => fillBars(node, waveBars, 40));
 fillBars(el.sysBars, sysBarBars, 26);
 
 const waveTick = () => {
@@ -4478,7 +4478,7 @@ const waveTick = () => {
   const target = WAVE_LEVEL[phase] ?? 0.16;
   waveAmp += (target - waveAmp) * 0.12;
   waveT += 0.19;
-  const n = 26;
+  const n = 40;
   for (let i = 0; i < waveBars.length; i += 1) {
     const k = i % n;
     const env = Math.sin(((k + 0.5) / n) * Math.PI);

@@ -3883,7 +3883,7 @@ html.is-electron .sheet.center { top: calc(50% + var(--chrome-h) / 2); }
     align-items: center;
     gap: 14px;
     width: 100%;
-    padding: 14px 14px 14px 16px;
+    padding: 18px 14px 18px 18px;
     font-family: var(--mono);
     font-size: 10px;
     font-weight: 500;
@@ -3924,6 +3924,7 @@ html.is-electron .sheet.center { top: calc(50% + var(--chrome-h) / 2); }
   .sysmon {
     display: flex;
     flex-direction: column;
+    margin-top: auto;
     padding: 12px 14px 10px;
     border: 1px solid var(--line);
     background: linear-gradient(180deg, rgba(8, 14, 11, 0.88), rgba(4, 7, 9, 0.94));
@@ -3954,7 +3955,7 @@ html.is-electron .sheet.center { top: calc(50% + var(--chrome-h) / 2); }
     grid-template-columns: 46px minmax(0, 1fr) 38px;
     align-items: center;
     gap: 8px;
-    padding: 9px 0;
+    padding: 11px 0;
     border-bottom: 1px solid rgba(140, 255, 200, 0.07);
   }
   .sys-key {
@@ -4138,15 +4139,15 @@ html.is-electron .sheet.center { top: calc(50% + var(--chrome-h) / 2); }
   .wave {
     display: flex;
     align-items: center;
-    gap: 3px;
+    justify-content: space-between;
+    gap: 2px;
     height: 68px;
     overflow: hidden;
   }
-  .wave-r { justify-content: flex-end; }
+  .wave-r { justify-content: space-between; }
   .wave i {
     flex: 1 1 0;
     min-width: 1px;
-    max-width: 3px;
     height: 12%;
     background: currentColor;
     color: var(--accent);
@@ -4242,8 +4243,8 @@ html.is-electron .sheet.center { top: calc(50% + var(--chrome-h) / 2); }
   .chat-msg {
     position: relative;
     font-family: var(--font);
-    font-size: 12.5px;
-    line-height: 1.6;
+    font-size: 13px;
+    line-height: 1.62;
     color: #e7fff2;
     animation: chat-in 0.22s var(--ease) both;
   }
