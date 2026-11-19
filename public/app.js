@@ -4303,20 +4303,40 @@ function chatScroll() {
   if (el.chatLog) el.chatLog.scrollTop = el.chatLog.scrollHeight;
 }
 
+const CHAT_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+
+function chatMarkup(text) {
+  const base = String(text || "").replace(/[&<>"']/g, (c) => CHAT_ESCAPES[c]);
+  return base
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<i>$2</i>")
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*•]\s+/gm, "• ");
+}
+
+function chatPaint(item) {
+  if (!item) return;
+  item.span.innerHTML = item.raw.trim() ? chatMarkup(item.raw) : "";
+  chatScroll();
+}
+
 function chatAppend(role, text, withCaret = false) {
   if (!el.chatLog) return null;
   const node = document.createElement("div");
   node.className = `chat-msg ${role}`;
   const span = document.createElement("span");
   span.className = "chat-text";
-  span.textContent = text;
   node.appendChild(span);
   const caret = withCaret ? document.createElement("span") : null;
   if (caret) { caret.className = "caret"; node.appendChild(caret); }
   el.chatLog.appendChild(node);
   while (el.chatLog.children.length > CHAT_MAX) el.chatLog.firstElementChild.remove();
+  const item = { node, span, caret, raw: String(text || "") };
+  if (role === "capri") chatPaint(item); else span.textContent = text;
   chatScroll();
-  return { node, span, caret };
+  return item;
 }
 
 function chatEnsureGreeting() {
@@ -4338,20 +4358,21 @@ function chatBegin() {
 
 function chatPush(item, text) {
   if (!item || !text) return;
-  item.span.textContent = (item.span.textContent + text).slice(-12000);
-  chatScroll();
+  const item2 = item;
+  item2.raw = (item2.raw + text).slice(-12000);
+  chatPaint(item2);
 }
 
 function chatSet(item, text) {
   if (!item) return;
-  item.span.textContent = String(text || "");
-  chatScroll();
+  item.raw = String(text || "");
+  chatPaint(item);
 }
 
 function chatEnd(item) {
   if (!item) return;
   item.caret?.remove();
-  if (!item.span.textContent.trim()) item.node.remove();
+  if (!item.raw.trim()) item.node.remove();
 }
 
 function setRailActive(name) {
