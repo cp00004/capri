@@ -82,6 +82,7 @@ const el = {
   osDate: $("#osDate"),
   idplateState: $("#idplateState"),
   stageLink: $("#stageLink"),
+  consoleMode: $("#consoleMode"),
   glitchLevel: $("#glitchLevel"),
   glitchTest: $("#glitchTest"),
   memoryCount: $("#memoryCount"),
@@ -4224,6 +4225,7 @@ function applyOsChrome() {
   const [stateLabel, linkLabel] = OS_STATE_LABELS[key] || OS_STATE_LABELS.idle;
   if (el.idplateState) el.idplateState.textContent = stateLabel;
   if (el.stageLink) el.stageLink.textContent = linkLabel;
+  if (el.consoleMode) el.consoleMode.textContent = stateLabel;
 }
 
 applyOsChrome();
