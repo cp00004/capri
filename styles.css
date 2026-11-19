@@ -3501,8 +3501,13 @@ input.hex { letter-spacing: 0.08em; }
     left: 0;
     right: auto;
     top: 0;
+    bottom: 0;
+    transform: none;
     width: min(400px, 40vw);
-    border-left: 0;
+    height: 100dvh;
+    max-height: none;
+    border-radius: 0;
+    border: 0;
     border-right: 1px solid var(--line-2);
     clip-path: polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%);
     box-shadow: 40px 0 90px rgba(0, 0, 0, 0.55), inset -1px 0 0 rgba(61, 255, 158, 0.22);
@@ -3637,6 +3642,7 @@ input.hex { letter-spacing: 0.08em; }
     transform: none;
     width: 100%;
     max-height: 88dvh;
+    border-radius: 0;
     border-left: 0;
     border-top: 1px solid var(--line-2);
     clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%, 0 14px);
