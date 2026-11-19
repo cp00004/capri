@@ -81,11 +81,21 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=5.0.0" />
+<link rel="stylesheet" href="styles.css?v=5.1.0" />
 </head>
 <body data-state="idle">
+<script>document.documentElement.classList.toggle("is-electron", Boolean(window.capriNative));</script>
 <div class="grain" aria-hidden="true"></div>
 <div class="glow" aria-hidden="true"></div>
+
+<div class="os-titlebar" aria-hidden="true">
+  <span class="tb-mark">
+    <svg viewBox="0 0 24 24"><path d="M16.4 8.2a5.4 5.4 0 1 0 0 7.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+  </span>
+  <span class="tb-title"><b>CAPRI</b> // Project Capricorn</span>
+  <span class="tb-spacer"></span>
+  <span class="tb-right">OS // CAPRICORN</span>
+</div>
 
 <header class="top">
   <div class="brand">
@@ -140,6 +150,74 @@
     </button>
   </div>
 </header>
+<div class="os-frame" id="osFrame">
+  <aside class="rail" aria-label="Capri OS modules">
+    <nav class="rail-nav" aria-label="Modules">
+      <button class="rail-item is-active" type="button" data-os-nav="home">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.4 10.6 12 4.2l7.6 6.4V20h-5.2v-5.4H9.6V20H4.4Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+        <span>HOME</span>
+        <i class="rail-tick" aria-hidden="true"></i>
+      </button>
+      <button class="rail-item" type="button" data-os-nav="assistant">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11v2M8 7.4v9.2M12 4.4v15.2M16 8.6v6.8M20 11v2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>AI ASSISTANT</span>
+        <i class="rail-tick" aria-hidden="true"></i>
+      </button>
+      <button class="rail-item" type="button" data-os-nav="apps">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="6.3" height="6.3" rx=".6" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="13.7" y="4" width="6.3" height="6.3" rx=".6" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="4" y="13.7" width="6.3" height="6.3" rx=".6" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="13.7" y="13.7" width="6.3" height="6.3" rx=".6" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        <span>APPS</span>
+        <i class="rail-tick" aria-hidden="true"></i>
+      </button>
+      <button class="rail-item" type="button" data-os-nav="memory">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx=".8" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="10.2" y="10.2" width="3.6" height="3.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.6 7V4.6M14.4 7V4.6M9.6 19.4V17M14.4 19.4V17M7 9.6H4.6M7 14.4H4.6M19.4 9.6H17M19.4 14.4H17" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span>MEMORY</span>
+        <i class="rail-tick" aria-hidden="true"></i>
+      </button>
+      <button class="rail-item" type="button" data-os-nav="settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M12 3.4v2.3M12 18.3v2.3M3.4 12h2.3M18.3 12h2.3M5.9 5.9l1.6 1.6M16.5 16.5l1.6 1.6M18.1 5.9l-1.6 1.6M7.5 16.5l-1.6 1.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span>SETTINGS</span>
+        <i class="rail-tick" aria-hidden="true"></i>
+      </button>
+      <button class="rail-item" type="button" data-os-nav="system">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v7.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7.3 7.1a7 7 0 1 0 9.4 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        <span>SYSTEM</span>
+        <i class="rail-tick" aria-hidden="true"></i>
+      </button>
+    </nav>
+
+    <section class="sysmon" aria-label="System status">
+      <header class="sysmon-head">
+        <span>SYSTEM STATUS</span><span class="slashes">///</span>
+        <span class="hatch" aria-hidden="true"></span>
+      </header>
+      <div class="sys-row">
+        <span class="sys-key">CPU</span>
+        <svg class="sys-spark" viewBox="0 0 100 18" preserveAspectRatio="none" aria-hidden="true"><polyline id="cpuSpark" points="0,14 100,14"/></svg>
+        <span class="sys-val" id="statCpu">--%</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-key">RAM</span>
+        <svg class="sys-spark" viewBox="0 0 100 18" preserveAspectRatio="none" aria-hidden="true"><polyline id="ramSpark" points="0,14 100,14"/></svg>
+        <span class="sys-val" id="statRam">--%</span>
+      </div>
+      <div class="sys-row">
+        <span class="sys-key">DISK</span>
+        <svg class="sys-spark" viewBox="0 0 100 18" preserveAspectRatio="none" aria-hidden="true"><polyline id="diskSpark" points="0,14 100,14"/></svg>
+        <span class="sys-val" id="statDisk">--%</span>
+      </div>
+      <div class="sys-row sys-row-net">
+        <span class="sys-key">NETWORK</span>
+        <span class="sys-net">
+          <b>↑ <span id="statUp">--</span></b>
+          <b>↓ <span id="statDown">--</span></b>
+        </span>
+      </div>
+      <div class="sys-bars" id="sysBars" aria-hidden="true"></div>
+    </section>
+    <span class="rail-foot" aria-hidden="true">CORE // CAPRICORN</span>
+  </aside>
+
+  <div class="os-center">
 <main class="stage">
   <div class="stage-cadre">
     <span class="stage-tag" aria-hidden="true"><i></i>SUBJECT // CAPRI-01</span>
@@ -183,16 +261,20 @@
       <span class="console-ticks"><i></i><i></i><i></i></span>
       <span class="console-mode" id="consoleMode">STANDBY</span>
     </div>
-    <button id="micBtn" class="mic" type="button" aria-label="Tap to talk">
-      <span class="mic-rings" aria-hidden="true"></span>
-      <span class="mic-core">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 3.2a2.9 2.9 0 0 0-2.9 2.9v5.6a2.9 2.9 0 0 0 5.8 0V6.1A2.9 2.9 0 0 0 12 3.2Z"/>
-          <path d="M6 10.8a6 6 0 0 0 12 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-          <path d="M12 16.8v3.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
-        </svg>
-      </span>
-    </button>
+    <div class="deck-core">
+      <div class="wave wave-l" aria-hidden="true"></div>
+      <button id="micBtn" class="mic" type="button" aria-label="Tap to talk">
+        <span class="mic-rings" aria-hidden="true"></span>
+        <span class="mic-core">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3.2a2.9 2.9 0 0 0-2.9 2.9v5.6a2.9 2.9 0 0 0 5.8 0V6.1A2.9 2.9 0 0 0 12 3.2Z"/>
+            <path d="M6 10.8a6 6 0 0 0 12 0" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+            <path d="M12 16.8v3.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+          </svg>
+        </span>
+      </button>
+      <div class="wave wave-r" aria-hidden="true"></div>
+    </div>
     <div class="dock-row">
       <button id="signInPill" class="pill accent hidden" type="button">Continue with Google</button>
       <button id="kbBtn" class="pill" type="button">Keyboard</button>
@@ -204,6 +286,22 @@
     </div>
   </div>
 </footer>
+  </div>
+
+  <aside class="os-chat" aria-label="Conversation with Capri">
+    <div class="chat-head">
+      <span>CAPRI AI</span><span class="slashes">///</span>
+      <span class="chat-hatch" aria-hidden="true"></span>
+    </div>
+    <div class="chat-log" id="chatLog" role="log" aria-live="polite" aria-label="Chat history"></div>
+    <form class="chat-form" id="chatForm" autocomplete="off">
+      <input id="chatInput" type="text" placeholder="Type a message…" enterkeyhint="send" aria-label="Message Capri" spellcheck="false" />
+      <button class="chat-send" type="submit" aria-label="Send message">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.6 19.4 12 7 19.4Z"/></svg>
+      </button>
+    </form>
+  </aside>
+</div>
 
 <form id="kbForm" class="kb-sheet hidden" autocomplete="off">
   <input id="kbInput" type="text" placeholder="Message Capri…" enterkeyhint="send" />
@@ -712,6 +810,77 @@
         <button id="devPermDeny" class="dev-btn ghost" type="button">DENY</button>
       </div>
     </div>
+  </div>
+</section>
+
+<section id="osApps" class="sheet hidden" aria-label="Capri apps">
+  <div class="sheet-head">
+    <h2>APPS</h2>
+    <button class="icon" type="button" data-close="osApps" aria-label="Close">&times;</button>
+  </div>
+  <div class="sheet-body">
+    <p class="hint">Every module she carries, one click from the rail.</p>
+    <div class="os-app-grid">
+      <button class="os-app" type="button" data-app="memory">
+        <span class="os-app-ico"><svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx=".8" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="10.2" y="10.2" width="3.6" height="3.6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9.6 7V4.6M14.4 7V4.6M9.6 19.4V17M14.4 19.4V17M7 9.6H4.6M7 14.4H4.6M19.4 9.6H17M19.4 14.4H17" fill="none" stroke="currentColor" stroke-width="1.4"/></svg></span>
+        <span class="os-app-name">MEMORY VAULT</span>
+        <span class="os-app-desc">Search everything she remembers.</span>
+      </button>
+      <button class="os-app" type="button" data-app="recorder">
+        <span class="os-app-ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.4" fill="none" stroke="currentColor" stroke-width="1.5" opacity=".55"/><circle cx="12" cy="12" r="3.4" fill="currentColor"/></svg></span>
+        <span class="os-app-name">SIDE RECORDER</span>
+        <span class="os-app-desc">Capture your side of the room.</span>
+      </button>
+      <button class="os-app" type="button" data-app="updates">
+        <span class="os-app-ico"><svg viewBox="0 0 24 24"><path d="M7 4h9a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M9 9h6M9 12.5h4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></span>
+        <span class="os-app-name">UPDATE LOG</span>
+        <span class="os-app-desc">What changed in every build.</span>
+      </button>
+      <button class="os-app" type="button" data-app="download">
+        <span class="os-app-ico"><svg viewBox="0 0 24 24"><path d="M12 5v10M7.8 11.4 12 15.6l4.2-4.2M5 19h14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        <span class="os-app-name">DOWNLOAD CAPRI</span>
+        <span class="os-app-desc">Phone and PC installers.</span>
+      </button>
+      <button class="os-app" type="button" data-app="access">
+        <span class="os-app-ico"><svg viewBox="0 0 24 24"><rect x="4.6" y="10" width="14.8" height="10" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8.2 10V7.6a3.8 3.8 0 0 1 7.6 0V10" fill="none" stroke="currentColor" stroke-width="1.5"/></svg></span>
+        <span class="os-app-name">FULL ACCESS</span>
+        <span class="os-app-desc">Microphone, notes, hands.</span>
+      </button>
+      <button class="os-app" type="button" data-app="system">
+        <span class="os-app-ico"><svg viewBox="0 0 24 24"><path d="M12 4v7.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M7.3 7.1a7 7 0 1 0 9.4 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+        <span class="os-app-name">SYSTEM MONITOR</span>
+        <span class="os-app-desc">Live CPU, memory, disk, link.</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<section id="osSystem" class="sheet hidden" aria-label="System monitor">
+  <div class="sheet-head">
+    <h2>SYSTEM</h2>
+    <button class="icon" type="button" data-close="osSystem" aria-label="Close">&times;</button>
+  </div>
+  <div class="sheet-body">
+    <div class="os-sys-spec">
+      <div class="os-sys-row"><span>UNIT</span><b>CAPRI-01</b></div>
+      <div class="os-sys-row"><span>HOST</span><b id="osSysHost">--</b></div>
+      <div class="os-sys-row"><span>CORE</span><b>CAPRICORN</b></div>
+      <div class="os-sys-row"><span>VERSION</span><b id="osSysVersion">--</b></div>
+      <div class="os-sys-row"><span>UPTIME</span><b id="osSysUptime">--</b></div>
+      <div class="os-sys-row"><span>STATE</span><b id="osSysState" class="lit">STANDBY</b></div>
+    </div>
+    <div class="os-sys-meters">
+      <div class="os-meter"><span class="os-meter-key">CPU</span><span class="os-meter-track"><i id="osMeterCpu"></i></span><span class="os-meter-val" id="osMeterCpuVal">--%</span></div>
+      <div class="os-meter"><span class="os-meter-key">RAM</span><span class="os-meter-track"><i id="osMeterRam"></i></span><span class="os-meter-val" id="osMeterRamVal">--%</span></div>
+      <div class="os-meter"><span class="os-meter-key">DISK</span><span class="os-meter-track"><i id="osMeterDisk"></i></span><span class="os-meter-val" id="osMeterDiskVal">--%</span></div>
+      <div class="os-meter"><span class="os-meter-key">NET</span><span class="os-meter-track wide"><i id="osMeterNet"></i></span><span class="os-meter-val" id="osMeterNetVal">--</span></div>
+    </div>
+    <div class="row wrap">
+      <button id="osSystemReload" class="pill accent" type="button">RELOAD INTERFACE</button>
+      <button id="osSystemUpdates" class="pill" type="button">UPDATE LOG</button>
+      <button id="osSystemQuit" class="pill" type="button">QUIT CAPRI</button>
+    </div>
+    <p class="hint">Live figures come straight from this machine. Nothing leaves it.</p>
   </div>
 </section>
 

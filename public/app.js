@@ -129,6 +129,35 @@ const el = {
   recStop: $("#recStop"),
   recFolder: $("#recFolder"),
   recList: $("#recList"),
+  chatLog: $("#chatLog"),
+  chatForm: $("#chatForm"),
+  chatInput: $("#chatInput"),
+  osApps: $("#osApps"),
+  osSystem: $("#osSystem"),
+  statCpu: $("#statCpu"),
+  statRam: $("#statRam"),
+  statDisk: $("#statDisk"),
+  statUp: $("#statUp"),
+  statDown: $("#statDown"),
+  cpuSpark: $("#cpuSpark"),
+  ramSpark: $("#ramSpark"),
+  diskSpark: $("#diskSpark"),
+  sysBars: $("#sysBars"),
+  osSysHost: $("#osSysHost"),
+  osSysVersion: $("#osSysVersion"),
+  osSysUptime: $("#osSysUptime"),
+  osSysState: $("#osSysState"),
+  osMeterCpu: $("#osMeterCpu"),
+  osMeterRam: $("#osMeterRam"),
+  osMeterDisk: $("#osMeterDisk"),
+  osMeterNet: $("#osMeterNet"),
+  osMeterCpuVal: $("#osMeterCpuVal"),
+  osMeterRamVal: $("#osMeterRamVal"),
+  osMeterDiskVal: $("#osMeterDiskVal"),
+  osMeterNetVal: $("#osMeterNetVal"),
+  osSystemReload: $("#osSystemReload"),
+  osSystemUpdates: $("#osSystemUpdates"),
+  osSystemQuit: $("#osSystemQuit"),
 };
 
 // Where the API lives. The Node build serves this page, so it can use its own
@@ -2827,6 +2856,8 @@ function nnnAskOverlay() {
 async function sayLocally(text, userText) {
   const line = String(text || "").trim();
   if (!line) return;
+  chatAppend("me", String(userText || "").trim() || "(voice)");
+  chatAppend("capri", line);
   typer.reset("");
   typer.held = true;
   setPhase("speaking");
@@ -3078,12 +3109,14 @@ async function respond(userText) {
   }
   if (await handleNoNut(userText)) return;
   if (await quickOpenTurn(userText)) return;
+  chatAppend("me", userText);
   state.history.push({ role: "user", content: userText });
   state.history = state.history.slice(-16);
 
   typer.reset("");
   typer.held = true; // hold text until audio starts
   setPhase("thinking");
+  const bubble = chatBegin();
 
   let speechBuf = "";
   let spokenUpTo = 0;
@@ -3168,6 +3201,7 @@ async function respond(userText) {
               if (state.phase !== "speaking") setPhase("speaking");
             }
             typer.push(evt.text);
+            chatPush(bubble, evt.text);
             speechBuf += evt.text;
 
             const boundary = firstChunk
@@ -3229,7 +3263,9 @@ async function respond(userText) {
       typer.reset(line);
       if (state.voiceOn) speech.enqueue(line);
       else typer.release();
+      chatSet(bubble, line);
     }
+    chatEnd(bubble);
   } catch (err) {
     if (err?.name !== "AbortError" && err.message !== "unauthorized") {
       showNotice(`No link: ${err.message}`, null, null, 9000);
@@ -3239,15 +3275,18 @@ async function respond(userText) {
       typer.reset(line);
       if (state.voiceOn) speech.enqueue(line);
       else typer.release();
+      chatSet(bubble, line);
     } else if (timedOut) {
       state.history.pop();
       const line = "…the line went quiet. Say that again?";
       typer.reset(line);
       if (state.voiceOn) speech.enqueue(line);
       else typer.release();
+      chatSet(bubble, line);
       showNotice("She went quiet mid-thought. Say that again.", null, null, 9000);
     }
   } finally {
+    chatEnd(bubble);
     clearTimeout(watchdog);
     state.streaming = false;
     activeAbort = null;
@@ -3299,6 +3338,9 @@ function openSheet(node) {
 function closeSheet(node) {
   node.classList.add("hidden");
   if (node === el.settings) el.settingsBtn.setAttribute("aria-expanded", "false");
+  if ([el.settings, el.memoryVault, el.osApps, el.osSystem, el.recorder, el.downloadSidebar].includes(node)) {
+    setRailActive("home");
+  }
 }
 
 el.settingsBtn.addEventListener("click", async () => {
@@ -3764,6 +3806,7 @@ function pullProfile(profile) {
 function applyProfile(profile) {
   if (!profile) return;
   state.profile = profile;
+  chatRefreshGreeting(profile);
 
   let row = readMirror(profile);
   if (!row && !String(profile.preferredName || "").trim()) {
@@ -4236,6 +4279,7 @@ function applyOsChrome() {
   const key = document.body.getAttribute("data-state") || "idle";
   const [stateLabel, linkLabel] = OS_STATE_LABELS[key] || OS_STATE_LABELS.idle;
   if (el.idplateState) el.idplateState.textContent = stateLabel;
+  if (el.osSysState) el.osSysState.textContent = stateLabel;
   if (el.stageLink) el.stageLink.textContent = linkLabel;
   if (el.consoleMode) el.consoleMode.textContent = stateLabel;
 }
@@ -4245,6 +4289,297 @@ new MutationObserver(applyOsChrome).observe(document.body, {
   attributes: true,
   attributeFilter: ["data-state"],
 });
+
+/* ------------------------------------------------------- os shell (5.1) */
+
+const CHAT_MAX = 90;
+let chatGreetingSpan = null;
+
+function capriAddressName() {
+  return String(state.profile?.preferredName || "").trim() || "Master";
+}
+
+function chatScroll() {
+  if (el.chatLog) el.chatLog.scrollTop = el.chatLog.scrollHeight;
+}
+
+function chatAppend(role, text, withCaret = false) {
+  if (!el.chatLog) return null;
+  const node = document.createElement("div");
+  node.className = `chat-msg ${role}`;
+  const span = document.createElement("span");
+  span.className = "chat-text";
+  span.textContent = text;
+  node.appendChild(span);
+  const caret = withCaret ? document.createElement("span") : null;
+  if (caret) { caret.className = "caret"; node.appendChild(caret); }
+  el.chatLog.appendChild(node);
+  while (el.chatLog.children.length > CHAT_MAX) el.chatLog.firstElementChild.remove();
+  chatScroll();
+  return { node, span, caret };
+}
+
+function chatEnsureGreeting() {
+  if (!el.chatLog || el.chatLog.children.length) return;
+  const item = chatAppend("capri", `Hello, ${capriAddressName()}.\nHow can I assist you today?`, true);
+  chatGreetingSpan = item?.span || null;
+}
+
+function chatRefreshGreeting(profile) {
+  if (!chatGreetingSpan || !el.chatLog) return;
+  if (el.chatLog.children.length !== 1) return;
+  const name = String(profile?.preferredName || "").trim() || "Master";
+  chatGreetingSpan.textContent = `Hello, ${name}.\nHow can I assist you today?`;
+}
+
+function chatBegin() {
+  return chatAppend("capri", "");
+}
+
+function chatPush(item, text) {
+  if (!item || !text) return;
+  item.span.textContent = (item.span.textContent + text).slice(-12000);
+  chatScroll();
+}
+
+function chatSet(item, text) {
+  if (!item) return;
+  item.span.textContent = String(text || "");
+  chatScroll();
+}
+
+function chatEnd(item) {
+  if (!item) return;
+  item.caret?.remove();
+  if (!item.span.textContent.trim()) item.node.remove();
+}
+
+function setRailActive(name) {
+  document.querySelectorAll("[data-os-nav]").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.osNav === name);
+  });
+}
+
+/* ---------------------------------------------------------- system poll */
+
+const sysHist = { cpu: [], ram: [], disk: [] };
+let sysBusy = false;
+
+function paintSpark(node, values) {
+  if (!node) return;
+  if (!values.length) return node.setAttribute("points", "0,14 100,14");
+  const n = values.length;
+  const points = values.map((v, i) => {
+    const x = n === 1 ? 0 : (i / (n - 1)) * 100;
+    const y = 16 - (Math.max(0, Math.min(100, v)) / 100) * 14;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  node.setAttribute("points", points.join(" "));
+}
+
+function pctText(v) {
+  return Number.isFinite(v) ? `${Math.round(v)}%` : "--";
+}
+
+function rateText(v) {
+  if (!Number.isFinite(v) || v < 0) return "--";
+  if (v >= 1024) return `${(v / 1024).toFixed(1)} MB/s`;
+  return `${Math.round(v)} KB/s`;
+}
+
+function uptimeText(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "--";
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function applySystem(d) {
+  const cpu = Number.isFinite(d?.cpu) ? d.cpu : null;
+  const ram = Number.isFinite(d?.ram) ? d.ram : null;
+  const disk = Number.isFinite(d?.disk) ? d.disk : null;
+  const up = Number.isFinite(d?.net?.up) ? d.net.up : null;
+  const down = Number.isFinite(d?.net?.down) ? d.net.down : null;
+
+  for (const [key, value] of [["cpu", cpu], ["ram", ram], ["disk", disk]]) {
+    if (value === null) continue;
+    sysHist[key].push(value);
+    if (sysHist[key].length > 24) sysHist[key].shift();
+    paintSpark(el[`${key}Spark`], sysHist[key]);
+  }
+
+  if (el.statCpu) el.statCpu.textContent = pctText(cpu);
+  if (el.statRam) el.statRam.textContent = pctText(ram);
+  if (el.statDisk) el.statDisk.textContent = pctText(disk);
+  if (el.statUp) el.statUp.textContent = rateText(up);
+  if (el.statDown) el.statDown.textContent = rateText(down);
+
+  const meter = (node, value) => { if (node) node.style.width = `${Math.max(0, Math.min(100, value || 0))}%`; };
+  meter(el.osMeterCpu, cpu);
+  meter(el.osMeterRam, ram);
+  meter(el.osMeterDisk, disk);
+  const netTotal = (up || 0) + (down || 0);
+  meter(el.osMeterNet, Number.isFinite(up) || Number.isFinite(down)
+    ? Math.min(100, Math.log10(netTotal + 1) * 28)
+    : 0);
+
+  if (el.osMeterCpuVal) el.osMeterCpuVal.textContent = pctText(cpu);
+  if (el.osMeterRamVal) el.osMeterRamVal.textContent = pctText(ram);
+  if (el.osMeterDiskVal) el.osMeterDiskVal.textContent = pctText(disk);
+  if (el.osMeterNetVal) el.osMeterNetVal.textContent = Number.isFinite(up) ? `↑${rateText(up)} ↓${rateText(down)}` : "--";
+
+  if (el.osSysHost && d?.host) el.osSysHost.textContent = d.host;
+  if (el.osSysUptime && Number.isFinite(d?.uptime)) el.osSysUptime.textContent = uptimeText(d.uptime);
+}
+
+async function pollSystem() {
+  if (sysBusy) return;
+  sysBusy = true;
+  try {
+    const res = await api("/api/system");
+    if (!res.ok) return;
+    applySystem(await res.json());
+  } catch {
+    /* the shell stays quiet when the machine can't report */
+  } finally {
+    sysBusy = false;
+  }
+}
+setInterval(pollSystem, 3000);
+pollSystem();
+
+/* --------------------------------------------------------- waveform deck */
+
+const WAVE_LEVEL = { idle: 0.16, listening: 0.58, thinking: 0.36, speaking: 0.76, error: 0.22, offline: 0.08 };
+const waveBars = [];
+const sysBarBars = [];
+let waveAmp = WAVE_LEVEL.idle;
+let waveT = 0;
+
+function fillBars(node, arr, count) {
+  if (!node) return;
+  node.textContent = "";
+  for (let i = 0; i < count; i += 1) {
+    const bar = document.createElement("i");
+    node.appendChild(bar);
+    arr.push(bar);
+  }
+}
+
+document.querySelectorAll(".wave").forEach((node) => fillBars(node, waveBars, 26));
+fillBars(el.sysBars, sysBarBars, 26);
+
+const waveTick = () => {
+  if (!window.matchMedia("(min-width: 1100px)").matches) return;
+  const phase = document.body.dataset.state || "idle";
+  const target = WAVE_LEVEL[phase] ?? 0.16;
+  waveAmp += (target - waveAmp) * 0.12;
+  waveT += 0.19;
+  const n = 26;
+  for (let i = 0; i < waveBars.length; i += 1) {
+    const k = i % n;
+    const env = Math.sin(((k + 0.5) / n) * Math.PI);
+    const s = Math.abs(Math.sin(waveT * 1.6 + k * 0.64) * Math.cos(waveT * 0.67 + k * 0.27));
+    const value = 7 + env * s * waveAmp * 92;
+    const bar = waveBars[i];
+    bar.style.height = `${value.toFixed(1)}%`;
+    bar.classList.toggle("hot", value > 46);
+  }
+  for (let i = 0; i < sysBarBars.length; i += 1) {
+    const s = Math.abs(Math.sin(waveT * 0.9 + i * 0.8) * Math.cos(waveT * 1.3 + i * 0.2));
+    const value = 8 + s * (0.25 + waveAmp * 0.7) * 88;
+    const bar = sysBarBars[i];
+    bar.style.height = `${value.toFixed(1)}%`;
+    bar.classList.toggle("hot", value > 55);
+  }
+};
+setInterval(waveTick, 90);
+
+/* -------------------------------------------------------- rail + launch */
+
+function openSystemSheet() {
+  if (!el.osSystem) return;
+  if (el.osSysHost) el.osSysHost.textContent = state.config?.host || "this pc";
+  if (el.osSysVersion) el.osSysVersion.textContent = APP_VERSION;
+  if (el.osSysState) el.osSysState.textContent = el.idplateState?.textContent || "STANDBY";
+  openSheet(el.osSystem);
+  pollSystem();
+}
+
+document.querySelectorAll("[data-os-nav]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const name = btn.dataset.osNav;
+    setRailActive(name);
+    if (name === "home") {
+      [el.settings, el.updates, el.memoryVault, el.recorder, el.downloadSidebar, el.osApps, el.osSystem]
+        .forEach((node) => { if (node && !node.classList.contains("hidden")) closeSheet(node); });
+      return;
+    }
+    if (name === "assistant") {
+      el.chatInput?.focus();
+      return;
+    }
+    if (name === "memory") {
+      if (el.memoryVaultBtn) el.memoryVaultBtn.click();
+      else openSheet(el.memoryVault);
+      return;
+    }
+    if (name === "settings") {
+      if (el.settings.classList.contains("hidden")) el.settingsBtn.click();
+      return;
+    }
+    if (name === "apps") {
+      openSheet(el.osApps);
+      return;
+    }
+    if (name === "system") openSystemSheet();
+  });
+});
+
+document.querySelectorAll("[data-app]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const app = btn.dataset.app;
+    if (el.osApps) closeSheet(el.osApps);
+    if (app === "memory") { setRailActive("memory"); el.memoryVaultBtn?.click(); }
+    else if (app === "updates") { setRailActive("home"); openSheet(el.updates); }
+    else if (app === "download") { setRailActive("home"); openSheet(el.downloadSidebar); }
+    else if (app === "system") { setRailActive("system"); openSystemSheet(); }
+    else if (app === "recorder") { setRailActive("home"); el.recBtn?.click(); }
+    else if (app === "access") { setRailActive("settings"); openSheet(el.settings); showSheetTab("access"); refreshSettings?.(); }
+  });
+});
+
+if (!IS_DESKTOP_APP) document.querySelector('[data-app="recorder"]')?.remove();
+
+el.osSystemReload?.addEventListener("click", () => location.reload());
+el.osSystemUpdates?.addEventListener("click", () => {
+  closeSheet(el.osSystem);
+  setRailActive("home");
+  openSheet(el.updates);
+});
+el.osSystemQuit?.addEventListener("click", () => {
+  if (window.capriNative?.quit) window.capriNative.quit();
+});
+
+function chatSubmit(text) {
+  const line = String(text || "").trim();
+  if (!line) return;
+  showHeard(line);
+  respond(line);
+}
+
+el.chatForm?.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const line = el.chatInput.value.trim();
+  if (!line) return;
+  el.chatInput.value = "";
+  chatSubmit(line);
+});
+
+chatEnsureGreeting();
 
 /* ---------------------------------------------------------------- publish */
 
@@ -4851,6 +5186,10 @@ el.micBtn.addEventListener("click", () => {
 });
 
 el.kbBtn.addEventListener("click", () => {
+  if (window.matchMedia("(min-width: 1100px)").matches) {
+    el.chatInput?.focus();
+    return;
+  }
   el.kbForm.classList.remove("hidden");
   el.kbInput.focus();
 });
@@ -4861,8 +5200,7 @@ el.kbForm.addEventListener("submit", (e) => {
   if (!text) return;
   el.kbInput.value = "";
   el.kbForm.classList.add("hidden");
-  showHeard(text);
-  respond(text);
+  chatSubmit(text);
 });
 
 el.kbInput.addEventListener("keydown", (e) => {
