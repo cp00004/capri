@@ -4524,7 +4524,8 @@ html.is-electron .sheet.center { top: calc(50% + var(--chrome-h) / 2); }
     pointer-events: none;
   }
   .chat-log > .chat-msg.capri:first-child {
-    padding: 15px 16px 15px 15px;
+    padding: 15px 14px 15px 14px;
+    font-size: 12.5px;
     border: 1px solid var(--line-2);
     border-left: 1px solid var(--accent);
     background: linear-gradient(180deg, rgba(61, 255, 158, 0.055), rgba(4, 7, 9, 0.4));
