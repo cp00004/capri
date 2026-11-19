@@ -3577,7 +3577,13 @@ input.hex { letter-spacing: 0.08em; }
 
   .stage-cadre { gap: 14px; }
 
-  .toast { left: calc(50% - 210px); right: auto; width: min(420px, 92vw); }
+  .toast {
+    left: 48px;
+    right: auto;
+    top: auto;
+    bottom: 40px;
+    width: min(420px, 40vw);
+  }
 }
 
 /* ----------------------------------------------------------- mobile layout */
