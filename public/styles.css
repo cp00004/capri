@@ -3579,10 +3579,7 @@ input.hex { letter-spacing: 0.08em; }
 @media (max-width: 860px) {
   :root { --frame-clip: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px); }
 
-  .top {
-    gap: 10px;
-    padding: max(12px, env(safe-area-inset-top)) 15px 11px;
-  }
+  .top { gap: 10px; padding: max(12px, env(safe-area-inset-top)) 15px 11px; }
   .brand { gap: 9px; }
   .brand-mark { width: 30px; height: 30px; }
   .brand-mark svg { width: 18px; height: 18px; }
@@ -3590,11 +3587,13 @@ input.hex { letter-spacing: 0.08em; }
   .brand-sub { display: none; }
   .os-clock, .top-sep { display: none; }
   .top-right { gap: 6px; }
-  .icon { width: 34px; height: 34px; }
+  .icon { width: 36px; height: 36px; }
 
   .stage { padding: 66px 16px 2px; }
-  .stage-cadre { padding: 10px 20px 0; gap: 0; }
-  .stage-tag, .stage-link, .idplate { display: none; }
+  .stage-cadre { padding: 10px 20px 0; gap: 10px; }
+  .stage-tag, .stage-link { display: none; }
+  .idplate { transform: scale(0.94); transform-origin: center top; }
+  .idplate-row { padding: 6px 11px 7px; }
   .cadre-corner { width: 10px; height: 10px; }
   .cadre-corner.tl { top: 6px; left: 4px; }
   .cadre-corner.tr { top: 6px; right: 4px; }
@@ -3604,10 +3603,13 @@ input.hex { letter-spacing: 0.08em; }
   .portrait::after { display: none; }
 
   .dock { padding: 4px 14px calc(14px + var(--safe-b)); gap: 8px; }
-  .console { padding: 11px 16px 8px; gap: 9px; }
+  .console { width: min(100%, 360px); padding: 11px 16px 9px; gap: 10px; }
+  .console-head { display: flex; padding-bottom: 9px; font-size: 7px; }
+  .console-ticks { display: none; }
   .console-meta { display: none; }
   .mic { width: 64px; }
   .subtitle { padding: 9px 13px; }
+  .sheet-head .icon { width: 34px; height: 34px; }
 
   .sheet {
     left: 0;
@@ -3666,6 +3668,12 @@ input.hex { letter-spacing: 0.08em; }
 @media (max-width: 560px) {
   .top { padding-left: 13px; padding-right: 13px; }
   .os-clock { display: none; }
+  .top-status .status-chip {
+    height: 26px;
+    padding: 0 5px;
+    border-color: transparent;
+    background: none;
+  }
   .toast { top: calc(66px + env(safe-area-inset-top, 0px)); bottom: auto; }
 }
 
