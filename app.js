@@ -186,7 +186,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "5.0.0";
+const APP_VERSION = "5.1.0";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -3517,6 +3517,17 @@ function paintAvatar(dataUrl) {
 /* -------------------------------------------------------------- update log */
 
 const UPDATE_LOG = [
+  {
+    version: "5.1.0", date: "2026-11-19", platform: "both",
+    title: "Command deck shell",
+    points: [
+      "PC rebuilt as a three-column console - rail navigation, framed subject stage, live CPU / RAM / disk / network panel",
+      "Right-hand conversation panel with streamed replies, formatting and the greeting card",
+      "Symmetric twin waveform around the microphone that reacts to standby, listening, thinking and speaking",
+      "APP and SYSTEM sheets on the rail, plus the same settings, vault, download and recorder flows behind them",
+      "Custom title strip and window chrome for the desktop app; phone layout untouched",
+    ],
+  },
   {
     version: "5.0.0", date: "2026-11-19", platform: "both",
     title: "CAPRI OS 5.0",
