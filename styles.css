@@ -2876,6 +2876,7 @@ body[data-state="listening"] #portraitImg { filter: saturate(1) contrast(1.08) b
   font-size: clamp(12px, 1.05vw, 14.5px);
 }
 .subtitle.cipher-mode { color: var(--accent); text-shadow: 0 0 12px rgba(61, 255, 158, 0.5); }
+.subtitle:empty, .heard:empty { display: none; }
 
 .console {
   position: relative;
@@ -2921,7 +2922,7 @@ body[data-state="listening"] #portraitImg { filter: saturate(1) contrast(1.08) b
   animation: mic-drift 30s linear infinite;
   transition: opacity 0.25s, border-color 0.25s;
 }
-.mic svg { width: 29%; height: 29%; }
+.mic svg { width: 32%; height: 32%; }
 .mic:hover {
   border-color: var(--accent);
   box-shadow:
@@ -3523,7 +3524,7 @@ input.hex { letter-spacing: 0.08em; }
 .console-head { display: none; }
 
 @media (min-width: 1100px) {
-  :root { --hex-h: min(clamp(320px, 56vh, 640px), calc(100dvh - 336px)); }
+  :root { --hex-h: min(clamp(340px, 64vh, 680px), calc(100dvh - 300px)); }
 
   .stage { padding: 84px 424px 24px 40px; }
 
