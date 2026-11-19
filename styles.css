@@ -3528,7 +3528,22 @@ input.hex { letter-spacing: 0.08em; }
 @keyframes sheet-up { from { transform: translateY(100%); } }
 
 /* --------------------------------------- desktop split: subject + command deck */
-.console-head { display: none; }
+.console-head {
+  display: none;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 7.5px;
+  letter-spacing: 0.22em;
+  color: var(--ink-faint);
+}
+.console-title { color: var(--ink-dim); }
+.console-ticks { display: flex; gap: 3px; }
+.console-ticks i { display: block; width: 9px; height: 1px; background: var(--line-2); }
+.console-mode { margin-left: auto; color: var(--accent); }
 
 @media (min-width: 1100px) {
   :root { --hex-h: min(clamp(340px, 64vh, 680px), calc(100dvh - 300px)); }
@@ -3557,22 +3572,7 @@ input.hex { letter-spacing: 0.08em; }
   .heard { text-align: left; max-width: none; }
 
   .console { width: 100%; padding: 15px 18px 11px; gap: 13px; }
-  .console-head {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    width: 100%;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--line);
-    font-family: var(--mono);
-    font-size: 7.5px;
-    letter-spacing: 0.22em;
-    color: var(--ink-faint);
-  }
-  .console-title { color: var(--ink-dim); }
-  .console-ticks { display: flex; gap: 3px; }
-  .console-ticks i { display: block; width: 9px; height: 1px; background: var(--line-2); }
-  .console-mode { margin-left: auto; color: var(--accent); }
+  .console-head { display: flex; padding-bottom: 10px; font-size: 7.5px; }
   .console .mic { width: 76px; margin: 2px auto 0; }
   .dock-row { justify-content: center; }
   .console-meta { justify-content: center; }
