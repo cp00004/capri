@@ -10,6 +10,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { TOOL_DEFS, executeTool, recentActions } from "./lib/pc.js";
 import { videoIntel, describeIntel } from "./lib/video.js";
@@ -3275,6 +3276,94 @@ async function handleRevoke(req, res) {
   json(res, 200, { removed: before - devices.length });
 }
 
+// ---------------------------------------------------------- system sampler
+// Real machine figures for the OS rail. Everything is best-effort: a missing
+// counter reports null and the shell shows "--" rather than a lie.
+let sysCpuPrev = null;
+let sysCache = { at: 0, data: null };
+let sysNetLast = null;
+let sysNetRate = null;
+let sysNetBusy = false;
+
+function sysCpuPercent() {
+  let idle = 0;
+  let total = 0;
+  for (const cpu of os.cpus() || []) {
+    const t = cpu.times || {};
+    idle += t.idle || 0;
+    total += (t.user || 0) + (t.nice || 0) + (t.sys || 0) + (t.idle || 0) + (t.irq || 0);
+  }
+  const prev = sysCpuPrev;
+  sysCpuPrev = { idle, total };
+  if (!prev || total <= prev.total) return null;
+  const dTotal = total - prev.total;
+  const dIdle = idle - prev.idle;
+  return Math.max(0, Math.min(100, (1 - dIdle / dTotal) * 100));
+}
+sysCpuPercent();
+
+async function sysDiskPercent() {
+  try {
+    if (typeof fs.promises.statfs !== "function") return null;
+    const root = path.parse(process.cwd()).root || "/";
+    const stats = await fs.promises.statfs(root);
+    const total = stats.blocks * stats.bsize;
+    const free = stats.bavail * stats.bsize;
+    if (!total) return null;
+    return Math.max(0, Math.min(100, (1 - free / total) * 100));
+  } catch {
+    return null;
+  }
+}
+
+function sysNetSample() {
+  if (process.platform !== "win32") return Promise.resolve(sysNetRate);
+  if (sysNetBusy) return Promise.resolve(sysNetRate);
+  sysNetBusy = true;
+  const script = "$s=Get-NetAdapterStatistics; \"$(($s|Measure-Object -Property ReceivedBytes -Sum).Sum) $(($s|Measure-Object -Property SentBytes -Sum).Sum)\"";
+  return new Promise((resolve) => {
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 1800, windowsHide: true },
+      (err, stdout) => {
+        sysNetBusy = false;
+        if (err) return resolve(sysNetRate);
+        const [rx, tx] = String(stdout).trim().split(/\s+/).map(Number);
+        if (!Number.isFinite(rx) || !Number.isFinite(tx)) return resolve(sysNetRate);
+        const now = Date.now();
+        const prev = sysNetLast;
+        sysNetLast = { rx, tx, at: now };
+        if (!prev) return resolve(sysNetRate);
+        const dt = Math.max(0.25, (now - prev.at) / 1000);
+        sysNetRate = {
+          up: Math.max(0, tx - prev.tx) / 1024 / dt,
+          down: Math.max(0, rx - prev.rx) / 1024 / dt,
+        };
+        resolve(sysNetRate);
+      },
+    );
+  });
+}
+
+async function systemSnapshot() {
+  const now = Date.now();
+  if (sysCache.data && now - sysCache.at < 1500) return sysCache.data;
+  const [disk, net] = await Promise.all([sysDiskPercent(), sysNetSample()]);
+  const memTotal = os.totalmem();
+  const data = {
+    cpu: sysCpuPercent(),
+    ram: memTotal ? (1 - os.freemem() / memTotal) * 100 : null,
+    disk,
+    net,
+    uptime: os.uptime(),
+    host: os.hostname(),
+    ts: now,
+  };
+  sysCache = { at: now, data };
+  return data;
+}
+
 // ---------------------------------------------------------------- routing
 const handler = async (req, res) => {
   loadEnv(); // re-read .env on each request
@@ -3362,6 +3451,22 @@ const handler = async (req, res) => {
       settingsRegistry: getRegistry(),
       now: Date.now(),
     });
+  }
+
+  if (req.method === "GET" && pathname === "/api/system") {
+    try {
+      return json(res, 200, await systemSnapshot());
+    } catch {
+      return json(res, 200, {
+        cpu: null,
+        ram: null,
+        disk: null,
+        net: null,
+        uptime: os.uptime(),
+        host: os.hostname(),
+        ts: Date.now(),
+      });
+    }
   }
 
   if (req.method === "GET" && pathname === "/api/auth/status") {

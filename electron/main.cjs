@@ -799,17 +799,19 @@ ipcMain.handle("capri-google-signin", () => googleSignIn());
 // ── Main window ──────────────────────────────────────────────────────────────
 function createWindow() {
   win = new BrowserWindow({
-    width:           430,
-    height:          900,
-    minWidth:        360,
-    minHeight:       600,
+    width:           1280,
+    height:          860,
+    minWidth:        420,
+    minHeight:       620,
     frame:           true,
+    titleBarStyle:   "hidden",
+    titleBarOverlay: { color: "#05070a", symbolColor: "#b9c8bf", height: 34 },
     autoHideMenuBar: true,
     resizable:       true,
     maximizable:     true,
-    backgroundColor: "#07000c",
+    backgroundColor: "#05070a",
     icon:            ICON,
-    title:           "CAPRI",
+    title:           "CAPRI // Project Capricorn",
     webPreferences: {
       preload:          path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
