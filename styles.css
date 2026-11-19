@@ -3274,6 +3274,8 @@ input.hex { letter-spacing: 0.08em; }
 .toast {
   top: calc(74px + env(safe-area-inset-top, 0px));
   bottom: auto;
+  left: 50%;
+  transform: translateX(-50%);
   border: 1px solid var(--line-2);
   border-left: 2px solid var(--accent);
   border-radius: 1px;
@@ -3582,6 +3584,7 @@ input.hex { letter-spacing: 0.08em; }
     right: auto;
     top: auto;
     bottom: 40px;
+    transform: none;
     width: min(420px, 40vw);
   }
 }
