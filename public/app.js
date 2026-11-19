@@ -157,7 +157,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "4.9.0";
+const APP_VERSION = "5.0.0";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -3475,6 +3475,18 @@ function paintAvatar(dataUrl) {
 /* -------------------------------------------------------------- update log */
 
 const UPDATE_LOG = [
+  {
+    version: "5.0.0", date: "2026-11-19", platform: "both",
+    title: "CAPRI OS 5.0",
+    points: [
+      "Full interface rebuild as a neon terminal OS - darker grid, hairline frames, mono data readouts",
+      "PC: subject stage on the left, fixed command deck on the right, side drawers",
+      "Phone: portrait stage with unit plate, full-width command plate, bottom sheets",
+      "Every sheet redrawn - settings, vault, NNN, download, update log, my side recorder",
+      "Live state readouts across the header and command deck - standby, listening, processing, transmitting",
+      "Chakra Petch, Inter and JetBrains Mono type system with the signature green accent restored",
+    ],
+  },
   {
     version: "4.9.0", date: "2026-11-18", platform: "both",
     title: "Studio glass restyle + my side recorder",
