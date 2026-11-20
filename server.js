@@ -1082,7 +1082,7 @@ const SHORTS_MAX = 6;
 
 function clampNum(n, lo, hi) { return Math.min(hi, Math.max(lo, Number(n) || lo)); }
 
-function cleanShortsClip(raw, ws, we, duration) {
+function cleanShortsClip(raw, ws, we, duration, platform) {
   if (!raw || typeof raw !== "object") return null;
   const lo = Math.max(0, ws - 2);
   const hi = Math.min(duration, we + 2);
@@ -1103,7 +1103,7 @@ function cleanShortsClip(raw, ws, we, duration) {
         .slice(0, 12)
     : [];
   // The algorithm wants these on every short, model or no model.
-  for (const tag of ["shorts", "youtubeshorts"]) {
+  for (const tag of ["shorts", platform === "tiktok" ? "tiktok" : "youtubeshorts"]) {
     if (!hashtags.some((h) => h.toLowerCase() === tag)) hashtags.unshift(tag);
   }
   return {
@@ -1241,7 +1241,7 @@ Return ONLY JSON:
     const list = Array.isArray(parsed.clips) ? parsed.clips : Array.isArray(parsed.shorts) ? parsed.shorts : parsed.start != null ? [parsed] : [];
     const clips = [];
     for (const raw of list.slice(0, 3)) {
-      const clip = cleanShortsClip(raw, w.ws, w.we, duration);
+      const clip = cleanShortsClip(raw, w.ws, w.we, duration, platform);
       if (clip) clips.push({ ...clip, provider: out.provider });
     }
     return clips;
