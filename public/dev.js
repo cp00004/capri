@@ -537,6 +537,7 @@
 
   const PLATFORMS = {
     youtube: { name: "YouTube Shorts", note: "9:16 · up to 60s · retention-first" },
+    both: { name: "YouTube + TikTok", note: "9:16 · up to 60s · one pass per feed" },
     tiktok: { name: "TikTok", note: "9:16 · up to 60s · hook in the first second" },
   };
 
@@ -915,80 +916,100 @@
             entry.read = { duration: info.duration, segments, frames };
           }
           if (!segments.length) throw new Error("I could not hear any speech in that video.");
-          let waited = 0;
-          ticker = setInterval(() => {
-            waited += 1;
-            shortsProgress(
-              `VIDEO ${tag} · WATCHING THE WHOLE VIDEO\n${windows.length} slice${windows.length === 1 ? "" : "s"} across ${clock(info.duration)} · ${segments.length} lines read · scoring every moment · ${waited}s`
-            );
-          }, 1000);
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 480_000);
-          let data;
-          try {
-            const res = await bridge().api("/api/dev/shorts", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                duration: info.duration,
-                platform: dev.platform,
-                segments,
-                frames,
-                windows,
-              }),
-              signal: ctrl.signal,
-            });
-            data = await res.json().catch(() => null);
-            if (!res.ok) throw new Error(data?.message || `analysis refused (${res.status})`);
-          } finally {
-            clearTimeout(timer);
-          }
-          const list = Array.isArray(data?.shorts) && data.shorts.length ? data.shorts : data?.pick ? [data.pick] : [];
-          if (!list.length) throw new Error("She watched the whole video and found nothing worth posting.");
+          // BOTH runs the same footage through each feed's own read: YouTube
+          // keeps its retention/loop wording, TikTok its first-second hook. The
+          // vertical encode is shared when both pick the same window.
+          const targets = dev.platform === "both" ? ["youtube", "tiktok"] : [dev.platform];
+          const cutCache = new Map();
           const before = made.length;
-          for (let i = 0; i < list.length; i += 1) {
-            const pick = list[i];
-            const start = Math.max(0, Number(pick.start) || 0);
-            const end = Math.min(info.duration, Number(pick.end) || 0);
-            if (end - start < 8) continue;
-            const length = end - start;
-            seq += 1;
-            const base = `${slug(pick.title)}-${stamp}-${seq}`;
-            shortsProgress(
-              `VIDEO ${tag} · CUTTING ${i + 1}/${list.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s${pick.score ? ` · score ${pick.score}` : ""}`
-            );
+          for (const platform of targets) {
+            const feed = PLATFORMS[platform].name;
+            let waited = 0;
+            ticker = setInterval(() => {
+              waited += 1;
+              shortsProgress(
+                `VIDEO ${tag}${targets.length > 1 ? ` · ${feed.toUpperCase()}` : ""} · WATCHING THE WHOLE VIDEO\n${windows.length} slice${windows.length === 1 ? "" : "s"} across ${clock(info.duration)} · ${segments.length} lines read · scoring every moment · ${waited}s`
+              );
+            }, 1000);
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 480_000);
+            let data;
             try {
-              const cues = buildCues(segments, start, end);
-              const srt = buildSrt(cues);
-              await D.write(`shorts/${base}.srt`, srt);
-              await D.write(`shorts/${base}.ass`, buildAss(cues));
-              const cut = await D.cut({
-                video: video.path,
-                start,
-                duration: length,
-                out: `shorts/${base}.mp4`,
-                captions: `shorts/${base}.ass`,
-                width: info.width,
-                height: info.height,
+              const res = await bridge().api("/api/dev/shorts", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  duration: info.duration,
+                  platform,
+                  segments,
+                  frames,
+                  windows,
+                }),
+                signal: ctrl.signal,
               });
-              const meta = [
-                `VIDEO\n${entry.name}`,
-                `PLATFORM\n${PLATFORMS[dev.platform].name}`,
-                `TITLE\n${pick.title || ""}`,
-                `HOOK\n${pick.hook || ""}`,
-                `CAPTION\n${pick.caption || ""}`,
-                `HASHTAGS\n${(pick.hashtags || []).map((h) => `#${h}`).join(" ")}`,
-                `DESCRIPTION\n${pick.description || ""}`,
-                `WHY IT KEEPS VIEWERS\n${pick.why || ""}`,
-                `RETENTION SCORE\n${pick.score || "?"}/100`,
-                `SOURCE\n${video.path}`,
-                `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
-                `FILE\nshorts/${base}.mp4`,
-              ].join("\n\n");
-              await D.write(`shorts/${base}.txt`, meta);
-              made.push({ pick, cut, base, meta, videoName: entry.name });
-            } catch (err) {
-              failures.push(`${entry.name} ${clock(start)}-${clock(end)}: ${err.message || err}`);
+              data = await res.json().catch(() => null);
+              if (!res.ok) throw new Error(data?.message || `analysis refused (${res.status})`);
+            } finally {
+              clearTimeout(timer);
+              if (ticker) { clearInterval(ticker); ticker = null; }
+            }
+            const list = Array.isArray(data?.shorts) && data.shorts.length ? data.shorts : data?.pick ? [data.pick] : [];
+            if (!list.length) {
+              if (targets.length === 1) throw new Error("She watched the whole video and found nothing worth posting.");
+              failures.push(`${entry.name} · ${feed}: nothing worth posting`);
+              continue;
+            }
+            for (let i = 0; i < list.length; i += 1) {
+              const pick = list[i];
+              const start = Math.max(0, Number(pick.start) || 0);
+              const end = Math.min(info.duration, Number(pick.end) || 0);
+              if (end - start < 8) continue;
+              const length = end - start;
+              const key = `${start.toFixed(2)}|${end.toFixed(2)}`;
+              const pfx = targets.length > 1 ? (platform === "tiktok" ? "-tt" : "-yt") : "";
+              shortsProgress(
+                `VIDEO ${tag}${targets.length > 1 ? ` · ${feed.toUpperCase()}` : ""} · CUTTING ${i + 1}/${list.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s${pick.score ? ` · score ${pick.score}` : ""}`
+              );
+              try {
+                let hold = cutCache.get(key);
+                if (!hold) {
+                  seq += 1;
+                  const fileBase = `${slug(pick.title)}-${stamp}-${seq}`;
+                  const cues = buildCues(segments, start, end);
+                  await D.write(`shorts/${fileBase}.srt`, buildSrt(cues));
+                  await D.write(`shorts/${fileBase}.ass`, buildAss(cues));
+                  const cut = await D.cut({
+                    video: video.path,
+                    start,
+                    duration: length,
+                    out: `shorts/${fileBase}.mp4`,
+                    captions: `shorts/${fileBase}.ass`,
+                    width: info.width,
+                    height: info.height,
+                  });
+                  hold = { cut, fileBase };
+                  cutCache.set(key, hold);
+                }
+                const base = `${hold.fileBase}${pfx}`;
+                const meta = [
+                  `VIDEO\n${entry.name}`,
+                  `PLATFORM\n${feed}`,
+                  `TITLE\n${pick.title || ""}`,
+                  `HOOK\n${pick.hook || ""}`,
+                  `CAPTION\n${pick.caption || ""}`,
+                  `HASHTAGS\n${(pick.hashtags || []).map((h) => `#${h}`).join(" ")}`,
+                  `DESCRIPTION\n${pick.description || ""}`,
+                  `WHY IT KEEPS VIEWERS\n${pick.why || ""}`,
+                  `RETENTION SCORE\n${pick.score || "?"}/100`,
+                  `SOURCE\n${video.path}`,
+                  `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
+                  `FILE\nshorts/${hold.fileBase}.mp4`,
+                ].join("\n\n");
+                await D.write(`shorts/${base}.txt`, meta);
+                made.push({ pick, cut: hold.cut, base, meta, videoName: entry.name, platform });
+              } catch (err) {
+                failures.push(`${entry.name}${targets.length > 1 ? ` ${feed}` : ""} ${clock(start)}-${clock(end)}: ${err.message || err}`);
+              }
             }
           }
           entry.state = made.length > before ? "done" : "nothing postable";
@@ -1067,7 +1088,7 @@
       const length = Math.max(0, (Number(pick.end) || 0) - (Number(pick.start) || 0));
       const when = document.createElement("div");
       when.className = "dev-when";
-      when.textContent = `${clock(pick.start)} - ${clock(pick.end)} · ${length.toFixed(1)}s · ${PLATFORMS[dev.platform].name}${pick.score ? ` · score ${pick.score}/100` : ""}`;
+      when.textContent = `${clock(pick.start)} - ${clock(pick.end)} · ${length.toFixed(1)}s · ${PLATFORMS[entry.platform || dev.platform].name}${pick.score ? ` · score ${pick.score}/100` : ""}`;
       body.appendChild(when);
       const from = document.createElement("div");
       from.className = "yt-short-from";
