@@ -854,6 +854,7 @@
 
     const card = document.createElement("article");
     card.className = "yt-short";
+    if (r.aspect === "16:9") card.style.gridTemplateColumns = "minmax(0, 440px) minmax(0, 1fr)";
     const frame = document.createElement("div");
     frame.className = "yt-short-frame";
     const player = document.createElement("video");
