@@ -91,6 +91,7 @@ contextBridge.exposeInMainWorld("capriDev", {
   camera: (args) => ipcRenderer.invoke("capri-dev-camera", args || {}),
   toonScript: (args) => ipcRenderer.invoke("capri-dev-toon-script", args || {}),
   toonSave: (args) => ipcRenderer.invoke("capri-dev-toon-save", args || {}),
+  storyScript: (args) => ipcRenderer.invoke("capri-dev-story-script", args || {}),
   reveal: (p) => ipcRenderer.invoke("capri-dev-reveal", String(p || "")),
   open: (p) => ipcRenderer.invoke("capri-dev-open", String(p || "")),
   ffmpeg: () => ipcRenderer.invoke("capri-dev-ffmpeg"),

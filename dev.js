@@ -28,17 +28,16 @@
     shortsBusy: false,
     platform: "youtube",
     contentMode: "shorts",
-    camPreset: "mix",
-    camAspect: "vertical",
-    camSeconds: 4,
-    camSeq: false,
-    cinemaFiles: [],
-    cinemaBusy: false,
+    storyType: "whatif",
+    storyAspect: "vertical",
+    storySeconds: 20,
+    storyBusy: false,
+    storyScript: null,
     toonStyle: "cocomelon",
     toonAspect: "vertical",
     toonSeconds: 15,
     toonMusic: true,
-    toonPhoto: null,
+    toonPhotos: [],
     toonBusy: false,
     toonStory: null,
     nameMode: "",
@@ -73,14 +72,14 @@
       nameInput: $("devNameInput"),
       viewTabs: document.querySelector(".dev-viewtabs"),
       ytView: $("devYoutubeView"),
-      cinemaView: $("devCinemaView"),
-      cinemaTitle: $("cinemaTitle"),
-      cinemaMeta: $("cinemaMeta"),
-      cinemaRun: $("cinemaRun"),
-      cinemaProgress: $("cinemaProgress"),
-      cinemaResult: $("cinemaResult"),
-      cinemaFiles: $("cinemaFiles"),
-      cinemaSeq: $("cinemaSeq"),
+      storyView: $("devStoryView"),
+      storyTitle: $("storyTitle"),
+      storyMeta: $("storyMeta"),
+      storyRun: $("storyRun"),
+      storyProgress: $("storyProgress"),
+      storyResult: $("storyResult"),
+      storyStage: $("storyStage"),
+      storyTopic: $("storyTopic"),
       toonView: $("devToonView"),
       toonTitle: $("toonTitle"),
       toonMeta: $("toonMeta"),
@@ -198,14 +197,14 @@
       $("devTerminalView").classList.add("hidden");
       const mode = dev.contentMode;
       dev.els.ytView.classList.toggle("hidden", mode !== "shorts");
-      dev.els.cinemaView.classList.toggle("hidden", mode !== "cinema");
+      dev.els.storyView.classList.toggle("hidden", mode !== "story");
       dev.els.toonView.classList.toggle("hidden", mode !== "toon");
-      if (mode === "cinema") paintCinema();
+      if (mode === "story") paintStory();
       else if (mode === "toon") paintToon();
       else paintStudio();
     } else {
       dev.els.ytView.classList.add("hidden");
-      dev.els.cinemaView.classList.add("hidden");
+      dev.els.storyView.classList.add("hidden");
       dev.els.toonView.classList.add("hidden");
       showView(dev.mainView || "chat");
     }
@@ -697,179 +696,150 @@
     return `/api/dev/media?path=${encodeURIComponent(String(abs || ""))}`;
   }
 
-  /* ------------------------------------------------------------ cinema */
+  /* ------------------------------------------------------------ stories */
+
+  const STORY_TYPES = { whatif: "What If", how: "How It Works", truestory: "True Story" };
 
   function setContentMode(name) {
-    if (name !== "shorts" && name !== "cinema" && name !== "toon") return;
+    if (name !== "shorts" && name !== "story" && name !== "toon") return;
     dev.contentMode = name;
     for (const b of document.querySelectorAll("[data-content-mode]")) {
       b.classList.toggle("active", b.getAttribute("data-content-mode") === name);
     }
     $("devContentShorts").classList.toggle("hidden", name !== "shorts");
-    $("devContentCinema").classList.toggle("hidden", name !== "cinema");
+    $("devContentStory").classList.toggle("hidden", name !== "story");
     $("devContentToon").classList.toggle("hidden", name !== "toon");
     showTab("content");
   }
 
-  function setCam(name) {
-    if (!CAMS[name]) return;
-    dev.camPreset = name;
-    for (const b of document.querySelectorAll("[data-cam]")) {
-      b.classList.toggle("active", b.getAttribute("data-cam") === name);
+  function setStoryType(name) {
+    if (!STORY_TYPES[name]) return;
+    dev.storyType = name;
+    for (const b of document.querySelectorAll("[data-story-type]")) {
+      b.classList.toggle("active", b.getAttribute("data-story-type") === name);
     }
-    paintCinema();
+    paintStory();
   }
 
-  function setCamAspect(name) {
-    dev.camAspect = name === "wide" ? "wide" : "vertical";
-    for (const b of document.querySelectorAll("[data-cam-aspect]")) {
-      b.classList.toggle("active", b.getAttribute("data-cam-aspect") === dev.camAspect);
+  function setStoryAspect(name) {
+    dev.storyAspect = name === "wide" ? "wide" : "vertical";
+    for (const b of document.querySelectorAll("[data-story-aspect]")) {
+      b.classList.toggle("active", b.getAttribute("data-story-aspect") === dev.storyAspect);
     }
-    paintCinema();
+    paintStory();
   }
 
-  function setCamSecs(value) {
-    const n = Number(value) || 4;
-    dev.camSeconds = Math.min(8, Math.max(2, n));
-    for (const b of document.querySelectorAll("[data-cam-secs]")) {
-      b.classList.toggle("active", Number(b.getAttribute("data-cam-secs")) === dev.camSeconds);
+  function setStorySecs(value) {
+    const n = Number(value) || 20;
+    dev.storySeconds = Math.min(30, Math.max(15, n));
+    for (const b of document.querySelectorAll("[data-story-secs]")) {
+      b.classList.toggle("active", Number(b.getAttribute("data-story-secs")) === dev.storySeconds);
     }
-    paintCinema();
+    paintStory();
   }
 
-  function toggleCamSeq() {
-    dev.camSeq = !dev.camSeq;
-    if (dev.els.cinemaSeq) {
-      dev.els.cinemaSeq.textContent = `SEQUENCE: ${dev.camSeq ? "ON" : "OFF"}`;
-      dev.els.cinemaSeq.setAttribute("aria-pressed", String(dev.camSeq));
-      dev.els.cinemaSeq.classList.toggle("active", dev.camSeq);
-    }
-    paintCinema();
+  function storyTopic() {
+    return String(dev.els.storyTopic?.value || "").trim();
   }
 
-  function renderCinemaFiles() {
-    const box = dev.els.cinemaFiles;
-    box.textContent = "";
-    box.classList.toggle("hidden", !dev.cinemaFiles.length);
-    for (const file of dev.cinemaFiles) {
-      const row = document.createElement("div");
-      row.className = "dev-file";
-      row.style.paddingLeft = "52px";
-      const thumb = document.createElement("img");
-      thumb.alt = "";
-      thumb.style.cssText = "position:absolute;left:6px;top:6px;width:38px;height:38px;object-fit:cover;border:1px solid var(--line);";
-      row.appendChild(thumb);
-      D.readImage(file.path)
-        .then((r) => { thumb.src = r.dataUrl; })
-        .catch(() => { thumb.remove(); row.style.paddingLeft = ""; });
-      const name = document.createElement("span");
-      name.textContent = file.name;
-      row.appendChild(name);
-      const x = document.createElement("button");
-      x.type = "button";
-      x.className = "dev-file-x";
-      x.setAttribute("aria-label", `Remove ${file.name}`);
-      x.textContent = "\u00d7";
-      x.addEventListener("click", () => {
-        if (dev.cinemaBusy) return;
-        dev.cinemaFiles = dev.cinemaFiles.filter((f) => f.path !== file.path);
-        renderCinemaFiles();
-        paintCinema();
-      });
-      row.appendChild(x);
-      box.appendChild(row);
-    }
+  function paintStory() {
+    if (!dev.els?.storyTitle) return;
+    const topic = storyTopic();
+    const frame = dev.storyAspect === "wide" ? "16:9" : "9:16";
+    dev.els.storyTitle.textContent = dev.storyScript?.title || (topic ? shortIdea(topic) : "No topic yet");
+    dev.els.storyMeta.textContent = topic
+      ? `${STORY_TYPES[dev.storyType]} · ${frame} · ${dev.storySeconds}s · she writes the hook and beats, then renders every frame here · lands in ${dev.root ? `${dev.root}\\stories` : "stories/ after you open a folder"}`
+      : "Pick a format and type a topic in the rail. What If pushes one idea to its limit, How It Works opens it up, True Story retells a real event.";
+    dev.els.storyRun.disabled = !(topic && dev.root) || dev.storyBusy;
   }
 
-  function paintCinema() {
-    if (!dev.els?.cinemaTitle) return;
-    const files = dev.cinemaFiles;
-    dev.els.cinemaTitle.textContent = !files.length
-      ? "No images yet"
-      : files.length === 1
-        ? files[0].name
-        : `${files.length} stills loaded`;
-    const frame = dev.camAspect === "wide" ? "16:9" : "9:16";
-    const seqNote = dev.camSeq && files.length > 1 ? ` · sequence, ${files.length} shots with crossfades` : "";
-    dev.els.cinemaMeta.textContent = files.length
-      ? `${CAMS[dev.camPreset]} · ${frame} · ${dev.camSeconds}s per shot${seqNote} · renders into ${dev.root ? `${dev.root}\\cinema` : "cinema/ after you open a folder"}`
-      : "Pick one or more stills in the rail. Every move is a real camera path over the frame - dolly, crash zoom, orbit, crane - finished with grain and vignette.";
-    dev.els.cinemaRun.disabled = !files.length || !dev.root || dev.cinemaBusy;
-    renderCinemaFiles();
+  function storyProgress(text) {
+    const box = dev.els.storyProgress;
+    box.classList.remove("hidden");
+    box.textContent = text;
   }
 
-  async function pickCinemaImages() {
-    if (dev.cinemaBusy) return;
-    try {
-      const files = await D.pickImages();
-      const known = new Set(dev.cinemaFiles.map((f) => f.path));
-      for (const f of files) {
-        if (!known.has(f.path)) dev.cinemaFiles.push(f);
-        if (dev.cinemaFiles.length >= 8) break;
-      }
-      paintCinema();
-    } catch (err) {
-      sysLine(`could not add those images: ${err.message || err}`);
-    }
-  }
-
-  function cinemaProgress(text) {
-    dev.els.cinemaProgress.classList.remove("hidden");
-    dev.els.cinemaProgress.textContent = text;
-  }
-
-  async function runCinema() {
-    if (dev.cinemaBusy) return;
-    if (!dev.root) {
-      cinemaProgress("Open a workspace folder first - the shots are written into it.");
+  async function runStory() {
+    if (dev.storyBusy) return;
+    const topic = storyTopic();
+    if (!topic) {
+      storyProgress("TYPE A TOPIC FIRST\nThe rail holds the topic.");
       return;
     }
-    if (!dev.cinemaFiles.length) return;
-    dev.cinemaBusy = true;
-    dev.els.cinemaRun.disabled = true;
-    dev.els.cinemaResult.classList.add("hidden");
+    if (!dev.root) {
+      storyProgress("OPEN A WORKSPACE FOLDER FIRST\nThe film is written into <folder>/stories.");
+      return;
+    }
+    if (!window.CapriZdf) {
+      storyProgress("STORIES ENGINE MISSING\nReload the app and try again.");
+      return;
+    }
+    dev.storyBusy = true;
+    dev.storyScript = null;
+    dev.els.storyResult.classList.add("hidden");
+    dev.els.storyStage.classList.remove("hidden");
+    dev.els.storyStage.textContent = "";
+    paintStory();
     const started = Date.now();
-    const count = dev.camSeq && dev.cinemaFiles.length > 1 ? dev.cinemaFiles.length : 1;
-    let waited = 0;
+    let stage = "WRITING THE SCRIPT";
     const ticker = setInterval(() => {
-      waited = Math.round((Date.now() - started) / 1000);
-      cinemaProgress(`RENDERING\n${count} shot${count === 1 ? "" : "s"} · ${CAMS[dev.camPreset]} · ${waited}s`);
+      storyProgress(`${stage}\n${Math.round((Date.now() - started) / 1000)}s`);
     }, 1000);
-    cinemaProgress(`RENDERING\n${count} shot${count === 1 ? "" : "s"} · ${CAMS[dev.camPreset]}`);
+    storyProgress("WRITING THE SCRIPT\nbuilding the hook and beats");
     try {
-      const r = await D.camera({
-        images: dev.cinemaFiles.map((f) => f.path),
-        preset: dev.camPreset,
-        aspect: dev.camAspect,
-        seconds: dev.camSeconds,
-        sequence: dev.camSeq,
-        name: dev.cinemaFiles[0].name.replace(/\.[^.]+$/, ""),
+      const script = await D.storyScript({ topic, type: dev.storyType, seconds: dev.storySeconds });
+      script.type = dev.storyType;
+      dev.storyScript = script;
+      stage = "RENDERING";
+      storyProgress(`RENDERING\n"${script.title}" · ${script.scenes.length} scenes`);
+      const render = await window.CapriZdf.renderStory({
+        script,
+        seconds: dev.storySeconds,
+        aspect: dev.storyAspect,
+        host: dev.els.storyStage,
+        onProgress: (p) => { stage = `RENDERING ${Math.round(p * 100)}%`; },
       });
-      cinemaProgress(`DONE\n${r.seconds}s · ${r.aspect} · ${Math.round(r.bytes / 100000) / 10} MB\n${r.path}`);
-      renderCinemaResult(r);
-      sysLine(`camera shot ready: ${r.path}`);
+      stage = "SCORING";
+      storyProgress("SCORING\nbuilding the soundtrack");
+      const music = window.CapriZdf.makeScore(render.seconds, dev.storyType);
+      stage = "WRITING MP4";
+      storyProgress("WRITING MP4\nconverting the recording");
+      const r = await D.toonSave({
+        kind: "video",
+        folder: "stories",
+        name: script.title || topic.slice(0, 40),
+        videoB64: render.videoB64,
+        wavB64: music?.wavB64 || "",
+        width: render.width,
+        height: render.height,
+        seconds: render.seconds,
+        aspect: render.aspect,
+      });
+      storyProgress(`DONE\n${r.seconds}s · ${r.aspect} · ${script.scenes.length} scenes · ${Math.round(r.bytes / 100000) / 10} MB\n${r.path}`);
+      renderStoryResult(r, script);
+      sysLine(`story film ready: ${r.path}`);
     } catch (err) {
-      cinemaProgress(`FAILED\n${err.message || err}`);
+      storyProgress(`FAILED\n${err.message || err}`);
     } finally {
       clearInterval(ticker);
-      dev.cinemaBusy = false;
-      paintCinema();
+      dev.storyBusy = false;
+      paintStory();
     }
   }
 
-  function renderCinemaResult(r) {
-    const box = dev.els.cinemaResult;
+  function renderStoryResult(r, script) {
+    const box = dev.els.storyResult;
     box.textContent = "";
     box.classList.remove("hidden");
     const head = document.createElement("div");
     head.className = "yt-results-head";
     const h = document.createElement("h4");
-    h.textContent = r.sequence ? `${r.shots.length}-shot camera sequence` : `${CAMS[r.shots[0]?.preset] || "Camera"} shot`;
+    h.textContent = `${script.title} · ${STORY_TYPES[script.type] || script.type}`;
     head.appendChild(h);
     const reveal = document.createElement("button");
     reveal.type = "button";
     reveal.className = "dev-mini";
-    reveal.textContent = "OPEN CINEMA FOLDER";
+    reveal.textContent = "OPEN STORIES FOLDER";
     reveal.addEventListener("click", () => D.reveal(r.path));
     head.appendChild(reveal);
     box.appendChild(head);
@@ -898,19 +868,17 @@
     const body = document.createElement("div");
     body.className = "yt-short-body";
     const title = document.createElement("h4");
-    title.textContent = r.sequence ? `${r.shots.length} shots, cut together` : CAMS[r.shots[0]?.preset] || "Camera shot";
+    title.textContent = `"${script.hook}"`;
     body.appendChild(title);
     const when = document.createElement("div");
     when.className = "dev-when";
-    when.textContent = `${r.seconds}s · ${r.width}x${r.height} · ${Math.round(r.bytes / 100000) / 10} MB · 30fps`;
+    when.textContent = `${r.seconds}s · ${r.width}x${r.height} · ${Math.round(r.bytes / 100000) / 10} MB · 30fps · ${script.source === "template" ? "local beats" : "AI script"}`;
     body.appendChild(when);
-    const shots = document.createElement("div");
-    shots.className = "yt-short-from";
-    shots.textContent = r.shots
-      .map((s, i) => `${r.sequence ? `shot ${i + 1}: ` : ""}${s.image} - ${CAMS[s.preset] || s.preset} · ${s.seconds}s`)
-      .join("\n");
-    shots.style.whiteSpace = "pre-wrap";
-    body.appendChild(shots);
+    const beats = document.createElement("div");
+    beats.className = "yt-short-from";
+    beats.textContent = script.scenes.map((s, i) => `${i + 1}. ${s.narration}  [${s.visual} · ${s.symbol}]`).join("\n");
+    beats.style.whiteSpace = "pre-wrap";
+    body.appendChild(beats);
     const where = document.createElement("div");
     where.className = "dev-tags";
     where.textContent = r.path;
@@ -926,8 +894,8 @@
     const again = document.createElement("button");
     again.type = "button";
     again.className = "dev-mini";
-    again.textContent = "RENDER AGAIN";
-    again.addEventListener("click", () => runCinema());
+    again.textContent = "MAKE AGAIN";
+    again.addEventListener("click", () => runStory());
     actions.appendChild(again);
     body.appendChild(actions);
     card.appendChild(body);
@@ -979,37 +947,39 @@
     const box = dev.els.toonFiles;
     if (!box) return;
     box.textContent = "";
-    if (!dev.toonPhoto) {
+    if (!dev.toonPhotos.length) {
       box.classList.add("hidden");
       return;
     }
     box.classList.remove("hidden");
-    const row = document.createElement("div");
-    row.className = "dev-file";
-    row.style.paddingLeft = "52px";
-    const thumb = document.createElement("img");
-    thumb.alt = "";
-    thumb.style.cssText = "position:absolute;left:6px;top:6px;width:38px;height:38px;object-fit:cover;border:1px solid var(--line);";
-    row.appendChild(thumb);
-    D.readImage(dev.toonPhoto.path)
-      .then((r) => { thumb.src = r.dataUrl; })
-      .catch(() => { thumb.remove(); row.style.paddingLeft = ""; });
-    const name = document.createElement("span");
-    name.textContent = dev.toonPhoto.name;
-    row.appendChild(name);
-    const x = document.createElement("button");
-    x.type = "button";
-    x.className = "dev-file-x";
-    x.setAttribute("aria-label", "Remove photo");
-    x.textContent = "\u00d7";
-    x.addEventListener("click", () => {
-      if (dev.toonBusy) return;
-      dev.toonPhoto = null;
-      renderToonPhoto();
-      paintToon();
+    dev.toonPhotos.forEach((photo, index) => {
+      const row = document.createElement("div");
+      row.className = "dev-file";
+      row.style.paddingLeft = "52px";
+      const thumb = document.createElement("img");
+      thumb.alt = "";
+      thumb.style.cssText = "position:absolute;left:6px;top:6px;width:38px;height:38px;object-fit:cover;border:1px solid var(--line);border-radius:50%;";
+      row.appendChild(thumb);
+      D.readImage(photo.path)
+        .then((r) => { thumb.src = r.dataUrl; })
+        .catch(() => { thumb.remove(); row.style.paddingLeft = ""; });
+      const name = document.createElement("span");
+      name.textContent = `#${index + 1} · ${photo.name}`;
+      row.appendChild(name);
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "dev-file-x";
+      x.setAttribute("aria-label", "Remove photo");
+      x.textContent = "\u00d7";
+      x.addEventListener("click", () => {
+        if (dev.toonBusy) return;
+        dev.toonPhotos = dev.toonPhotos.filter((f) => f.path !== photo.path);
+        renderToonPhoto();
+        paintToon();
+      });
+      row.appendChild(x);
+      box.appendChild(row);
     });
-    row.appendChild(x);
-    box.appendChild(row);
   }
 
   async function pickToonPhoto() {
@@ -1017,7 +987,11 @@
     try {
       const files = await D.pickImages();
       if (!files.length) return;
-      dev.toonPhoto = files[0];
+      const known = new Set(dev.toonPhotos.map((f) => f.path));
+      for (const f of files) {
+        if (!known.has(f.path)) dev.toonPhotos.push(f);
+        if (dev.toonPhotos.length >= 4) break;
+      }
       renderToonPhoto();
       paintToon();
     } catch (err) {
@@ -1042,7 +1016,7 @@
     const frame = dev.toonAspect === "wide" ? "16:9" : "9:16";
     dev.els.toonTitle.textContent = dev.toonStory?.title || (prompt ? shortIdea(prompt) : "No idea yet");
     const bits = [TOON_STYLES[dev.toonStyle], frame, `${dev.toonSeconds}s`];
-    if (dev.toonPhoto) bits.push("photo in the story");
+    if (dev.toonPhotos.length) bits.push(`${dev.toonPhotos.length} character photo${dev.toonPhotos.length > 1 ? "s" : ""}`);
     bits.push(dev.toonMusic ? "music" : "no music");
     dev.els.toonMeta.textContent = prompt
       ? `${bits.join(" · ")} · she writes the beats, then animates every frame on this machine · lands in ${dev.root ? `${dev.root}\\toon` : "toon/ after you open a folder"}`
@@ -1058,14 +1032,15 @@
     renderToonPhoto();
   }
 
-  async function readToonImage() {
-    if (!dev.toonPhoto) return "";
-    try {
-      const r = await D.readImage(dev.toonPhoto.path);
-      return r?.dataUrl || "";
-    } catch {
-      return "";
+  async function readToonImages() {
+    const list = [];
+    for (const photo of dev.toonPhotos) {
+      try {
+        const r = await D.readImage(photo.path);
+        if (r?.dataUrl) list.push(r.dataUrl);
+      } catch { /* skip broken photo */ }
     }
+    return list;
   }
 
   async function runToon() {
@@ -1101,13 +1076,13 @@
       dev.toonStory = story;
       stage = "ANIMATING";
       toonProgress(`ANIMATING\n"${story.title}" · ${story.scenes.length} scenes`);
-      const imageDataUrl = await readToonImage();
+      const photoDataUrls = await readToonImages();
       const render = await window.CapriToon.renderShort({
         story,
         seconds: dev.toonSeconds,
         aspect: dev.toonAspect,
         host: dev.els.toonStage,
-        imageDataUrl,
+        photoDataUrls,
         onProgress: (p) => { stage = `ANIMATING ${Math.round(p * 100)}%`; },
       });
       stage = "SCORING";
@@ -1164,8 +1139,8 @@
       const story = await D.toonScript({ prompt, seconds: dev.toonSeconds });
       story.style = dev.toonStyle;
       dev.toonStory = story;
-      const imageDataUrl = await readToonImage();
-      const t = await window.CapriToon.renderThumbs({ story, imageDataUrl });
+      const photoDataUrls = await readToonImages();
+      const t = await window.CapriToon.renderThumbs({ story, photoDataUrls });
       toonProgress("WRITING PNGs\nsaving both crops");
       const r = await D.toonSave({ kind: "thumb", name: story.title || "toon", pngs: t.pngs });
       toonProgress(`DONE\n2 thumbnails · 1280x720 + 1080x1920\n${r.path}`);
@@ -1889,18 +1864,17 @@
     document.querySelectorAll("[data-content-mode]").forEach((b) => {
       b.addEventListener("click", () => setContentMode(b.getAttribute("data-content-mode")));
     });
-    document.querySelectorAll("[data-cam]").forEach((b) => {
-      b.addEventListener("click", () => setCam(b.getAttribute("data-cam")));
+    document.querySelectorAll("[data-story-type]").forEach((b) => {
+      b.addEventListener("click", () => setStoryType(b.getAttribute("data-story-type")));
     });
-    document.querySelectorAll("[data-cam-aspect]").forEach((b) => {
-      b.addEventListener("click", () => setCamAspect(b.getAttribute("data-cam-aspect")));
+    document.querySelectorAll("[data-story-aspect]").forEach((b) => {
+      b.addEventListener("click", () => setStoryAspect(b.getAttribute("data-story-aspect")));
     });
-    document.querySelectorAll("[data-cam-secs]").forEach((b) => {
-      b.addEventListener("click", () => setCamSecs(b.getAttribute("data-cam-secs")));
+    document.querySelectorAll("[data-story-secs]").forEach((b) => {
+      b.addEventListener("click", () => setStorySecs(b.getAttribute("data-story-secs")));
     });
-    $("cinemaSeq").addEventListener("click", toggleCamSeq);
-    $("cinemaPick").addEventListener("click", pickCinemaImages);
-    $("cinemaRun").addEventListener("click", runCinema);
+    $("storyRun").addEventListener("click", runStory);
+    dev.els.storyTopic.addEventListener("input", paintStory);
     document.querySelectorAll("[data-toon-style]").forEach((b) => {
       b.addEventListener("click", () => setToonStyle(b.getAttribute("data-toon-style")));
     });

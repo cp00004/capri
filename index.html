@@ -81,7 +81,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="styles.css?v=5.2.0" />
+<link rel="stylesheet" href="styles.css?v=5.3.0" />
 </head>
 <body data-state="idle">
 <script>document.documentElement.classList.toggle("is-electron", Boolean(window.capriNative));</script>
@@ -806,9 +806,9 @@
             <button type="button" class="dev-platform" data-toon-secs="20">20s</button>
           </div>
           <button id="toonMusic" class="dev-mini wide" type="button" aria-pressed="true">MUSIC: ON</button>
-          <button id="toonPick" class="dev-btn wide" type="button">ADD A PHOTO (OPTIONAL)</button>
+          <button id="toonPick" class="dev-btn wide" type="button">ADD CHARACTER PHOTO</button>
           <div id="toonFiles" class="dev-files hidden"></div>
-          <p class="dev-hint">Type an idea and she writes the beats, rigs a toddler toon, paints the world, animates every frame, scores it and cuts a real MP4. Add a photo and it becomes the story's special object.</p>
+          <p class="dev-hint">Type any idea - a fight, a race, a joke, a rescue. She casts the characters, writes the beats, animates every frame, scores it and cuts a real MP4. Each photo becomes a character's face, in order: add one per character (Luffy, then Zoro) and they fight as themselves.</p>
         </div>
       </div>
       <button id="devExit" class="dev-btn ghost wide dev-exit" type="button">&times; CLOSE DEV MODE</button>
@@ -843,18 +843,19 @@
           <div id="shortsResult" class="yt-results hidden"></div>
         </div>
       </div>
-      <div id="devCinemaView" class="dev-view hidden">
+      <div id="devStoryView" class="dev-view hidden">
         <div class="yt-scroll">
           <header class="yt-head">
             <div class="yt-head-text">
-              <p class="dev-kicker">CINEMA // CAMERA ENGINE</p>
-              <h3 id="cinemaTitle">No images yet</h3>
-              <p id="cinemaMeta" class="yt-meta">Pick stills in the rail, choose a camera move, and she renders a real crane, orbit or crash zoom through the frame.</p>
+              <p class="dev-kicker">STORIES // CINEMATIC ENGINE</p>
+              <h3 id="storyTitle">No topic yet</h3>
+              <p id="storyMeta" class="yt-meta">Pick What If, How It Works or True Story in the rail, type the topic, and she renders the whole explainer short with miniature CGI scenes and documentary captions.</p>
             </div>
-            <button id="cinemaRun" class="dev-btn accent" type="button" disabled>RENDER SHOT</button>
+            <button id="storyRun" class="dev-btn accent" type="button" disabled>MAKE FILM</button>
           </header>
-          <div id="cinemaProgress" class="dev-progress hidden"></div>
-          <div id="cinemaResult" class="yt-results hidden"></div>
+          <div id="storyStage" class="toon-stage hidden"></div>
+          <div id="storyProgress" class="dev-progress hidden"></div>
+          <div id="storyResult" class="yt-results hidden"></div>
         </div>
       </div>
       <div id="devToonView" class="dev-view hidden">
@@ -984,8 +985,9 @@
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
-<script src="toon.js?v=5.2.0"></script>
-<script src="dev.js?v=5.2.0"></script>
-<script src="app.js?v=5.2.0"></script>
+<script src="toon.js?v=5.3.0"></script>
+<script src="zdf.js?v=5.3.0"></script>
+<script src="dev.js?v=5.3.0"></script>
+<script src="app.js?v=5.3.0"></script>
 </body>
 </html>
