@@ -1282,7 +1282,7 @@ body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 
   font-size: 14px; line-height: 1; cursor: pointer; border-radius: 2px;
 }
 .dev-file-x:hover { border-color: var(--pink); background: rgba(255, 11, 82, 0.12); }
-.dev-platforms { display: flex; gap: 6px; margin: 10px; }
+.dev-platforms { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px; }
 .dev-platform {
   flex: 1; font-family: var(--mono); font-size: 11px; letter-spacing: 0.5px;
   color: var(--ink-dim); background: transparent; border: 1px solid var(--line-2);
