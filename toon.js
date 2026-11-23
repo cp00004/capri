@@ -869,7 +869,19 @@
       ctx.closePath(); ctx.fill();
       ctx.fillStyle = "#ff7b29";
       ctx.beginPath();
-      ctx.moveTo(W * 0.44, H * 0.27); ctx.lineTo(W * 0.5, H * 0.27); ctx.lineTo(W * 0.62, H * 0.9); ctx.lineTo(W * 0.5, H * 0.9);
+      ctx.moveTo(W * 0.465, H * 0.27);
+      ctx.lineTo(W * 0.5, H * 0.27);
+      ctx.quadraticCurveTo(W * 0.55, H * 0.6, W * 0.62, H * 0.88);
+      ctx.lineTo(W * 0.55, H * 0.89);
+      ctx.quadraticCurveTo(W * 0.5, H * 0.62, W * 0.475, H * 0.3);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "rgba(255,220,120,0.85)";
+      ctx.beginPath();
+      ctx.moveTo(W * 0.478, H * 0.28);
+      ctx.lineTo(W * 0.492, H * 0.28);
+      ctx.quadraticCurveTo(W * 0.52, H * 0.6, W * 0.585, H * 0.87);
+      ctx.lineTo(W * 0.56, H * 0.87);
+      ctx.quadraticCurveTo(W * 0.5, H * 0.62, W * 0.482, H * 0.3);
       ctx.closePath(); ctx.fill();
       const rand = rng(seed + 71);
       for (let i = 0; i < 14; i += 1) {
@@ -1325,6 +1337,7 @@
     ["trophy", /(trophy|medal|prize|cup)/],
     ["pumpkin", /(pumpkin|halloween)/],
     ["skateboard", /(skate|board)/],
+    ["robot", /(robot|droid|android)/],
     ["sword", /(sword|katana|blade|saber)/],
     ["shield", /(shield|armor)/],
     ["balloon", /(balloon)/],
@@ -1681,6 +1694,33 @@
       ctx.fillStyle = "#ffd43b";
       ctx.fillRect(-s * 0.5, s * 0.15, s, s * 0.05);
       ctx.fillRect(-s * 0.5, s * 0.27, s, s * 0.05);
+    } else if (kind === "robot") {
+      ctx.translate(0, Math.sin(t * 2.4) * s * 0.06);
+      ctx.fillStyle = "#9aa7bd";
+      rrect(ctx, -s * 0.6, -s * 0.5, s * 1.2, s * 1.05, s * 0.2);
+      ctx.fill();
+      ctx.strokeStyle = rgba(INK, 0.45);
+      ctx.lineWidth = s * 0.05;
+      ctx.stroke();
+      ctx.fillStyle = "#2a3550";
+      rrect(ctx, -s * 0.44, -s * 0.34, s * 0.88, s * 0.5, s * 0.14);
+      ctx.fill();
+      const lid = Math.sin(t * 4) > -0.2 ? 1 : 0.2;
+      ctx.fillStyle = pal[1];
+      ctx.beginPath(); ctx.arc(-s * 0.2, -s * 0.14, s * 0.1 * lid, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(s * 0.2, -s * 0.14, s * 0.1 * lid, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = pal[2];
+      ctx.lineWidth = s * 0.05;
+      ctx.beginPath(); ctx.arc(0, s * 0.02, s * 0.14, 0.2, Math.PI - 0.2); ctx.stroke();
+      ctx.strokeStyle = "#5c6478";
+      ctx.lineWidth = s * 0.06;
+      ctx.beginPath(); ctx.moveTo(0, -s * 0.5); ctx.lineTo(0, -s * 0.78); ctx.stroke();
+      ctx.fillStyle = "#ff6b6b";
+      ctx.beginPath(); ctx.arc(0, -s * 0.82, s * 0.08, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#5c6478";
+      ctx.lineWidth = s * 0.12;
+      ctx.beginPath(); ctx.moveTo(-s * 0.62, s * 0.1); ctx.lineTo(-s * 0.85, s * 0.4 + Math.sin(t * 3) * s * 0.08); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(s * 0.62, s * 0.1); ctx.lineTo(s * 0.85, s * 0.4 - Math.sin(t * 3) * s * 0.08); ctx.stroke();
     } else if (kind === "gift") {
       ctx.translate(0, Math.sin(t * 2.2) * s * 0.08);
       ctx.fillStyle = pal[0];
