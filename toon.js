@@ -797,6 +797,7 @@
     const pal = story.palette;
     const kind = actor?.kind || story.hero.kind;
     const fur = actor?.color || story.hero.color;
+    const outfit = /^#[0-9a-f]{6}$/i.test(String(actor?.outfit || "")) ? actor.outfit : "";
     const skin = kind === "kid" ? "#ffd8b5" : fur;
     const outline = rgba(INK, 0.82);
     const OW = STYLE === "flat" ? 1.6 : 1;
@@ -852,19 +853,19 @@
     };
 
     // body
-    ctx.fillStyle = pal[2];
+    ctx.fillStyle = outfit || pal[2];
     rrect(ctx, -r * 0.54, r * 0.55, r * 1.08, r * 1.0, r * 0.42);
     ctx.fill();
     ctx.strokeStyle = outline;
     ctx.lineWidth = r * 0.045 * OW;
     ctx.stroke();
     // overalls
-    ctx.fillStyle = shade(pal[3], -0.05);
+    ctx.fillStyle = outfit ? shade(outfit, -0.22) : shade(pal[3], -0.05);
     rrect(ctx, -r * 0.46, r * 1.02, r * 0.92, r * 0.48, r * 0.2);
     ctx.fill();
     ctx.stroke();
     // straps
-    ctx.strokeStyle = shade(pal[3], -0.05);
+    ctx.strokeStyle = outfit ? shade(outfit, -0.22) : shade(pal[3], -0.05);
     ctx.lineWidth = r * 0.09;
     for (const s of [-1, 1]) {
       ctx.beginPath();
@@ -1172,6 +1173,19 @@
   /* ------------------------------------------------------------ scene */
 
   function pose(scene, sceneTime, sceneDur, t, seed, L) {
+    const seq = Array.isArray(scene.beats) ? scene.beats.filter(Boolean).slice(0, 4) : [];
+    if (seq.length > 1) {
+      const n = seq.length;
+      const pos = clamp(sceneTime / Math.max(0.1, sceneDur), 0, 0.9999) * (n - 1);
+      const i = Math.min(n - 2, Math.floor(pos));
+      const f = pos - i;
+      const k0 = f < 0.66 ? 0 : (f - 0.66) / 0.34;
+      const k = k0 * k0 * (3 - 2 * k0);
+      const a = pose({ ...scene, beats: null, action: seq[i] }, sceneTime, sceneDur, t, seed, L);
+      if (k <= 0) return a;
+      const b = pose({ ...scene, beats: null, action: seq[i + 1] }, sceneTime, sceneDur, t, seed + 7, L);
+      return blendPose(a, b, k);
+    }
     const rand = rng(seed + hash(scene.caption) % 999);
     const beat = Math.sin(t * 5 + rand() * 2);
     let eyeOpen = 1;
