@@ -380,8 +380,7 @@
         ctx.fill();
       }
       hills(ctx, W, H, 0.72, ["#1c1745", "#251e57", "#2f2769"], t, 0.5);
-    } else {
-      // school
+    } else if (bg === "school") {
       sky(ctx, W, H, "#fff4e6", "#ffe8cc");
       ctx.fillStyle = "#e9d8a6";
       ctx.fillRect(0, H * 0.7, W, H * 0.3);
@@ -410,6 +409,217 @@
       ctx.fillStyle = "#74c0fc";
       rrect(ctx, W * 0.17, H * 0.8, W * 0.08, H * 0.07, 8);
       ctx.fill();
+    } else if (bg === "city") {
+      sky(ctx, W, H, "#ffc9a8", "#ffe3d1");
+      sun(ctx, W * 0.5, H * 0.44, H * 0.09, t);
+      const rand = rng(seed + 21);
+      for (let layer = 0; layer < 3; layer += 1) {
+        let x = -W * 0.05;
+        while (x < W) {
+          const bw = W * (0.08 + rand() * 0.09);
+          const bh = H * (0.14 + rand() * 0.24) * (1 - layer * 0.18);
+          ctx.fillStyle = ["#b78b8f", "#8f6a78", "#5f4557"][layer];
+          ctx.fillRect(x, H * 0.72 - bh, bw, bh + H * 0.2);
+          if (layer === 2) {
+            ctx.fillStyle = "rgba(255,236,170,0.75)";
+            for (let wy = H * 0.72 - bh + 20; wy < H * 0.7; wy += 26) {
+              for (let wx = x + 10; wx < x + bw - 12; wx += 20) {
+                if (rand() < 0.45) ctx.fillRect(wx, wy, 8, 12);
+              }
+            }
+          }
+          x += bw + W * 0.012;
+        }
+      }
+      ctx.fillStyle = "#4a3b45";
+      ctx.fillRect(0, H * 0.86, W, H * 0.14);
+      ctx.strokeStyle = "rgba(255,255,255,0.5)";
+      ctx.lineWidth = 6;
+      for (let i = 0; i < 4; i += 1) ctx.strokeRect(W * (0.1 + i * 0.25), H * 0.9, W * 0.08, H * 0.02);
+    } else if (bg === "forest") {
+      sky(ctx, W, H, "#a8e6a1", "#e5ffd9");
+      const rand = rng(seed + 23);
+      for (let layer = 0; layer < 3; layer += 1) {
+        for (let i = 0; i < 5; i += 1) {
+          const x = W * (0.05 + i * 0.22) + rand() * W * 0.06;
+          const h = H * (0.2 + rand() * 0.16) * (1 - layer * 0.15);
+          ctx.fillStyle = ["#3f8f4f", "#2f6f3f", "#1d4d2e"][layer];
+          ctx.fillRect(x, H * 0.78 - h, W * 0.035, h);
+          for (let k = 0; k < 3; k += 1) {
+            ctx.beginPath();
+            ctx.ellipse(x + W * 0.017 + Math.sin(k + i) * W * 0.02, H * 0.78 - h + k * H * 0.045, W * 0.1, H * 0.05, k * 0.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
+      ctx.fillStyle = "#67b96f";
+      ctx.fillRect(0, H * 0.86, W, H * 0.14);
+      flowers(ctx, W, H, t, pal);
+    } else if (bg === "mountain") {
+      sky(ctx, W, H, "#a5d8ff", "#ffe8f6");
+      sun(ctx, W * 0.76, H * 0.16, H * 0.05, t);
+      ctx.fillStyle = "#8a9bb8";
+      ctx.beginPath();
+      ctx.moveTo(-W * 0.1, H * 0.72); ctx.lineTo(W * 0.3, H * 0.24); ctx.lineTo(W * 0.58, H * 0.72); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#6c7d9c";
+      ctx.beginPath();
+      ctx.moveTo(W * 0.22, H * 0.72); ctx.lineTo(W * 0.62, H * 0.18); ctx.lineTo(W * 1.05, H * 0.72); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.moveTo(W * 0.52, H * 0.33); ctx.lineTo(W * 0.62, H * 0.18); ctx.lineTo(W * 0.72, H * 0.33);
+      ctx.lineTo(W * 0.66, H * 0.3); ctx.lineTo(W * 0.6, H * 0.36); ctx.lineTo(W * 0.56, H * 0.3); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#7fb069";
+      ctx.fillRect(0, H * 0.72, W, H * 0.28);
+    } else if (bg === "desert") {
+      sky(ctx, W, H, "#ffd08a", "#ffe9c9");
+      sun(ctx, W * 0.7, H * 0.22, H * 0.08, t);
+      const rand = rng(seed + 27);
+      for (let i = 0; i < 3; i += 1) {
+        ctx.fillStyle = ["#f4c27a", "#e8b06a", "#d99a55"][i];
+        ctx.beginPath();
+        ctx.moveTo(0, H * (0.62 + i * 0.08));
+        ctx.bezierCurveTo(W * (0.2 + rand() * 0.2), H * (0.56 + i * 0.08), W * (0.6 + rand() * 0.2), H * (0.68 + i * 0.07), W, H * (0.6 + i * 0.09));
+        ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = "#4f9c56";
+      ctx.fillRect(W * 0.12, H * 0.72, W * 0.03, H * 0.12);
+      ctx.fillRect(W * 0.085, H * 0.74, W * 0.02, H * 0.05);
+      ctx.fillRect(W * 0.165, H * 0.75, W * 0.02, H * 0.045);
+    } else if (bg === "snow") {
+      sky(ctx, W, H, "#cfe8ff", "#f4fbff");
+      hills(ctx, W, H, 0.6, ["#e9f4ff", "#d7e9ff", "#c3dcfb"], t, 0.8);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, H * 0.82, W, H * 0.18);
+      const rand = rng(seed + 29);
+      for (let i = 0; i < 40; i += 1) {
+        const y = (rand() * H + t * 30 + i * 7) % H;
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.beginPath(); ctx.arc(rand() * W, y, 3 + rand() * 3, 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (bg === "castle") {
+      sky(ctx, W, H, "#7b6cb8", "#e2b8f0");
+      moon(ctx, W * 0.2, H * 0.16, H * 0.05, t);
+      ctx.fillStyle = "#6b5a8a";
+      ctx.fillRect(W * 0.3, H * 0.5, W * 0.4, H * 0.36);
+      for (const x of [0.24, 0.36, 0.64, 0.76]) {
+        ctx.fillStyle = "#5a4a78";
+        ctx.fillRect(W * x, H * 0.42, W * 0.06, H * 0.44);
+        ctx.beginPath();
+        ctx.moveTo(W * x - W * 0.02, H * 0.42);
+        ctx.lineTo(W * x + W * 0.03, H * 0.32);
+        ctx.lineTo(W * x + W * 0.08, H * 0.42);
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = "#3d3252";
+      ctx.beginPath();
+      ctx.moveTo(W * 0.45, H * 0.86); ctx.lineTo(W * 0.45, H * 0.66);
+      ctx.arc(W * 0.5, H * 0.66, W * 0.05, Math.PI, 0); ctx.lineTo(W * 0.55, H * 0.86); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = "#556b3f";
+      ctx.fillRect(0, H * 0.86, W, H * 0.14);
+    } else if (bg === "dojo") {
+      sky(ctx, W, H, "#f6e2c4", "#e8c9a0");
+      ctx.fillStyle = "#c99b6a";
+      ctx.fillRect(0, H * 0.7, W, H * 0.3);
+      ctx.strokeStyle = "#a87a4d";
+      ctx.lineWidth = 6;
+      for (let i = 0; i < 9; i += 1) { ctx.beginPath(); ctx.moveTo(0, H * (0.72 + i * 0.03)); ctx.lineTo(W, H * (0.72 + i * 0.03)); ctx.stroke(); }
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(W * 0.34, H * 0.14, W * 0.32, H * 0.3);
+      ctx.strokeStyle = "#3d2a1a";
+      ctx.lineWidth = 10;
+      ctx.strokeRect(W * 0.34, H * 0.14, W * 0.32, H * 0.3);
+      setFont(ctx, W * 0.07);
+      ctx.fillStyle = "#2a1a10";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("道", W * 0.5, H * 0.29);
+      ctx.fillStyle = "#b5835a";
+      ctx.fillRect(W * 0.1, H * 0.62, W * 0.8, H * 0.04);
+    } else if (bg === "arena") {
+      sky(ctx, W, H, "#1a1230", "#3a2450");
+      const spot = ctx.createRadialGradient(W * 0.5, H * 0.2, 0, W * 0.5, H * 0.2, W * 0.7);
+      spot.addColorStop(0, "rgba(255,230,180,0.35)");
+      spot.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = spot; ctx.fillRect(0, 0, W, H);
+      const rand = rng(seed + 33);
+      for (let i = 0; i < 26; i += 1) {
+        ctx.fillStyle = "rgba(0,0,0,0.6)";
+        ctx.beginPath(); ctx.arc(rand() * W, H * (0.5 + rand() * 0.12), W * 0.016, 0, Math.PI * 2); ctx.fill();
+      }
+      ctx.fillStyle = "#c9a36a";
+      ctx.beginPath(); ctx.ellipse(W * 0.5, H * 0.83, W * 0.42, H * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#8a6a3d"; ctx.lineWidth = 8; ctx.stroke();
+    } else if (bg === "cave") {
+      sky(ctx, W, H, "#241a14", "#0d0906");
+      const rand = rng(seed + 37);
+      for (let i = 0; i < 9; i += 1) {
+        const x = rand() * W;
+        ctx.fillStyle = "#3a2a1e";
+        ctx.beginPath(); ctx.moveTo(x - W * 0.04, 0); ctx.lineTo(x + W * 0.05, 0); ctx.lineTo(x + W * 0.01, H * (0.2 + rand() * 0.18)); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = "#2c1f16";
+      ctx.fillRect(0, H * 0.82, W, H * 0.18);
+      for (const x of [0.15, 0.85]) {
+        const glow = ctx.createRadialGradient(W * x, H * 0.5, 0, W * x, H * 0.5, W * 0.16);
+        glow.addColorStop(0, "rgba(255,180,80,0.5)"); glow.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(W * x, H * 0.5, W * 0.16, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#ffb347"; ctx.beginPath(); ctx.ellipse(W * x, H * 0.5, W * 0.02, H * 0.035, 0, 0, Math.PI * 2); ctx.fill();
+      }
+    } else if (bg === "ocean") {
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, "#1d7fa8");
+      g.addColorStop(0.6, "#0c5677");
+      g.addColorStop(1, "#052f45");
+      ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+      const rays = ctx.createLinearGradient(0, 0, 0, H * 0.6);
+      rays.addColorStop(0, "rgba(255,255,255,0.28)"); rays.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = rays;
+      for (let i = 0; i < 4; i += 1) {
+        ctx.beginPath();
+        ctx.moveTo(W * (0.2 + i * 0.2), 0);
+        ctx.lineTo(W * (0.28 + i * 0.2), 0);
+        ctx.lineTo(W * (0.36 + i * 0.2), H * 0.65);
+        ctx.lineTo(W * (0.18 + i * 0.2), H * 0.65);
+        ctx.closePath(); ctx.fill();
+      }
+      const rand = rng(seed + 41);
+      for (let i = 0; i < 16; i += 1) {
+        const x = rand() * W;
+        const y = H - ((t * (20 + rand() * 30) + rand() * H) % H);
+        ctx.strokeStyle = "rgba(220,250,255,0.5)"; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.arc(x, y, 4 + rand() * 7, 0, Math.PI * 2); ctx.stroke();
+      }
+      ctx.fillStyle = "#0a3a2a";
+      for (let i = 0; i < 8; i += 1) {
+        const x = (i * W) / 8 + 30;
+        ctx.beginPath();
+        ctx.moveTo(x, H);
+        for (let k = 0; k < 5; k += 1) ctx.quadraticCurveTo(x + Math.sin(t * 1.5 + k + i) * 26, H - k * H * 0.07, x, H - (k + 1) * H * 0.07);
+        ctx.lineTo(x + 26, H); ctx.closePath(); ctx.fill();
+      }
+      ctx.fillStyle = "#c9b083"; ctx.fillRect(0, H * 0.9, W, H * 0.1);
+    } else {
+      // jungle
+      sky(ctx, W, H, "#9be5a0", "#dff9d4");
+      const rand = rng(seed + 43);
+      for (let i = 0; i < 6; i += 1) {
+        const x = W * (0.06 + i * 0.17);
+        const h = H * (0.3 + rand() * 0.18);
+        ctx.fillStyle = "#2f6b3a";
+        ctx.fillRect(x, H * 0.8 - h, W * 0.03, h);
+        ctx.fillStyle = i % 2 ? "#2f8f4a" : "#24703b";
+        for (let k = 0; k < 3; k += 1) {
+          ctx.beginPath();
+          ctx.ellipse(x + W * 0.015 + Math.sin(t + k + i) * 8, H * 0.8 - h + k * H * 0.06, W * 0.13, H * 0.05, (k - 1) * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.fillStyle = "#3f8f4f";
+      ctx.fillRect(0, H * 0.84, W, H * 0.16);
+      ctx.strokeStyle = "#6f9a3d"; ctx.lineWidth = 4;
+      for (let i = 0; i < 3; i += 1) {
+        ctx.beginPath(); ctx.moveTo(W * (0.2 + i * 0.3), 0); ctx.quadraticCurveTo(W * (0.25 + i * 0.3) + Math.sin(t + i) * 20, H * 0.3, W * (0.22 + i * 0.3), H * 0.6); ctx.stroke();
+      }
     }
   }
 
@@ -582,11 +792,11 @@
     ctx.stroke();
   }
 
-  function hero(ctx, st, story) {
+  function hero(ctx, st, story, actor) {
     const { x, y, r, rot = 0, armL = 0.5, armR = 0.5, legSwing = 0, eyeOpen = 1, mood = "happy", blink = 0, look } = st;
     const pal = story.palette;
-    const kind = story.hero.kind;
-    const fur = story.hero.color;
+    const kind = actor?.kind || story.hero.kind;
+    const fur = actor?.color || story.hero.color;
     const skin = kind === "kid" ? "#ffd8b5" : fur;
     const outline = rgba(INK, 0.82);
     const OW = STYLE === "flat" ? 1.6 : 1;
@@ -672,49 +882,70 @@
 
     // ears / hair
     ears(ctx, kind, r, fur, st.t || 0, mood);
-    // head
-    ctx.fillStyle = kind === "kid" ? skin : fur;
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = outline;
-    ctx.lineWidth = r * 0.05 * OW;
-    ctx.stroke();
-    // light forehead patch
-    ctx.fillStyle = "rgba(255,255,255,0.22)";
-    ctx.beginPath();
-    ctx.ellipse(-r * 0.28, -r * 0.42, r * 0.4, r * 0.24, -0.4, 0, Math.PI * 2);
-    ctx.fill();
+    if (st.face) {
+      // the attached photo becomes this character's face
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.clip();
+      const f = st.face;
+      const scale = Math.max((2 * r) / f.width, (2 * r) / f.height);
+      ctx.drawImage(f, -(f.width * scale) / 2, -(f.height * scale) / 2, f.width * scale, f.height * scale);
+      ctx.restore();
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = r * 0.06 * OW;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(255,255,255,0.14)";
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.32, -r * 0.45, r * 0.34, r * 0.16, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // head
+      ctx.fillStyle = kind === "kid" ? skin : fur;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = r * 0.05 * OW;
+      ctx.stroke();
+      // light forehead patch
+      ctx.fillStyle = "rgba(255,255,255,0.22)";
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.28, -r * 0.42, r * 0.4, r * 0.24, -0.4, 0, Math.PI * 2);
+      ctx.fill();
 
-    if (kind === "cat") {
-      ctx.strokeStyle = "rgba(255,255,255,0.8)";
-      ctx.lineWidth = r * 0.018;
-      for (const s of [-1, 1]) {
-        for (let i = 0; i < 3; i += 1) {
-          ctx.beginPath();
-          ctx.moveTo(s * r * 0.5, r * 0.22 + i * r * 0.05);
-          ctx.lineTo(s * r * 0.86, r * 0.14 + i * r * 0.075);
-          ctx.stroke();
+      if (kind === "cat") {
+        ctx.strokeStyle = "rgba(255,255,255,0.8)";
+        ctx.lineWidth = r * 0.018;
+        for (const s of [-1, 1]) {
+          for (let i = 0; i < 3; i += 1) {
+            ctx.beginPath();
+            ctx.moveTo(s * r * 0.5, r * 0.22 + i * r * 0.05);
+            ctx.lineTo(s * r * 0.86, r * 0.14 + i * r * 0.075);
+            ctx.stroke();
+          }
         }
       }
-    }
-    if (kind === "dog" || kind === "bear") {
-      ctx.fillStyle = "rgba(255,255,255,0.35)";
-      ctx.beginPath();
-      ctx.ellipse(0, r * 0.3, r * 0.34, r * 0.24, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = INK;
-      ctx.beginPath();
-      ctx.ellipse(0, r * 0.19, r * 0.09, r * 0.065, 0, 0, Math.PI * 2);
-      ctx.fill();
-    }
+      if (kind === "dog" || kind === "bear") {
+        ctx.fillStyle = "rgba(255,255,255,0.35)";
+        ctx.beginPath();
+        ctx.ellipse(0, r * 0.3, r * 0.34, r * 0.24, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = INK;
+        ctx.beginPath();
+        ctx.ellipse(0, r * 0.19, r * 0.09, r * 0.065, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
 
-    face(ctx, r, kind, mood, st.t || 0, blink, look);
+      face(ctx, r, kind, mood, st.t || 0, blink, look);
+    }
     arm(-1, armL);
     arm(1, armR);
 
     // bow / cap accessory
-    if (kind !== "kid" && story.seed % 2 === 0) {
+    if (!st.face && kind !== "kid" && story.seed % 2 === 0) {
       ctx.save();
       ctx.translate(-r * 0.62, -r * 0.55);
       ctx.rotate(-0.35);
@@ -943,6 +1174,7 @@
   function pose(scene, sceneTime, sceneDur, t, seed, L) {
     const rand = rng(seed + hash(scene.caption) % 999);
     const beat = Math.sin(t * 5 + rand() * 2);
+    let eyeOpen = 1;
     const bounce = Math.abs(beat) * L.r * 0.08;
     let x = L.heroX + Math.sin(t * 0.9 + rand()) * L.W * 0.012;
     let lift = bounce;
@@ -985,13 +1217,88 @@
       armL = -1.05 + Math.sin(t * 8) * 0.2;
       armR = -1.05 - Math.sin(t * 8) * 0.2;
       lift = Math.abs(beat) * L.r * 0.14;
+    } else if (action === "run") {
+      const eased = easeOutCubic(clamp(sceneTime / Math.max(0.1, sceneDur - 0.4), 0, 1));
+      x = L.heroX + (eased - 0.5) * L.W * 0.28;
+      legSwing = t * 14;
+      armL = 0.7 + Math.sin(t * 14) * 0.7;
+      armR = 0.7 - Math.sin(t * 14) * 0.7;
+      rot = -0.08;
+      look = { x: 1, y: 0 };
+    } else if (action === "punch") {
+      const th = (sceneTime % 0.62) / 0.62;
+      armR = th < 0.5 ? lerp(-1.2, -0.02, th / 0.5) : lerp(-0.02, -1.2, (th - 0.5) / 0.5);
+      armL = 0.9;
+      rot = -0.08;
+      x = L.heroX + Math.sin(th * Math.PI) * L.W * 0.03;
+      look = { x: 1, y: -0.2 };
+    } else if (action === "kick") {
+      const th = (sceneTime % 0.74) / 0.74;
+      legSwing = th < 0.55 ? lerp(0, 1.5, th / 0.55) : lerp(1.5, 0.3, (th - 0.55) / 0.45);
+      lift = Math.abs(Math.sin(th * Math.PI)) * L.r * 0.32;
+      armL = -0.5;
+      armR = -0.5;
+      rot = 0.06;
+    } else if (action === "hit" || action === "fall") {
+      const p = action === "fall" ? clamp(sceneTime / 0.7, 0, 1) : 0.32 + Math.sin(t * 18) * 0.1;
+      rot = (action === "fall" ? 1.15 : 0.3) * p;
+      x = L.heroX + (action === "fall" ? L.W * 0.035 * p : Math.sin(t * 20) * L.W * 0.012);
+      lift = action === "fall" ? 0 : -L.r * 0.04;
+      armL = -1.6;
+      armR = -1.45;
+      eyeOpen = 0.35;
+    } else if (action === "throw") {
+      const th = (sceneTime % 0.85) / 0.85;
+      armR = th < 0.45 ? -1.7 : lerp(-0.15, -1.7, (th - 0.45) / 0.55);
+      armL = 0.6;
+      rot = -0.06;
+    } else if (action === "hug") {
+      armL = 0.1 + Math.sin(t * 3) * 0.08;
+      armR = 0.1 + Math.sin(t * 3 + 1) * 0.08;
+      rot = Math.sin(t * 2) * 0.02;
+      lift = Math.abs(beat) * L.r * 0.03;
+    } else if (action === "fly") {
+      lift = L.r * 0.85 + Math.sin(t * 2.4) * L.r * 0.15;
+      armL = -2.4;
+      armR = -2.4;
+      legSwing = 0.55;
+      rot = Math.sin(t * 2) * 0.05;
+    } else if (action === "sleep") {
+      eyeOpen = 0.06;
+      rot = 0.14;
+      lift = -L.r * 0.3;
+      armL = 1.2;
+      armR = 1.2;
+      legSwing = 0;
+    } else if (action === "sneak") {
+      lift = -L.r * 0.16;
+      legSwing = t * 3;
+      armL = 0.95;
+      armR = 0.95;
+      rot = 0.18;
+    } else if (action === "laugh") {
+      rot = Math.sin(t * 12) * 0.06;
+      armL = 0.9 + Math.sin(t * 12) * 0.25;
+      armR = 0.9 - Math.sin(t * 12) * 0.25;
+      eyeOpen = 0.5;
+      lift = Math.abs(Math.sin(t * 12)) * L.r * 0.05;
+    } else if (action === "cry") {
+      armL = -1.15;
+      armR = -1.15;
+      eyeOpen = 0.6;
+      rot = 0.05;
+    } else if (action === "sit") {
+      lift = -L.r * 0.42;
+      armL = 1.3;
+      armR = 1.3;
+      legSwing = 1.4;
     }
     // blink every ~2.8s
     const phase = (t + (seed % 31) * 0.11) % 2.8;
     const blink = phase < 0.12 ? Math.sin((phase / 0.12) * Math.PI) : 0;
     return {
       x, y: L.heroY - lift, r: L.r, rot, armL, armR, legSwing,
-      blink, look, mood: scene.mood || "happy", t,
+      blink, look, eyeOpen, mood: scene.mood || "happy", t,
     };
   }
 
@@ -1090,7 +1397,7 @@
   }
 
   function drawFrame(ctx, opt) {
-    const { W, H, story, t, seconds, img } = opt;
+    const { W, H, story, t, seconds, img, imgs } = opt;
     const scenes = story.scenes && story.scenes.length ? story.scenes : [{ caption: "Hello!", action: "wave", bg: "park", prop: "balloon", mood: "happy" }];
     const sceneDur = seconds / scenes.length;
     const idx = clamp(Math.floor(t / sceneDur), 0, scenes.length - 1);
@@ -1101,28 +1408,91 @@
     if (STYLE === "chibi") L.r *= 1.1;
     const pal = story.palette;
     const seed = story.seed || 7;
+    const cast = (Array.isArray(story.cast) && story.cast.length ? story.cast : [story.hero]).slice(0, 3);
+    const faces = Array.isArray(imgs) ? imgs : (img ? [img] : []);
+    const duo = cast.length > 1;
+    const spots = cast.length === 1
+      ? [{ x: L.heroX, mirror: false, scale: 1 }]
+      : cast.length === 2
+        ? [
+          { x: W * (L.vertical ? 0.31 : 0.33), mirror: false, scale: 0.84 },
+          { x: W * (L.vertical ? 0.69 : 0.67), mirror: true, scale: 0.84 },
+        ]
+        : [
+          { x: W * 0.2, mirror: false, scale: 0.72 },
+          { x: W * 0.8, mirror: true, scale: 0.72 },
+          { x: W * 0.5, mirror: false, scale: 0.86 },
+        ];
+    const propX = duo ? W * 0.5 : L.propX;
+    const propY = duo ? H * (L.vertical ? 0.33 : 0.29) : L.propY;
+    const propS = duo ? L.r * 0.4 : L.r * 0.55;
 
     backdrop(ctx, { W, H, bg: scene.bg, t, pal, seed: seed + idx });
-    // ground shadow under hero
-    const poseNow = pose(scene, sceneTime, sceneDur, t, seed + idx, L);
-    const shadowY = Math.min(L.heroY + L.r * 1.95, H * 0.97);
-    ctx.fillStyle = "rgba(0,0,0,0.16)";
-    ctx.beginPath();
-    ctx.ellipse(L.heroX, shadowY, L.r * (1.1 - (L.heroY - poseNow.y) / (L.r * 6)), L.r * 0.16, 0, 0, Math.PI * 2);
-    ctx.fill();
+    // scene-cut light flash sits on the world, before the cast and captions
+    if (idx > 0 && sceneTime < 0.42) {
+      const q = sceneTime / 0.42;
+      ctx.fillStyle = `rgba(255,255,255,${(1 - q) * 0.3})`;
+      ctx.fillRect(0, 0, W, H);
+    }
 
     // prop first when it should sit behind
-    prop(ctx, scene.prop, L.propX, L.propY, L.r * 0.55, t, pal);
+    prop(ctx, scene.prop, propX, propY, propS, t, pal);
     if (scene.action === "cheer" || scene.mood === "excited") confetti(ctx, W, H, t, pal, 30);
-    if (img) photoCard(ctx, img, L.photoX, L.photoY, L.photoSize, t, pal[1]);
-    if (STYLE === "sticker") {
+
+    const drawOne = (spot, i) => {
+      const actor = cast[i];
+      const AL = Object.assign({}, L, {
+        heroX: spot.x,
+        r: L.r * spot.scale,
+        propX,
+        propY,
+      });
+      const act = i === 0
+        ? scene
+        : Object.assign({}, scene, {
+          action: scene.action2 || "idle",
+          mood: scene.mood2 || "happy",
+        });
+      const poseNow = pose(act, sceneTime, sceneDur, t, seed + idx + i * 7, AL);
+      poseNow.face = faces[i] || null;
+      const shadowY = Math.min(AL.heroY + AL.r * 1.95, H * 0.97);
+      ctx.fillStyle = "rgba(0,0,0,0.16)";
+      ctx.beginPath();
+      ctx.ellipse(spot.x, shadowY, AL.r * (1.1 - (AL.heroY - poseNow.y) / (AL.r * 6)), AL.r * 0.16, 0, 0, Math.PI * 2);
+      ctx.fill();
       ctx.save();
-      ctx.shadowColor = "rgba(255,255,255,0.95)";
-      ctx.shadowBlur = 26;
-      hero(ctx, poseNow, story);
+      if (spot.mirror) {
+        ctx.translate(spot.x * 2, 0);
+        ctx.scale(-1, 1);
+      }
+      if (STYLE === "sticker") {
+        ctx.save();
+        ctx.shadowColor = "rgba(255,255,255,0.95)";
+        ctx.shadowBlur = 26;
+        hero(ctx, poseNow, story, actor);
+        ctx.restore();
+      }
+      hero(ctx, poseNow, story, actor);
       ctx.restore();
-    }
-    hero(ctx, poseNow, story);
+      if (duo && actor?.name) {
+        const ty = Math.min(AL.heroY - AL.r * 1.42, H * 0.52);
+        setFont(ctx, W * 0.026);
+        const label = String(actor.name).toUpperCase().slice(0, 12);
+        const tw = ctx.measureText(label).width;
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "rgba(20,12,30,0.55)";
+        rrect(ctx, spot.x - tw / 2 - W * 0.016, ty - W * 0.019, tw + W * 0.032, W * 0.038, W * 0.019);
+        ctx.fill();
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(label, spot.x, ty + 1);
+        ctx.restore();
+      }
+    };
+
+    const order = cast.length === 3 ? [2, 0, 1] : [0, 1];
+    for (const i of order) if (cast[i]) drawOne(spots[i], i);
     if (scene.action === "cheer") confetti(ctx, W, H, t + 0.6, pal, 18);
 
     // captions in the safe area
@@ -1164,16 +1534,6 @@
 
   function finishFrame(ctx, opt) {
     const { W, H, story, t, idx, pal, L, p, seconds } = opt;
-    // scene-cut flash + ring
-    const sceneDur = opt.sceneDur;
-    if (idx > 0 && t - idx * sceneDur < 0.42) {
-      const q = (t - idx * sceneDur) / 0.42;
-      ctx.save();
-      ctx.globalAlpha = (1 - q) * 0.32;
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, W, H);
-      ctx.restore();
-    }
     if (p > 0) {
       // outro panel
       ctx.save();
@@ -1215,7 +1575,7 @@
 
   /* ------------------------------------------------------------ thumbs */
 
-  function drawThumb(canvas, story, img, vertical) {
+  function drawThumb(canvas, story, imgs, vertical) {
     STYLE = story.style || "cocomelon";
     const W = canvas.width;
     const H = canvas.height;
@@ -1251,29 +1611,40 @@
       ctx.fill();
     }
 
-    // hero
+    // cast (up to two on the cover)
     const L = vertical
       ? { r: W * 0.24, heroX: W * 0.5, heroY: H * 0.69, vertical: true, W, H }
       : { r: H * 0.225, heroX: W * 0.72, heroY: H * 0.607, vertical: false, W, H };
-    ctx.fillStyle = "rgba(0,0,0,0.15)";
-    ctx.beginPath();
-    ctx.ellipse(L.heroX, L.heroY + L.r * 1.75, L.r * 1.1, L.r * 0.16, 0, 0, Math.PI * 2);
-    ctx.fill();
-    hero(ctx, {
-      x: L.heroX, y: L.heroY - L.r * 0.25, r: L.r, rot: 0.04,
-      armL: -2.2, armR: -2.4, legSwing: 0.4, blink: 0, look: { x: 0, y: -1 },
-      mood: "surprised", t: 1.2,
-    }, story);
+    const cast = (Array.isArray(story.cast) && story.cast.length ? story.cast : [story.hero]).slice(0, 2);
+    const faces = Array.isArray(imgs) ? imgs : (imgs ? [imgs] : []);
+    const spots = cast.length > 1
+      ? (vertical
+        ? [{ x: W * 0.34, y: H * 0.7, r: W * 0.185, rot: 0.09 }, { x: W * 0.66, y: H * 0.7, r: W * 0.185, rot: -0.09 }]
+        : [{ x: W * 0.56, y: H * 0.62, r: H * 0.175, rot: 0.09 }, { x: W * 0.8, y: H * 0.62, r: H * 0.175, rot: -0.09 }])
+      : [{ x: L.heroX, y: L.heroY, r: L.r, rot: 0.04 }];
+    spots.forEach((s, i) => {
+      ctx.fillStyle = "rgba(0,0,0,0.15)";
+      ctx.beginPath();
+      ctx.ellipse(s.x, s.y + s.r * 0.7, s.r * 1.1, s.r * 0.16, 0, 0, Math.PI * 2);
+      ctx.fill();
+      hero(ctx, {
+        x: s.x, y: s.y - s.r * 0.25, r: s.r, rot: s.rot,
+        armL: i === 0 ? 0.55 : 0.7, armR: i === 0 ? 0.7 : 0.55, legSwing: 0.4, blink: 0, look: { x: 0, y: -1 },
+        mood: i === 0 ? "surprised" : "happy", t: 1.2 + i,
+        face: faces[i] || null,
+      }, story, cast[i]);
+    });
+    const anchor = spots[spots.length - 1];
 
-    if (img) {
+    if (cast.length === 1 && faces[0]) {
       const size = vertical ? W * 0.26 : H * 0.25;
-      photoCard(ctx, img, vertical ? W * 0.08 : W * 0.035, vertical ? H * 0.33 : H * 0.06, size, 0.7, pal[1]);
+      photoCard(ctx, faces[0], vertical ? W * 0.08 : W * 0.035, vertical ? H * 0.33 : H * 0.06, size, 0.7, pal[1]);
     }
 
     // big words
     const text = String(story.thumbText || "WATCH THIS").toUpperCase().replace(/[!?]+$/, "");
     const words = text.split(/\s+/).filter(Boolean).slice(0, 4);
-    const maxW = vertical ? W * 0.9 : W * 0.5;
+    const maxW = vertical ? W * 0.9 : (cast.length > 1 ? W * 0.42 : W * 0.5);
     let size = vertical ? W * 0.17 : H * 0.16;
     setFont(ctx, size);
     while (ctx.measureText(words.join(" ")).width > maxW && size > 40) {
@@ -1326,8 +1697,8 @@
     ctx.lineCap = "round";
     const ax = endX + (vertical ? W * 0.04 : W * 0.03);
     const ay = endY + (vertical ? H * 0.05 : H * 0.09);
-    const bx = vertical ? L.heroX + L.r * 0.55 : L.heroX - L.r * 0.95;
-    const by = vertical ? L.heroY - L.r * 1.1 : L.heroY - L.r * 0.62;
+    const bx = vertical ? anchor.x + anchor.r * 0.55 : anchor.x - anchor.r * 0.95;
+    const by = vertical ? anchor.y - anchor.r * 0.85 : anchor.y - anchor.r * 0.62;
     ctx.beginPath();
     ctx.moveTo(ax, ay);
     ctx.quadraticCurveTo(ax - (ax - bx) * 0.25, ay + (by - ay) * 0.55, bx, by);
@@ -1484,7 +1855,7 @@
   }
 
   async function renderShort(opt) {
-    const { story, seconds, aspect, host, imageDataUrl, onProgress } = opt;
+    const { story, seconds, aspect, host, imageDataUrl, photoDataUrls, onProgress } = opt;
     const vertical = String(aspect || "vertical") !== "wide";
     const W = vertical ? 1080 : 1920;
     const H = vertical ? 1920 : 1080;
@@ -1500,10 +1871,11 @@
     canvas.className = "toon-canvas";
     if (host) host.appendChild(canvas);
     const ctx = canvas.getContext("2d");
-    const img = imageDataUrl ? await loadImage(imageDataUrl) : null;
+    const srcs = (Array.isArray(photoDataUrls) && photoDataUrls.length ? photoDataUrls : (imageDataUrl ? [imageDataUrl] : [])).slice(0, 3);
+    const imgs = (await Promise.all(srcs.map((s) => loadImage(s)))).filter(Boolean);
     const draw = (at) => {
       try {
-        drawFrame(ctx, { W, H, story, t: at, seconds: dur, img });
+        drawFrame(ctx, { W, H, story, t: at, seconds: dur, imgs });
       } catch (err) {
         console.error("toon frame", err);
       }
@@ -1549,8 +1921,10 @@
   }
 
   function renderThumbs(opt) {
-    const { story, imageDataUrl } = opt;
-    return loadImage(imageDataUrl || "").then((img) => {
+    const { story, imageDataUrl, photoDataUrls } = opt;
+    const srcs = (Array.isArray(photoDataUrls) && photoDataUrls.length ? photoDataUrls : (imageDataUrl ? [imageDataUrl] : [])).slice(0, 3);
+    return Promise.all(srcs.map((s) => loadImage(s))).then((loaded) => {
+      const imgs = loaded.filter(Boolean);
       const specs = [
         { W: 1280, H: 720, suffix: "youtube-wide", vertical: false },
         { W: 1080, H: 1920, suffix: "shorts-cover", vertical: true },
@@ -1560,7 +1934,7 @@
         const canvas = document.createElement("canvas");
         canvas.width = spec.W;
         canvas.height = spec.H;
-        drawThumb(canvas, story, img, spec.vertical);
+        drawThumb(canvas, story, imgs, spec.vertical);
         pngs.push({
           b64: canvas.toDataURL("image/png"),
           width: spec.W,
