@@ -186,7 +186,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "5.5.0";
+const APP_VERSION = "5.5.1";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -3517,6 +3517,18 @@ function paintAvatar(dataUrl) {
 /* -------------------------------------------------------------- update log */
 
 const UPDATE_LOG = [
+  {
+    version: "5.5.1", date: "2026-11-23", platform: "windows",
+    title: "Humans that act",
+    points: [
+      "Every person in a toon is now a real articulated human: head, neck, torso, hips, two-segment arms and legs with hands and shoes, and a face with real expressions - no more bean bodies",
+      "Each character keeps a signature look across scenes: skin tone, hair style, hair colour and outfit colour stay the same, and ears, brows, blinks and eye tracking sell the performance",
+      "Arms bend at the elbow now, so guards, wind-ups, cowers, crying and cocked punches read like a person instead of a Y-shape",
+      "Scenes no longer loop one copied clip forever: a fight is wind-up, hit and settle, and after the action ends the character returns to a natural resting stance",
+      "Settled motion and weight: people tip from their feet, land after jumps, and spins are a hop-and-twirl instead of a cartwheel through the air",
+      "Camera and staging cleanup: name tags hug the head, shadows sit under the shoes, and arena crowds read as a crowd instead of floating dots",
+    ],
+  },
   {
     version: "5.5.0", date: "2026-11-23", platform: "windows",
     title: "Pose engine + living worlds",

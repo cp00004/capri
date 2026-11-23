@@ -585,9 +585,18 @@
       spot.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = spot; ctx.fillRect(0, 0, W, H);
       const rand = rng(seed + 33);
+      // crowd silhouette: a dark mound with heads poking over the top
+      ctx.fillStyle = "rgba(0,0,0,0.5)";
+      ctx.beginPath();
+      ctx.ellipse(W * 0.5, H * 0.68, W * 0.74, H * 0.1, 0, Math.PI, Math.PI * 2);
+      ctx.fill();
       for (let i = 0; i < 26; i += 1) {
-        ctx.fillStyle = "rgba(0,0,0,0.6)";
-        ctx.beginPath(); ctx.arc(rand() * W, H * (0.5 + rand() * 0.12), W * 0.016, 0, Math.PI * 2); ctx.fill();
+        const hx = rand() * W;
+        const hy = H * (0.55 + rand() * 0.06) + Math.sin(hx * 0.02) * H * 0.01;
+        ctx.beginPath();
+        ctx.arc(hx, hy, W * 0.017, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(hx - W * 0.028, hy, W * 0.056, H * 0.03);
       }
       ctx.fillStyle = "#c9a36a";
       ctx.beginPath(); ctx.ellipse(W * 0.5, H * 0.83, W * 0.42, H * 0.12, 0, 0, Math.PI * 2); ctx.fill();
@@ -1142,6 +1151,317 @@
     ctx.stroke();
   }
 
+  function faceHuman(ctx, h, mood, t, blink, look, eyeOpen = 1) {
+    const ex = h * 0.36;
+    const ey = -h * 0.02;
+    const lid = Math.max(0, Math.min(1, eyeOpen)) * (1 - 0.92 * blink);
+    const openY = h * 0.2 * (mood === "surprised" ? 1.25 : 1) * (0.12 + 0.88 * lid);
+    const lx = Math.max(-1, Math.min(1, look?.x || 0));
+    const ly = Math.max(-1, Math.min(1, look?.y || 0));
+    ctx.lineCap = "round";
+    // brows
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = h * 0.07;
+    for (const s of [-1, 1]) {
+      const browY = -h * 0.32 + (mood === "angry" ? h * 0.02 : 0);
+      const tilt = mood === "angry" ? h * 0.1 * s : mood === "sad" ? -h * 0.07 * s : 0;
+      ctx.beginPath();
+      ctx.moveTo(s * ex - h * 0.13, browY + tilt);
+      ctx.quadraticCurveTo(s * ex, browY - h * 0.06, s * ex + h * 0.13, browY - tilt * 0.2);
+      ctx.stroke();
+    }
+    // eyes
+    for (const s of [-1, 1]) {
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.ellipse(s * ex, ey, h * 0.15, Math.max(h * 0.02, openY), 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = rgba(INK, 0.7);
+      ctx.lineWidth = h * 0.045;
+      ctx.stroke();
+      if (openY > h * 0.05) {
+        ctx.fillStyle = "#2a1a14";
+        ctx.beginPath();
+        ctx.arc(s * ex + lx * h * 0.05, ey + ly * h * 0.04, h * 0.075, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.beginPath();
+        ctx.arc(s * ex + lx * h * 0.05 - h * 0.022, ey - h * 0.025 + ly * h * 0.04, h * 0.023, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // nose
+    ctx.strokeStyle = rgba(INK, 0.5);
+    ctx.lineWidth = h * 0.045;
+    ctx.beginPath();
+    ctx.moveTo(h * 0.02, h * 0.06);
+    ctx.quadraticCurveTo(h * 0.08, h * 0.2, 0, h * 0.25);
+    ctx.stroke();
+    // mouth
+    ctx.strokeStyle = "#7a3040";
+    ctx.lineWidth = h * 0.055;
+    if (mood === "surprised") {
+      ctx.fillStyle = "#8c1c3a";
+      ctx.beginPath();
+      ctx.ellipse(0, h * 0.4, h * 0.09, h * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (mood === "sad") {
+      ctx.beginPath();
+      ctx.arc(0, h * 0.52, h * 0.16, Math.PI * 1.15, Math.PI * 1.85);
+      ctx.stroke();
+    } else if (mood === "angry") {
+      ctx.beginPath();
+      ctx.moveTo(-h * 0.14, h * 0.42);
+      ctx.quadraticCurveTo(0, h * 0.36, h * 0.14, h * 0.42);
+      ctx.stroke();
+    } else if (mood === "excited" || mood === "happy" || mood === "proud" || mood === "silly") {
+      ctx.fillStyle = "#8c1c3a";
+      ctx.beginPath();
+      ctx.moveTo(-h * 0.16, h * 0.36);
+      ctx.quadraticCurveTo(0, h * 0.56, h * 0.16, h * 0.36);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-h * 0.16, h * 0.36);
+      ctx.quadraticCurveTo(0, h * 0.56, h * 0.16, h * 0.36);
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.moveTo(-h * 0.1, h * 0.4);
+      ctx.quadraticCurveTo(0, h * 0.44, h * 0.1, h * 0.4);
+      ctx.stroke();
+    }
+    // cheeks
+    ctx.fillStyle = "rgba(255,120,140,0.18)";
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(s * h * 0.58, h * 0.26, h * 0.12, h * 0.07, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawHumanBody(ctx, st, story, actor) {
+    const r = st.r;
+    const h = r * 0.25;
+    const pal = story.palette;
+    const seed = hash(String(actor?.name || "actor")) + (story.seed || 0);
+    const pos = Math.abs(seed);
+    const outfit = /^#[0-9a-f]{6}$/i.test(String(actor?.outfit || ""))
+      ? actor.outfit
+      : (/^#[0-9a-f]{6}$/i.test(String(actor?.color || "")) ? actor.color : pal[2]);
+    const outfitDark = shade(outfit, -0.3);
+    const skinTones = ["#f2c49b", "#d9a066", "#b97a56", "#8d5a3b", "#6b4226", "#ffd9bd"];
+    const skin = st.face ? "#e9b58f" : skinTones[pos % skinTones.length];
+    const hairTone = ["#201714", "#3a2418", "#17171d", "#59371f", "#7a4a24"][(pos >>> 2) % 5];
+    const pants = "#2f3a4d";
+    const shoe = "#1d2129";
+    const outline = rgba(INK, 0.85);
+    const OW = STYLE === "flat" ? 1.5 : 1;
+    const t = st.t || 0;
+    const breath = Math.sin(t * 1.9) * h * 0.035;
+    const armL = Number.isFinite(st.armL) ? st.armL : 0.55;
+    const armR = Number.isFinite(st.armR) ? st.armR : 0.55;
+    const legSwing = Number.isFinite(st.legSwing) ? st.legSwing : 0;
+
+    const cap = (x1, y1, x2, y2, w, col, edge) => {
+      ctx.lineCap = "round";
+      if (edge !== false) {
+        ctx.strokeStyle = outline;
+        ctx.lineWidth = w + h * 0.085 * OW;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = col;
+      ctx.lineWidth = w;
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+    };
+    const joint = (x, y, d, col, edge) => {
+      if (edge) {
+        ctx.fillStyle = outline;
+        ctx.beginPath();
+        ctx.arc(x, y, d / 2 + h * 0.04 * OW, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(x, y, d / 2, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    // arm: legacy shoulder angle remapped so idle arms hang and raises read as raises
+    const mapArm = (a) => {
+      const k = 0.6 + 0.7 * Math.max(0, Math.min(1, (0.8 - a) / 1.4));
+      return Math.max(-1.35, Math.min(1.5, 1.2 + (a - 0.6) * k));
+    };
+    const drawArm = (side, raw, foldRaw) => {
+      const a = mapArm(Math.max(-2.4, Math.min(2.2, raw)));
+      const sx = side * 1.28 * h;
+      const sy = 1.42 * h + breath;
+      const ex = sx + side * Math.cos(a) * 1.45 * h;
+      const ey = sy + Math.sin(a) * 1.45 * h;
+      const fold = Number.isFinite(foldRaw) ? foldRaw : 0;
+      const bend = lerp(-0.25, 0.35, Math.max(0, Math.min(1, (a + 0.9) / 2.2))) + fold;
+      const a2 = a + bend;
+      const hx = ex + side * Math.cos(a2) * 1.28 * h;
+      const hy = ey + Math.sin(a2) * 1.28 * h;
+      cap(sx, sy, ex, ey, h * 0.55, outfit);
+      cap(ex, ey, hx, hy, h * 0.38, skin, false);
+      joint(ex, ey, h * 0.5, skin);
+      joint(hx, hy, h * 0.32, skin);
+      joint(sx, sy, h * 0.6, outfit);
+    };
+
+    const hipY = 3.55 * h;
+    const drawLeg = (side) => {
+      const ph = legSwing + (side > 0 ? Math.PI : 0);
+      const sw = Math.sin(ph);
+      const lift = Math.max(0, sw) * h * 0.5;
+      const hx = side * 0.62 * h;
+      const kx = hx + side * (0.08 * h + sw * 0.16 * h);
+      const ky = hipY + 1.78 * h - lift * 0.25 + breath * 0.5;
+      const ax = kx + side * 0.05 * h + sw * 0.08 * h;
+      const ay = ky + 1.62 * h - lift * 0.6;
+      cap(hx, hipY + breath, kx, ky, h * 0.64, pants);
+      cap(kx, ky, ax, ay, h * 0.5, pants, false);
+      joint(kx, ky, h * 0.58, pants);
+      ctx.fillStyle = shoe;
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = h * 0.05 * OW;
+      ctx.beginPath();
+      ctx.ellipse(ax + side * 0.12 * h, ay + h * 0.16, h * 0.4, h * 0.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    };
+
+    // far arm first, then legs, then torso, then head, then near arm
+    drawArm(-1, armL, st.elbowL);
+    drawLeg(-1);
+    drawLeg(1);
+
+    // pelvis
+    ctx.fillStyle = pants;
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = h * 0.05 * OW;
+    rrect(ctx, -1.02 * h, 3.3 * h, 2.04 * h, 0.6 * h, 0.28 * h);
+    ctx.fill();
+    ctx.stroke();
+
+    // neck
+    ctx.fillStyle = skin;
+    ctx.beginPath();
+    ctx.rect(-0.3 * h, 0.72 * h, 0.6 * h, 0.78 * h);
+    ctx.fill();
+    ctx.strokeStyle = rgba(INK, 0.45);
+    ctx.lineWidth = h * 0.035;
+    ctx.beginPath();
+    ctx.moveTo(-0.3 * h, 0.72 * h);
+    ctx.lineTo(-0.3 * h, 1.5 * h);
+    ctx.moveTo(0.3 * h, 0.72 * h);
+    ctx.lineTo(0.3 * h, 1.5 * h);
+    ctx.stroke();
+
+    // torso
+    ctx.beginPath();
+    ctx.moveTo(-1.34 * h, 1.36 * h + breath);
+    ctx.quadraticCurveTo(-1.12 * h, 2.05 * h, -0.94 * h, 2.8 * h);
+    ctx.quadraticCurveTo(-1.06 * h, 3.2 * h, -1.02 * h, 3.45 * h);
+    ctx.lineTo(1.02 * h, 3.45 * h);
+    ctx.quadraticCurveTo(1.06 * h, 3.2 * h, 0.94 * h, 2.8 * h);
+    ctx.quadraticCurveTo(1.12 * h, 2.05 * h, 1.34 * h, 1.36 * h + breath);
+    ctx.quadraticCurveTo(0, 1.12 * h + breath, -1.34 * h, 1.36 * h + breath);
+    ctx.closePath();
+    ctx.fillStyle = outfit;
+    ctx.fill();
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = h * 0.055 * OW;
+    ctx.stroke();
+    // collar + hem
+    ctx.strokeStyle = outfitDark;
+    ctx.lineWidth = h * 0.09;
+    ctx.beginPath();
+    ctx.moveTo(-0.45 * h, 1.32 * h + breath);
+    ctx.quadraticCurveTo(0, 1.62 * h + breath, 0.45 * h, 1.32 * h + breath);
+    ctx.stroke();
+    ctx.strokeStyle = rgba(INK, 0.28);
+    ctx.lineWidth = h * 0.05;
+    ctx.beginPath();
+    ctx.moveTo(-1.0 * h, 3.22 * h);
+    ctx.lineTo(1.0 * h, 3.22 * h);
+    ctx.stroke();
+
+    // ears
+    ctx.fillStyle = skin;
+    for (const s of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(s * 0.99 * h, 0.06 * h, 0.14 * h, 0.2 * h, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // head
+    const hairStyle = pos % 4;
+    if (hairStyle === 3) {
+      ctx.fillStyle = hairTone;
+      ctx.beginPath();
+      ctx.ellipse(0, 0.5 * h, 1.08 * h, 1.5 * h, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (st.face) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, h, 0, Math.PI * 2);
+      ctx.clip();
+      const f = st.face;
+      const scale = Math.max((2 * h) / f.width, (2 * h) / f.height);
+      ctx.drawImage(f, -(f.width * scale) / 2, -(f.height * scale) / 2, f.width * scale, f.height * scale);
+      ctx.restore();
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = h * 0.07 * OW;
+      ctx.beginPath();
+      ctx.arc(0, 0, h, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = skin;
+      ctx.beginPath();
+      ctx.arc(0, 0, h, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = outline;
+      ctx.lineWidth = h * 0.06 * OW;
+      ctx.stroke();
+      faceHuman(ctx, h, st.mood || "happy", t, st.blink || 0, st.look, st.eyeOpen);
+    }
+    // hair: dome sits on the crown, style adds fringe, bun or long hair
+    ctx.fillStyle = hairTone;
+    ctx.strokeStyle = outline;
+    ctx.lineWidth = h * 0.05 * OW;
+    ctx.beginPath();
+    ctx.ellipse(0, -h * 0.58, h * 1.04, h * 0.6, 0, Math.PI, Math.PI * 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    if (hairStyle === 1) {
+      ctx.beginPath();
+      ctx.ellipse(-h * 0.2, -h * 0.62, h * 0.72, h * 0.36, 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (hairStyle === 2) {
+      ctx.beginPath();
+      ctx.arc(0, -h * 1.18, h * 0.42, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (hairStyle === 3) {
+      for (const s of [-1, 1]) {
+        ctx.beginPath();
+        ctx.ellipse(s * h * 0.98, h * 0.35, h * 0.3, h * 0.82, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    drawArm(1, armR, st.elbowR);
+  }
+
   function hero(ctx, st, story, actor) {
     const { x, y, r, rot = 0, armL = 0.5, armR = 0.5, legSwing = 0, eyeOpen = 1, mood = "happy", blink = 0, look } = st;
     const pal = story.palette;
@@ -1153,6 +1473,18 @@
     const OW = STYLE === "flat" ? 1.6 : 1;
     ctx.save();
     ctx.translate(x, y);
+
+    if (kind === "human" || kind === "kid") {
+      if (rot) {
+        // humans tip from the feet, not the skull
+        ctx.translate(0, r * 1.72);
+        ctx.rotate(rot);
+        ctx.translate(0, -r * 1.72);
+      }
+      drawHumanBody(ctx, st, story, actor);
+      ctx.restore();
+      return;
+    }
     ctx.rotate(rot);
 
     // legs
@@ -1826,14 +2158,19 @@
     const seq = Array.isArray(scene.beats) ? scene.beats.filter(Boolean).slice(0, 4) : [];
     if (seq.length > 1) {
       const n = seq.length;
+      const segDur = Math.max(0.3, sceneDur / (n - 1));
       const pos = clamp(sceneTime / Math.max(0.1, sceneDur), 0, 0.9999) * (n - 1);
       const i = Math.min(n - 2, Math.floor(pos));
       const f = pos - i;
       const k0 = f < 0.66 ? 0 : (f - 0.66) / 0.34;
       const k = k0 * k0 * (3 - 2 * k0);
-      const a = pose({ ...scene, beats: null, action: seq[i] }, sceneTime, sceneDur, t, seed, L);
+      const sub = (action, sd, kk) => {
+        const st0 = clamp((sceneTime - kk * segDur) / segDur, 0, 1);
+        return pose({ ...scene, beats: null, action, _seg: true }, st0 * segDur, segDur, t, sd, L);
+      };
+      const a = sub(seq[i], seed, i);
       if (k <= 0) return a;
-      const b = pose({ ...scene, beats: null, action: seq[i + 1] }, sceneTime, sceneDur, t, seed + 7, L);
+      const b = sub(seq[i + 1], seed + 7, i + 1);
       return blendPose(a, b, k);
     }
     const rand = rng(seed + hash(scene.caption) % 999);
@@ -1847,18 +2184,33 @@
     let armR = 0.6 + Math.sin(t * 2 + 1 + rand()) * 0.15;
     let legSwing = 0;
     let look = { x: 0, y: 0 };
+    let elbowL = 0;
+    let elbowR = 0;
+    const baseX = x;
+    const baseRot = rot;
+    const baseArmL = armL;
+    const baseArmR = armR;
+    // a scene is one performance: repeat a cycle at most a few times, then settle
+    const reps = Math.max(1, Math.min(3, Math.round(sceneDur / 2.4)));
+    let actionEnd = -1;
+    const cyc = (period) => {
+      if (scene._seg) return clamp(sceneTime / Math.max(0.01, sceneDur), 0, 1);
+      const total = period * reps;
+      actionEnd = Math.max(actionEnd, total);
+      return sceneTime >= total ? 1 : (sceneTime % period) / period;
+    };
     const action = scene.action || "wave";
     if (action === "walk") {
       const eased = easeOutCubic(clamp(sceneTime / Math.max(0.1, sceneDur - 0.5), 0, 1));
       x = L.heroX + (eased - 0.5) * L.W * 0.16 + Math.sin(t * 3) * L.W * 0.01;
       legSwing = t * 7;
-      armL = 0.5 + Math.sin(t * 7) * 0.4;
-      armR = 0.5 - Math.sin(t * 7) * 0.4;
+      armL = 0.68 + Math.sin(t * 7) * 0.18;
+      armR = 0.68 - Math.sin(t * 7) * 0.18;
       look = { x: 1, y: 0 };
     } else if (action === "jump") {
-      const cyc = (sceneTime % 1.15) / 1.15;
-      lift = Math.sin(cyc * Math.PI) * L.r * 0.75;
-      legSwing = cyc > 0.4 ? 0.5 : 0;
+      const jc = cyc(1.15);
+      lift = Math.sin(jc * Math.PI) * L.r * 0.75;
+      legSwing = jc > 0.4 ? 0.5 : 0;
       armL = -1.0;
       armR = -1.0;
     } else if (action === "wave") {
@@ -1885,19 +2237,23 @@
       const eased = easeOutCubic(clamp(sceneTime / Math.max(0.1, sceneDur - 0.4), 0, 1));
       x = L.heroX + (eased - 0.5) * L.W * 0.28;
       legSwing = t * 14;
-      armL = 0.7 + Math.sin(t * 14) * 0.7;
-      armR = 0.7 - Math.sin(t * 14) * 0.7;
+      armL = 0.72 + Math.sin(t * 14) * 0.3;
+      armR = 0.72 - Math.sin(t * 14) * 0.3;
       rot = -0.08;
       look = { x: 1, y: 0 };
     } else if (action === "punch") {
-      const th = (sceneTime % 0.62) / 0.62;
-      armR = th < 0.5 ? lerp(-1.2, -0.02, th / 0.5) : lerp(-0.02, -1.2, (th - 0.5) / 0.5);
+      const th = cyc(0.62);
+      const jab = th < 0.45 ? 0 : (th < 0.6 ? easeOutCubic((th - 0.45) / 0.15) : 1 - easeOutCubic((th - 0.6) / 0.4));
+      const cock = th < 0.45 ? easeOutCubic(th / 0.45) : 1 - jab;
+      armR = lerp(lerp(0.95, 0.8, cock), -0.25, jab);
+      elbowR = -3.0 * cock + 2.6 * jab;
       armL = 0.9;
+      elbowL = -3.0;
       rot = -0.08;
       x = L.heroX + Math.sin(th * Math.PI) * L.W * 0.03;
       look = { x: 1, y: -0.2 };
     } else if (action === "kick") {
-      const th = (sceneTime % 0.74) / 0.74;
+      const th = cyc(0.74);
       legSwing = th < 0.55 ? lerp(0, 1.5, th / 0.55) : lerp(1.5, 0.3, (th - 0.55) / 0.45);
       lift = Math.abs(Math.sin(th * Math.PI)) * L.r * 0.32;
       armL = -0.5;
@@ -1910,9 +2266,11 @@
       lift = action === "fall" ? 0 : -L.r * 0.04;
       armL = -1.6;
       armR = -1.45;
+      elbowL = -0.9;
+      elbowR = -1.1;
       eyeOpen = 0.35;
     } else if (action === "throw") {
-      const th = (sceneTime % 0.85) / 0.85;
+      const th = cyc(0.85);
       armR = th < 0.45 ? -1.7 : lerp(-0.15, -1.7, (th - 0.45) / 0.55);
       armL = 0.6;
       rot = -0.06;
@@ -1947,8 +2305,10 @@
       eyeOpen = 0.5;
       lift = Math.abs(Math.sin(t * 12)) * L.r * 0.05;
     } else if (action === "cry") {
-      armL = -1.15;
-      armR = -1.15;
+      armL = 0.95;
+      armR = 0.85;
+      elbowL = -3.5;
+      elbowR = -3.7;
       eyeOpen = 0.6;
       rot = 0.05;
     } else if (action === "sit") {
@@ -1957,7 +2317,7 @@
       armR = 1.3;
       legSwing = 1.4;
     } else if (action === "dodge") {
-      const th = (sceneTime % 0.9) / 0.9;
+      const th = cyc(0.9);
       const k = th < 0.45 ? easeOutCubic(th / 0.45) : 1 - easeOutCubic((th - 0.45) / 0.55);
       x = L.heroX - k * L.W * 0.14;
       rot = -0.28 * k;
@@ -1966,7 +2326,7 @@
       legSwing = 0.9 * k;
       look = { x: -1, y: 0.1 };
     } else if (action === "recoil") {
-      const th = (sceneTime % 1.1) / 1.1;
+      const th = cyc(1.1);
       const k = Math.sin(th * Math.PI);
       x = L.heroX + k * L.W * 0.06;
       rot = 0.3 * k;
@@ -1976,14 +2336,16 @@
       eyeOpen = 0.55;
       look = { x: 0.6, y: -0.2 };
     } else if (action === "guard") {
-      armL = -1.55 + Math.sin(t * 4) * 0.1;
-      armR = -1.8 - Math.sin(t * 4) * 0.1;
+      armL = 0.95 + Math.sin(t * 4) * 0.05;
+      armR = 0.9 - Math.sin(t * 4) * 0.05;
+      elbowL = -3.1;
+      elbowR = -3.3;
       rot = 0.07 + Math.sin(t * 2.4) * 0.02;
       lift = -L.r * 0.08;
       x = L.heroX + Math.sin(t * 1.6) * L.W * 0.015;
       look = { x: 0.8, y: -0.1 };
     } else if (action === "grapple") {
-      const th = (sceneTime % 1.3) / 1.3;
+      const th = cyc(1.3);
       const k = Math.sin(th * Math.PI);
       armL = 0.05;
       armR = 0.02;
@@ -1993,7 +2355,7 @@
       lift = -L.r * 0.04;
       look = { x: 1, y: 0 };
     } else if (action === "leap") {
-      const th = (sceneTime % 1.2) / 1.2;
+      const th = cyc(1.2);
       lift = Math.sin(th * Math.PI) * L.r * 0.95;
       x = L.heroX + (th - 0.5) * L.W * 0.24;
       legSwing = th < 0.4 ? 0.75 : 0.2;
@@ -2002,12 +2364,14 @@
       rot = -0.12;
       look = { x: 1, y: -0.3 };
     } else if (action === "windup") {
-      const th = (sceneTime % 0.9) / 0.9;
+      const th = cyc(0.9);
       const k = th < 0.7 ? easeOutCubic(th / 0.7) : 1;
       x = L.heroX - k * L.W * 0.03;
       rot = 0.2 * k;
-      armR = lerp(-0.6, -2.3, k);
+      armR = 0.9;
+      elbowR = lerp(-0.5, -3.1, k);
       armL = 0.75;
+      elbowL = -3.0;
       legSwing = 0.3 * k;
       look = { x: 1, y: -0.1 };
     } else if (action === "aim") {
@@ -2017,7 +2381,7 @@
       lift = -L.r * 0.03;
       look = { x: 1, y: -0.15 };
     } else if (action === "swing") {
-      const th = (sceneTime % 0.8) / 0.8;
+      const th = cyc(0.8);
       const k = th < 0.45 ? th / 0.45 : 1 - (th - 0.45) / 0.55;
       armR = th < 0.45 ? lerp(-2.3, -0.15, th / 0.45) : lerp(-0.15, 1.1, (th - 0.45) / 0.55);
       armL = 0.55 + k * 0.35;
@@ -2026,7 +2390,7 @@
       legSwing = 0.4 * k;
       look = { x: 1, y: 0.1 };
     } else if (action === "serve") {
-      const th = (sceneTime % 1.0) / 1.0;
+      const th = cyc(1.0);
       armR = th < 0.5 ? lerp(0.2, -2.4, th / 0.5) : lerp(-2.4, 0.4, (th - 0.5) / 0.5);
       armL = 0.4;
       lift = th > 0.42 && th < 0.62 ? L.r * 0.18 : 0;
@@ -2058,8 +2422,10 @@
     } else if (action === "cower") {
       lift = -L.r * 0.24;
       rot = 0.22;
-      armL = -2.5 + Math.sin(t * 7) * 0.06;
-      armR = -2.5 - Math.sin(t * 7) * 0.06;
+      armL = 1.05 + Math.sin(t * 7) * 0.03;
+      armR = 1.0 - Math.sin(t * 7) * 0.03;
+      elbowL = -3.9;
+      elbowR = -4.0;
       eyeOpen = 0.45;
       legSwing = 0.5;
       look = { x: 0, y: 0.4 };
@@ -2071,7 +2437,7 @@
       eyeOpen = 0.75;
       look = { x: -0.4, y: 0.2 };
     } else if (action === "bow") {
-      const th = (sceneTime % 1.6) / 1.6;
+      const th = cyc(1.6);
       const k = th < 0.5 ? easeOutCubic(th / 0.5) : 1 - easeOutCubic((th - 0.5) / 0.5);
       rot = 0.55 * k;
       armL = 0.9;
@@ -2086,24 +2452,44 @@
       eyeOpen = 0.9;
       look = { x: -0.2, y: -0.1 };
     } else if (action === "spin") {
-      rot = ((sceneTime % 1.2) / 1.2) * Math.PI * 2;
-      armL = -0.15;
-      armR = -0.15;
-      legSwing = t * 6;
-      lift = Math.abs(Math.sin(t * 5)) * L.r * 0.08;
+      const th = cyc(1.2);
+      const k = Math.sin(th * Math.PI);
+      lift = k * L.r * 0.34;
+      rot = Math.sin(th * Math.PI * 2) * 0.2;
+      armL = -1.1;
+      armR = -1.1;
+      legSwing = th * 6;
+      look = { x: 0, y: -0.4 };
     } else if (action === "pace") {
       x = L.heroX + Math.sin(sceneTime * 2.2) * L.W * 0.07;
       legSwing = t * 6;
-      armL = 0.5 + Math.sin(t * 6) * 0.3;
+      armL = 0.68 + Math.sin(t * 6) * 0.16;
       armR = 0.5 - Math.sin(t * 6) * 0.3;
       rot = 0.04;
       look = { x: 0, y: 0.3 };
+    }
+    // settle back to a natural resting stance so a scene never loops the same clip
+    if (!scene._seg) {
+      const end = actionEnd >= 0 ? actionEnd : sceneDur * 0.78;
+      const settle = clamp((sceneTime - end) / 0.7, 0, 1) * 0.85;
+      if (settle > 0) {
+        if (action !== "walk" && action !== "run" && action !== "pace") x = lerp(x, baseX, settle);
+        rot = lerp(rot, baseRot, settle);
+        armL = lerp(armL, baseArmL, settle);
+        armR = lerp(armR, baseArmR, settle);
+        elbowL = lerp(elbowL, 0, settle);
+        elbowR = lerp(elbowR, 0, settle);
+        legSwing = lerp(legSwing, 0, settle);
+        lift = lerp(lift, 0, settle);
+        if (action !== "sleep" && action !== "cry") eyeOpen = lerp(eyeOpen, 1, settle);
+        look = { x: lerp(look.x, 0, settle), y: lerp(look.y, 0, settle) };
+      }
     }
     // blink every ~2.8s
     const phase = (t + (seed % 31) * 0.11) % 2.8;
     const blink = phase < 0.12 ? Math.sin((phase / 0.12) * Math.PI) : 0;
     return {
-      x, y: L.heroY - lift, r: L.r, rot, armL, armR, legSwing,
+      x, y: L.heroY - lift, r: L.r, rot, armL, armR, elbowL, elbowR, legSwing,
       blink, look, eyeOpen, mood: scene.mood || "happy", t,
     };
   }
@@ -2117,6 +2503,8 @@
       rot: m(a.rot, b.rot),
       armL: m(a.armL, b.armL),
       armR: m(a.armR, b.armR),
+      elbowL: m(a.elbowL || 0, b.elbowL || 0),
+      elbowR: m(a.elbowR || 0, b.elbowR || 0),
       legSwing: m(a.legSwing, b.legSwing),
       blink: k < 0.5 ? a.blink : b.blink,
       look: k < 0.5 ? a.look : b.look,
@@ -2234,6 +2622,28 @@
     }
   }
 
+  const IMPACT_ACTIONS = new Set(["punch", "kick", "hit", "fall", "throw", "swing", "grapple", "recoil"]);
+
+  function cameraFor(scene, sceneTime, sceneDur, t, seed) {
+    const p = clamp(sceneTime / Math.max(0.1, sceneDur), 0, 1);
+    const smooth = p * p * (3 - 2 * p);
+    const base = { wide: 1.0, medium: 1.05, close: 1.12, push: 1.0 }[scene.camera] || 1.04;
+    const push = scene.camera === "push" ? 0.1 : scene.camera === "close" ? 0.045 : 0.02;
+    const dir = hash(String(scene.caption || "")) % 2 ? 1 : -1;
+    const handX = Math.sin(t * 0.8 + seed) * 0.0022 + Math.sin(t * 1.7 + seed * 2) * 0.0011;
+    const handY = Math.sin(t * 1.1 + seed * 3) * 0.0016;
+    let shake = 0;
+    if (IMPACT_ACTIONS.has(scene.action)) {
+      const hit = clamp((p - 0.42) / 0.1, 0, 1) * (1 - clamp((p - 0.55) / 0.3, 0, 1));
+      shake = Math.sin(t * 62) * 0.009 * hit;
+    }
+    return {
+      z: base + push * smooth,
+      ox: (smooth - 0.5) * 0.012 * dir + handX + shake,
+      oy: handY,
+    };
+  }
+
   function drawFrame(ctx, opt) {
     const { W, H, story, t, seconds, img, imgs } = opt;
     const scenes = story.scenes && story.scenes.length ? story.scenes : [{ caption: "Hello!", action: "wave", bg: "park", prop: "balloon", mood: "happy" }];
@@ -2273,6 +2683,14 @@
       ctx.fillRect(0, 0, W, H);
     }
 
+    const cam = cameraFor(scene, sceneTime, sceneDur, t, seed + idx);
+    const focusY = H * (L.vertical ? 0.6 : 0.56);
+    ctx.save();
+    ctx.translate(W / 2, focusY);
+    ctx.scale(cam.z, cam.z);
+    ctx.translate(-W / 2, -focusY);
+    ctx.translate(cam.ox * W, cam.oy * H);
+
     // prop first when it should sit behind
     prop(ctx, scene.prop, propX, propY, propS, t, pal);
     if (scene.action === "cheer" || scene.mood === "excited") confetti(ctx, W, H, t, pal, 30);
@@ -2294,7 +2712,7 @@
         });
       const poseNow = pose(act, sceneTime, sceneDur, t, seed + idx + i * 7, AL);
       poseNow.face = faces[i] || null;
-      const shadowY = Math.min(AL.heroY + AL.r * 1.95, H * 0.97);
+      const shadowY = Math.min(AL.heroY + AL.r * 1.78, H * 0.97);
       ctx.fillStyle = "rgba(0,0,0,0.16)";
       ctx.beginPath();
       ctx.ellipse(spot.x, shadowY, AL.r * (1.1 - (AL.heroY - poseNow.y) / (AL.r * 6)), AL.r * 0.16, 0, 0, Math.PI * 2);
@@ -2314,7 +2732,8 @@
       hero(ctx, poseNow, story, actor);
       ctx.restore();
       if (duo && actor?.name) {
-        const ty = Math.min(AL.heroY - AL.r * 1.42, H * 0.52);
+        const hum = actor.kind === "human" || actor.kind === "kid";
+        const ty = Math.min(AL.heroY - AL.r * (hum ? 0.8 : 1.42), H * 0.52);
         setFont(ctx, W * 0.026);
         const label = String(actor.name).toUpperCase().slice(0, 12);
         const tw = ctx.measureText(label).width;
@@ -2333,6 +2752,7 @@
     const order = cast.length === 3 ? [2, 0, 1] : [0, 1];
     for (const i of order) if (cast[i]) drawOne(spots[i], i);
     if (scene.action === "cheer") confetti(ctx, W, H, t + 0.6, pal, 18);
+    ctx.restore();
 
     // captions in the safe area
     caption(ctx, scene.caption, { W, H, y: L.captionY, age: sceneTime + 0.15, pal, capWidth: W * (L.vertical ? 0.86 : 0.52), cx: L.captionX });
@@ -2462,9 +2882,10 @@
         : [{ x: W * 0.56, y: H * 0.62, r: H * 0.175, rot: 0.09 }, { x: W * 0.8, y: H * 0.62, r: H * 0.175, rot: -0.09 }])
       : [{ x: L.heroX, y: L.heroY, r: L.r, rot: 0.04 }];
     spots.forEach((s, i) => {
+      const hum = cast[i]?.kind === "human" || cast[i]?.kind === "kid";
       ctx.fillStyle = "rgba(0,0,0,0.15)";
       ctx.beginPath();
-      ctx.ellipse(s.x, s.y + s.r * 0.7, s.r * 1.1, s.r * 0.16, 0, 0, Math.PI * 2);
+      ctx.ellipse(s.x, s.y + s.r * (hum ? 1.56 : 0.7), s.r * 1.1, s.r * 0.16, 0, 0, Math.PI * 2);
       ctx.fill();
       hero(ctx, {
         x: s.x, y: s.y - s.r * 0.25, r: s.r, rot: s.rot,
