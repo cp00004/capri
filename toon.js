@@ -1371,24 +1371,38 @@
     setFont(ctx, 30 * scale);
     ctx.fillText("CAPRI TOONS", pad + chipH + 8 * scale, pad + chipH / 2 + 1);
 
-    // scene dots
+    // scene dots (a progress track once there are too many scenes to dot)
     const n = story.scenes.length;
-    const dot = 12 * scale;
-    const gap = 18 * scale;
-    const totalW = n * dot + (n - 1) * gap;
-    const dx = W - pad - totalW;
-    for (let i = 0; i < n; i += 1) {
-      ctx.fillStyle = i === sceneIndex ? story.palette[1] : "rgba(255,255,255,0.55)";
-      ctx.beginPath();
-      ctx.arc(dx + i * (dot + gap) + dot / 2, pad + chipH / 2, i === sceneIndex ? dot * 0.7 : dot * 0.42, 0, Math.PI * 2);
+    const p = clamp(Number(prog) || 0, 0, 1);
+    if (n > 24) {
+      const trackW = 340 * scale;
+      const trackX = W - pad - trackW;
+      const trackY = pad + chipH / 2;
+      ctx.fillStyle = "rgba(255,255,255,0.3)";
+      rrect(ctx, trackX, trackY - 5 * scale, trackW, 10 * scale, 5 * scale);
       ctx.fill();
+      if (p > 0) {
+        ctx.fillStyle = story.palette[1];
+        rrect(ctx, trackX, trackY - 5 * scale, Math.max(10 * scale, trackW * p), 10 * scale, 5 * scale);
+        ctx.fill();
+      }
+    } else {
+      const dot = 12 * scale;
+      const gap = 18 * scale;
+      const totalW = n * dot + (n - 1) * gap;
+      const dx = W - pad - totalW;
+      for (let i = 0; i < n; i += 1) {
+        ctx.fillStyle = i === sceneIndex ? story.palette[1] : "rgba(255,255,255,0.55)";
+        ctx.beginPath();
+        ctx.arc(dx + i * (dot + gap) + dot / 2, pad + chipH / 2, i === sceneIndex ? dot * 0.7 : dot * 0.42, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     // progress bar
     const barY = pad + chipH + 14 * scale;
     ctx.fillStyle = "rgba(255,255,255,0.25)";
     rrect(ctx, pad, barY, W - pad * 2, 6 * scale, 3 * scale);
     ctx.fill();
-    const p = clamp(Number(prog) || 0, 0, 1);
     if (p > 0) {
       ctx.fillStyle = rgba(story.palette[1], 0.9);
       rrect(ctx, pad, barY, (W - pad * 2) * p, 6 * scale, 3 * scale);
@@ -1742,15 +1756,6 @@
 
   /* ------------------------------------------------------------ music */
 
-  function toB64(bytes) {
-    let s = "";
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-    }
-    return btoa(s);
-  }
-
   function makeMusic(seconds) {
     const rate = 44100;
     const total = Math.max(1, Math.floor(seconds * rate));
@@ -1777,6 +1782,8 @@
 
     for (let bar = 0; bar * 2 < seconds; bar += 1) {
       const root = chords[bar % chords.length];
+      // pad once per bar instead of four overlapping per beat (matters on long cuts)
+      for (const note of [root, root + 4, root + 7]) add(bar * 2, 2.0, semis(note - 12), 0.05, 1.4, "soft");
       for (let b = 0; b < 4; b += 1) {
         const at = bar * 2 + b * beat;
         if (at > seconds) break;
@@ -1801,8 +1808,6 @@
           const t = i / rate - (at + beat / 2);
           out[i] += (rand() * 2 - 1) * 0.05 * Math.exp(-t * 70);
         }
-        // chord pad
-        for (const note of [root, root + 4, root + 7]) add(at, 1.9, semis(note - 12), 0.05, 1.4, "soft");
       }
     }
 
@@ -1831,18 +1836,20 @@
     for (let i = 0; i < total; i += 1) {
       view.setInt16(44 + i * 2, clamp(out[i], -1, 1) * 32767, true);
     }
-    return { wavB64: toB64(data), seconds };
+    return { wavBuf: data, seconds };
   }
 
   /* ------------------------------------------------------------ render */
 
-  function blobToB64(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || "").replace(/^data:[^,]*,/, ""));
-      reader.onerror = () => reject(new Error("Could not read the recording."));
-      reader.readAsDataURL(blob);
-    });
+  function blobToBytes(blob) {
+    return blob.arrayBuffer().then((buf) => new Uint8Array(buf));
+  }
+
+  function bitsFor(seconds) {
+    if (seconds <= 60) return 8_000_000;
+    if (seconds <= 150) return 6_000_000;
+    if (seconds <= 300) return 4_500_000;
+    return 3_000_000;
   }
 
   function loadImage(src) {
@@ -1859,7 +1866,7 @@
     const vertical = String(aspect || "vertical") !== "wide";
     const W = vertical ? 1080 : 1920;
     const H = vertical ? 1920 : 1080;
-    const dur = clamp(Number(seconds) || 15, 6, 30);
+    const dur = clamp(Number(seconds) || 15, 6, 480);
     if (!window.MediaRecorder) throw new Error("This build cannot record video.");
     if (host) {
       host.textContent = "";
@@ -1885,7 +1892,7 @@
     const mime = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]
       .find((m) => MediaRecorder.isTypeSupported(m)) || "";
     if (!mime) throw new Error("No webm encoder on this build.");
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 });
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitsFor(dur) });
     const chunks = [];
     rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
     const stopped = new Promise((resolve) => { rec.onstop = resolve; });
@@ -1902,7 +1909,9 @@
           resolve();
           return;
         }
-        requestAnimationFrame(loop);
+        // rAF freezes in hidden windows; timers keep long renders moving
+        if (document.hidden) setTimeout(loop, 33);
+        else requestAnimationFrame(loop);
       };
       requestAnimationFrame(loop);
     });
@@ -1912,7 +1921,7 @@
     const blob = new Blob(chunks, { type: mime });
     if (!blob.size) throw new Error("The recorder wrote zero bytes.");
     return {
-      videoB64: await blobToB64(blob),
+      videoBuf: await blobToBytes(blob),
       width: W,
       height: H,
       seconds: dur,
