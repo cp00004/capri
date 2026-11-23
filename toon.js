@@ -961,7 +961,7 @@
       look = { x: 1, y: 0 };
     } else if (action === "jump") {
       const cyc = (sceneTime % 1.15) / 1.15;
-      lift = -Math.sin(cyc * Math.PI) * L.r * 0.75;
+      lift = Math.sin(cyc * Math.PI) * L.r * 0.75;
       legSwing = cyc > 0.4 ? 0.5 : 0;
       armL = -1.0;
       armR = -1.0;
@@ -1134,13 +1134,13 @@
       const out = clamp((1.9 - t) / 0.25, 0, 1);
       const sc = 0.6 + 0.4 * easeOutBack(p);
       ctx.save();
-      ctx.translate(W / 2, H * (L.vertical ? 0.17 : 0.19));
+      ctx.translate(W * (L.vertical ? 0.5 : 0.31), H * (L.vertical ? 0.17 : 0.27));
       ctx.scale(sc, sc);
       ctx.globalAlpha = Math.min(p * 2, 1) * out;
       const title = String(story.title || "Toon Time").toUpperCase().slice(0, 22);
-      setFont(ctx, W * (L.vertical ? 0.085 : 0.062));
-      const maxW = W * 0.86;
-      let size = W * (L.vertical ? 0.085 : 0.062);
+      setFont(ctx, W * (L.vertical ? 0.085 : 0.05));
+      const maxW = W * (L.vertical ? 0.86 : 0.52);
+      let size = W * (L.vertical ? 0.085 : 0.05);
       while (ctx.measureText(title).width > maxW && size > W * 0.04) {
         size -= 3;
         setFont(ctx, size);
@@ -1180,6 +1180,8 @@
       ctx.fillStyle = "rgba(16,8,26,0.42)";
       ctx.fillRect(0, 0, W, H);
       const bob = Math.sin((Date.now() / 1000) * 5) * 8;
+      const ox = L.captionX || W / 2;
+      const oy = L.vertical ? H * 0.24 : H * 0.42;
       ctx.globalAlpha = p;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1187,16 +1189,16 @@
       ctx.lineJoin = "round";
       ctx.strokeStyle = "rgba(24,12,32,0.9)";
       ctx.lineWidth = W * 0.075 * 0.2;
-      ctx.strokeText("FOLLOW FOR", W / 2, H * 0.44 - 70 + bob);
+      ctx.strokeText("FOLLOW FOR", ox, oy - 70 + bob);
       ctx.fillStyle = "#ffffff";
-      ctx.fillText("FOLLOW FOR", W / 2, H * 0.44 - 70 + bob);
+      ctx.fillText("FOLLOW FOR", ox, oy - 70 + bob);
       setFont(ctx, W * 0.115);
-      ctx.strokeText("PART 2!", W / 2, H * 0.44 + 40 + bob);
+      ctx.strokeText("PART 2!", ox, oy + 40 + bob);
       ctx.fillStyle = "#ffe066";
-      ctx.fillText("PART 2!", W / 2, H * 0.44 + 40 + bob);
+      ctx.fillText("PART 2!", ox, oy + 40 + bob);
       setFont(ctx, W * 0.045);
       ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.fillText("new toon every day", W / 2, H * 0.44 + 130 + bob);
+      ctx.fillText("new toon every day", ox, oy + 130 + bob);
       ctx.restore();
     }
     // brand + dots
@@ -1281,7 +1283,9 @@
     const lines = wrapLines(ctx, words, maxW);
     const lineH = size * 1.05;
     const cx = vertical ? W / 2 : W * 0.29;
-    const startY = vertical ? H * 0.16 : H * 0.5 - (lines.length - 1) * lineH * 0.5;
+    const startY = vertical ? H * 0.2 : H * 0.5 - (lines.length - 1) * lineH * 0.5;
+    let endX = cx;
+    let endY = startY;
     lines.forEach((line, li) => {
       const lineText = line.join(" ");
       const w = ctx.measureText(lineText).width;
@@ -1300,6 +1304,8 @@
       ctx.shadowColor = "transparent";
       ctx.fillStyle = li % 2 ? "#ffffff" : "#ffe066";
       ctx.fillText(lineText, 0, 0);
+      endX = cx + w / 2;
+      endY = startY + li * lineH;
       // accent swoosh underline on last line
       if (li === lines.length - 1) {
         ctx.strokeStyle = pal[1];
@@ -1318,8 +1324,8 @@
     ctx.fillStyle = "#ff2d55";
     ctx.lineWidth = (vertical ? W : H) * 0.018;
     ctx.lineCap = "round";
-    const ax = vertical ? W * 0.82 : W * 0.53;
-    const ay = vertical ? H * 0.44 : H * 0.55;
+    const ax = endX + (vertical ? W * 0.04 : W * 0.03);
+    const ay = endY + (vertical ? H * 0.05 : H * 0.09);
     const bx = vertical ? L.heroX + L.r * 0.55 : L.heroX - L.r * 0.95;
     const by = vertical ? L.heroY - L.r * 1.1 : L.heroY - L.r * 0.62;
     ctx.beginPath();
