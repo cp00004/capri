@@ -4544,6 +4544,6 @@ html.is-electron .sheet.center { top: calc(50% + var(--chrome-h) / 2); }
 .dev-cams { flex-wrap: wrap; }
 .dev-cams .dev-platform { flex: 1 1 28%; padding: 7px 4px; }
 #cinemaPick { width: calc(100% - 20px); margin: 8px 10px 0; }
-#cinemaSeq { margin: 10px 10px 0; width: calc(100% - 20px); }
+#cinemaSeq { flex: 0 0 auto; margin: 10px 10px 0; width: calc(100% - 20px); text-align: center; }
 #cinemaSeq.active { color: #04130b; border-color: var(--accent); background: var(--accent); }
 .yt-head #cinemaRun { width: auto; margin: 0; flex: 0 0 auto; padding: 12px 20px; }
