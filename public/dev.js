@@ -27,6 +27,13 @@
     videos: [],
     shortsBusy: false,
     platform: "youtube",
+    contentMode: "shorts",
+    camPreset: "mix",
+    camAspect: "vertical",
+    camSeconds: 4,
+    camSeq: false,
+    cinemaFiles: [],
+    cinemaBusy: false,
     nameMode: "",
     mainView: "chat",
   };
@@ -59,6 +66,14 @@
       nameInput: $("devNameInput"),
       viewTabs: document.querySelector(".dev-viewtabs"),
       ytView: $("devYoutubeView"),
+      cinemaView: $("devCinemaView"),
+      cinemaTitle: $("cinemaTitle"),
+      cinemaMeta: $("cinemaMeta"),
+      cinemaRun: $("cinemaRun"),
+      cinemaProgress: $("cinemaProgress"),
+      cinemaResult: $("cinemaResult"),
+      cinemaFiles: $("cinemaFiles"),
+      cinemaSeq: $("cinemaSeq"),
       ytTitle: $("ytVideoTitle"),
       ytMeta: $("ytVideoMeta"),
       ytContext: $("ytContext"),
@@ -163,10 +178,14 @@
       $("devChat").classList.add("hidden");
       $("devEditorView").classList.add("hidden");
       $("devTerminalView").classList.add("hidden");
-      dev.els.ytView.classList.remove("hidden");
-      paintStudio();
+      const cinema = dev.contentMode === "cinema";
+      dev.els.ytView.classList.toggle("hidden", cinema);
+      dev.els.cinemaView.classList.toggle("hidden", !cinema);
+      if (cinema) paintCinema();
+      else paintStudio();
     } else {
       dev.els.ytView.classList.add("hidden");
+      dev.els.cinemaView.classList.add("hidden");
       showView(dev.mainView || "chat");
     }
   }
@@ -541,6 +560,18 @@
     tiktok: { name: "TikTok", note: "9:16 · up to 60s · hook in the first second" },
   };
 
+  const CAMS = {
+    mix: "Mix",
+    push_in: "Dolly In",
+    pull_out: "Dolly Out",
+    crash_zoom: "Crash Zoom",
+    orbit: "Orbit",
+    crane: "Crane Up",
+    bullet: "Bullet Time",
+    fpv: "FPV Drone",
+    handheld: "Handheld",
+  };
+
   function shortsProgress(text) {
     const box = dev.els.shortsProgress;
     box.classList.remove("hidden");
@@ -643,6 +674,242 @@
 
   function mediaUrl(abs) {
     return `/api/dev/media?path=${encodeURIComponent(String(abs || ""))}`;
+  }
+
+  /* ------------------------------------------------------------ cinema */
+
+  function setContentMode(name) {
+    if (name !== "shorts" && name !== "cinema") return;
+    dev.contentMode = name;
+    for (const b of document.querySelectorAll("[data-content-mode]")) {
+      b.classList.toggle("active", b.getAttribute("data-content-mode") === name);
+    }
+    $("devContentShorts").classList.toggle("hidden", name !== "shorts");
+    $("devContentCinema").classList.toggle("hidden", name !== "cinema");
+    showTab("content");
+  }
+
+  function setCam(name) {
+    if (!CAMS[name]) return;
+    dev.camPreset = name;
+    for (const b of document.querySelectorAll("[data-cam]")) {
+      b.classList.toggle("active", b.getAttribute("data-cam") === name);
+    }
+    paintCinema();
+  }
+
+  function setCamAspect(name) {
+    dev.camAspect = name === "wide" ? "wide" : "vertical";
+    for (const b of document.querySelectorAll("[data-cam-aspect]")) {
+      b.classList.toggle("active", b.getAttribute("data-cam-aspect") === dev.camAspect);
+    }
+    paintCinema();
+  }
+
+  function setCamSecs(value) {
+    const n = Number(value) || 4;
+    dev.camSeconds = Math.min(8, Math.max(2, n));
+    for (const b of document.querySelectorAll("[data-cam-secs]")) {
+      b.classList.toggle("active", Number(b.getAttribute("data-cam-secs")) === dev.camSeconds);
+    }
+    paintCinema();
+  }
+
+  function toggleCamSeq() {
+    dev.camSeq = !dev.camSeq;
+    if (dev.els.cinemaSeq) {
+      dev.els.cinemaSeq.textContent = `SEQUENCE: ${dev.camSeq ? "ON" : "OFF"}`;
+      dev.els.cinemaSeq.setAttribute("aria-pressed", String(dev.camSeq));
+      dev.els.cinemaSeq.classList.toggle("active", dev.camSeq);
+    }
+    paintCinema();
+  }
+
+  function renderCinemaFiles() {
+    const box = dev.els.cinemaFiles;
+    box.textContent = "";
+    box.classList.toggle("hidden", !dev.cinemaFiles.length);
+    for (const file of dev.cinemaFiles) {
+      const row = document.createElement("div");
+      row.className = "dev-file";
+      row.style.paddingLeft = "52px";
+      const thumb = document.createElement("img");
+      thumb.alt = "";
+      thumb.style.cssText = "position:absolute;left:6px;top:6px;width:38px;height:38px;object-fit:cover;border:1px solid var(--line);";
+      row.appendChild(thumb);
+      D.readImage(file.path)
+        .then((r) => { thumb.src = r.dataUrl; })
+        .catch(() => { thumb.remove(); row.style.paddingLeft = ""; });
+      const name = document.createElement("span");
+      name.textContent = file.name;
+      row.appendChild(name);
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "dev-file-x";
+      x.setAttribute("aria-label", `Remove ${file.name}`);
+      x.textContent = "\u00d7";
+      x.addEventListener("click", () => {
+        if (dev.cinemaBusy) return;
+        dev.cinemaFiles = dev.cinemaFiles.filter((f) => f.path !== file.path);
+        renderCinemaFiles();
+        paintCinema();
+      });
+      row.appendChild(x);
+      box.appendChild(row);
+    }
+  }
+
+  function paintCinema() {
+    if (!dev.els?.cinemaTitle) return;
+    const files = dev.cinemaFiles;
+    dev.els.cinemaTitle.textContent = !files.length
+      ? "No images yet"
+      : files.length === 1
+        ? files[0].name
+        : `${files.length} stills loaded`;
+    const frame = dev.camAspect === "wide" ? "16:9" : "9:16";
+    const seqNote = dev.camSeq && files.length > 1 ? ` · sequence, ${files.length} shots with crossfades` : "";
+    dev.els.cinemaMeta.textContent = files.length
+      ? `${CAMS[dev.camPreset]} · ${frame} · ${dev.camSeconds}s per shot${seqNote} · renders into ${dev.root ? `${dev.root}\\cinema` : "cinema/ after you open a folder"}`
+      : "Pick one or more stills in the rail. Every move is a real camera path over the frame - dolly, crash zoom, orbit, crane - finished with grain and vignette.";
+    dev.els.cinemaRun.disabled = !files.length || !dev.root || dev.cinemaBusy;
+    renderCinemaFiles();
+  }
+
+  async function pickCinemaImages() {
+    if (dev.cinemaBusy) return;
+    try {
+      const files = await D.pickImages();
+      const known = new Set(dev.cinemaFiles.map((f) => f.path));
+      for (const f of files) {
+        if (!known.has(f.path)) dev.cinemaFiles.push(f);
+        if (dev.cinemaFiles.length >= 8) break;
+      }
+      paintCinema();
+    } catch (err) {
+      sysLine(`could not add those images: ${err.message || err}`);
+    }
+  }
+
+  function cinemaProgress(text) {
+    dev.els.cinemaProgress.classList.remove("hidden");
+    dev.els.cinemaProgress.textContent = text;
+  }
+
+  async function runCinema() {
+    if (dev.cinemaBusy) return;
+    if (!dev.root) {
+      cinemaProgress("Open a workspace folder first - the shots are written into it.");
+      return;
+    }
+    if (!dev.cinemaFiles.length) return;
+    dev.cinemaBusy = true;
+    dev.els.cinemaRun.disabled = true;
+    dev.els.cinemaResult.classList.add("hidden");
+    const started = Date.now();
+    const count = dev.camSeq && dev.cinemaFiles.length > 1 ? dev.cinemaFiles.length : 1;
+    let waited = 0;
+    const ticker = setInterval(() => {
+      waited = Math.round((Date.now() - started) / 1000);
+      cinemaProgress(`RENDERING\n${count} shot${count === 1 ? "" : "s"} · ${CAMS[dev.camPreset]} · ${waited}s`);
+    }, 1000);
+    cinemaProgress(`RENDERING\n${count} shot${count === 1 ? "" : "s"} · ${CAMS[dev.camPreset]}`);
+    try {
+      const r = await D.camera({
+        images: dev.cinemaFiles.map((f) => f.path),
+        preset: dev.camPreset,
+        aspect: dev.camAspect,
+        seconds: dev.camSeconds,
+        sequence: dev.camSeq,
+        name: dev.cinemaFiles[0].name.replace(/\.[^.]+$/, ""),
+      });
+      cinemaProgress(`DONE\n${r.seconds}s · ${r.aspect} · ${Math.round(r.bytes / 100000) / 10} MB\n${r.path}`);
+      renderCinemaResult(r);
+      sysLine(`camera shot ready: ${r.path}`);
+    } catch (err) {
+      cinemaProgress(`FAILED\n${err.message || err}`);
+    } finally {
+      clearInterval(ticker);
+      dev.cinemaBusy = false;
+      paintCinema();
+    }
+  }
+
+  function renderCinemaResult(r) {
+    const box = dev.els.cinemaResult;
+    box.textContent = "";
+    box.classList.remove("hidden");
+    const head = document.createElement("div");
+    head.className = "yt-results-head";
+    const h = document.createElement("h4");
+    h.textContent = r.sequence ? `${r.shots.length}-shot camera sequence` : `${CAMS[r.shots[0]?.preset] || "Camera"} shot`;
+    head.appendChild(h);
+    const reveal = document.createElement("button");
+    reveal.type = "button";
+    reveal.className = "dev-mini";
+    reveal.textContent = "OPEN CINEMA FOLDER";
+    reveal.addEventListener("click", () => D.reveal(r.path));
+    head.appendChild(reveal);
+    box.appendChild(head);
+
+    const card = document.createElement("article");
+    card.className = "yt-short";
+    const frame = document.createElement("div");
+    frame.className = "yt-short-frame";
+    const player = document.createElement("video");
+    player.className = "yt-short-video";
+    player.controls = true;
+    player.loop = true;
+    player.autoplay = true;
+    player.muted = true;
+    player.playsInline = true;
+    player.style.aspectRatio = r.aspect === "16:9" ? "16 / 9" : "9 / 16";
+    player.src = mediaUrl(r.abs);
+    frame.appendChild(player);
+    const num = document.createElement("span");
+    num.className = "yt-short-num";
+    num.textContent = r.aspect;
+    frame.appendChild(num);
+    card.appendChild(frame);
+
+    const body = document.createElement("div");
+    body.className = "yt-short-body";
+    const title = document.createElement("h4");
+    title.textContent = r.sequence ? `${r.shots.length} shots, cut together` : CAMS[r.shots[0]?.preset] || "Camera shot";
+    body.appendChild(title);
+    const when = document.createElement("div");
+    when.className = "dev-when";
+    when.textContent = `${r.seconds}s · ${r.width}x${r.height} · ${Math.round(r.bytes / 100000) / 10} MB · 30fps`;
+    body.appendChild(when);
+    const shots = document.createElement("div");
+    shots.className = "yt-short-from";
+    shots.textContent = r.shots
+      .map((s, i) => `${r.sequence ? `shot ${i + 1}: ` : ""}${s.image} - ${CAMS[s.preset] || s.preset} · ${s.seconds}s`)
+      .join("\n");
+    shots.style.whiteSpace = "pre-wrap";
+    body.appendChild(shots);
+    const where = document.createElement("div");
+    where.className = "dev-tags";
+    where.textContent = r.path;
+    body.appendChild(where);
+    const actions = document.createElement("div");
+    actions.className = "dev-actions";
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "dev-mini";
+    openBtn.textContent = "OPEN FILE";
+    openBtn.addEventListener("click", () => D.open(r.abs).catch((e) => sysLine(String(e.message || e))));
+    actions.appendChild(openBtn);
+    const again = document.createElement("button");
+    again.type = "button";
+    again.className = "dev-mini";
+    again.textContent = "RENDER AGAIN";
+    again.addEventListener("click", () => runCinema());
+    actions.appendChild(again);
+    body.appendChild(actions);
+    card.appendChild(body);
+    box.appendChild(card);
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   function paintStudio() {
@@ -1221,6 +1488,21 @@
     document.querySelectorAll("[data-platform]").forEach((b) => {
       b.addEventListener("click", () => setPlatform(b.getAttribute("data-platform")));
     });
+    document.querySelectorAll("[data-content-mode]").forEach((b) => {
+      b.addEventListener("click", () => setContentMode(b.getAttribute("data-content-mode")));
+    });
+    document.querySelectorAll("[data-cam]").forEach((b) => {
+      b.addEventListener("click", () => setCam(b.getAttribute("data-cam")));
+    });
+    document.querySelectorAll("[data-cam-aspect]").forEach((b) => {
+      b.addEventListener("click", () => setCamAspect(b.getAttribute("data-cam-aspect")));
+    });
+    document.querySelectorAll("[data-cam-secs]").forEach((b) => {
+      b.addEventListener("click", () => setCamSecs(b.getAttribute("data-cam-secs")));
+    });
+    $("cinemaSeq").addEventListener("click", toggleCamSeq);
+    $("cinemaPick").addEventListener("click", pickCinemaImages);
+    $("cinemaRun").addEventListener("click", runCinema);
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && dev.open) {
         if (dev.promptResolve) { dev.promptResolve("deny"); return; }
