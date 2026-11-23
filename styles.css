@@ -4539,3 +4539,11 @@ html.is-electron .sheet.center { top: calc(50% + var(--chrome-h) / 2); }
 
   .console .mic { box-shadow: inset 0 0 0 6px rgba(5, 8, 10, 0.94), 0 0 0 1px rgba(61, 255, 158, 0.22), 0 0 46px rgba(61, 255, 158, 0.12), 0 20px 40px rgba(0, 0, 0, 0.6); }
 }
+
+/* cinema camera engine */
+.dev-cams { flex-wrap: wrap; }
+.dev-cams .dev-platform { flex: 1 1 28%; padding: 7px 4px; }
+#cinemaPick { width: calc(100% - 20px); margin: 8px 10px 0; }
+#cinemaSeq { margin: 10px 10px 0; width: calc(100% - 20px); }
+#cinemaSeq.active { color: #04130b; border-color: var(--accent); background: var(--accent); }
+.yt-head #cinemaRun { width: auto; margin: 0; flex: 0 0 auto; padding: 12px 20px; }

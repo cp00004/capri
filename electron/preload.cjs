@@ -88,6 +88,7 @@ contextBridge.exposeInMainWorld("capriDev", {
   wav: (args) => ipcRenderer.invoke("capri-dev-wav", args || {}),
   frame: (args) => ipcRenderer.invoke("capri-dev-frame", args || {}),
   cut: (args) => ipcRenderer.invoke("capri-dev-cut", args || {}),
+  camera: (args) => ipcRenderer.invoke("capri-dev-camera", args || {}),
   reveal: (p) => ipcRenderer.invoke("capri-dev-reveal", String(p || "")),
   open: (p) => ipcRenderer.invoke("capri-dev-open", String(p || "")),
   ffmpeg: () => ipcRenderer.invoke("capri-dev-ffmpeg"),
