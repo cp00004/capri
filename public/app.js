@@ -186,7 +186,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "5.4.0";
+const APP_VERSION = "5.5.0";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -3517,6 +3517,17 @@ function paintAvatar(dataUrl) {
 /* -------------------------------------------------------------- update log */
 
 const UPDATE_LOG = [
+  {
+    version: "5.5.0", date: "2026-11-23", platform: "windows",
+    title: "Pose engine + living worlds",
+    points: [
+      "TOON pose library nearly doubles: dodge, recoil, guard, grapple, leap, wind-up, aim, swing, serve, dribble, skate, brag, cower, tremble, bow, shrug, spin and pace join the 20 original moves",
+      "Pose sequences: every fight, sport, jump and fall scene now plays anticipation, action and follow-through (wind-up, punch, recoil) instead of one held loop",
+      "Persistent cast: named characters keep their body, fur colour and signature outfit across renders, and earlier casts are remembered for continuing stories",
+      "Dynamic worlds: the director invents any location or prop from your idea - flooded library, neon subway, rooftop skyline, volcano lair, lantern, trophy, guitar, robot - with 12 new hand-drawn backdrops and 13 new props",
+      "Reference photos still drive the face, and everything else from 5.4 stays: 10s to 8m toons, stories, real-time rendering and MP4 saves",
+    ],
+  },
   {
     version: "5.4.0", date: "2026-11-23", platform: "windows",
     title: "Long-form toons + stories",
