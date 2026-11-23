@@ -621,10 +621,10 @@
       ctx.strokeStyle = outline;
       ctx.lineWidth = r * 0.19;
       ctx.lineCap = "round";
-      const sx = side * r * 0.54;
-      const sy = r * 0.92;
-      const hx = sx + Math.cos(angle) * side * r * 0.62;
-      const hy = sy + Math.sin(angle) * r * 0.62;
+      const sx = side * r * 0.58;
+      const sy = r * 1.0;
+      const hx = sx + Math.cos(angle) * side * r * 0.8;
+      const hy = sy + Math.sin(angle) * r * 0.8;
       ctx.beginPath();
       ctx.moveTo(sx, sy);
       ctx.lineTo(hx, hy);
@@ -637,7 +637,7 @@
       ctx.stroke();
       ctx.fillStyle = skin;
       ctx.beginPath();
-      ctx.arc(hx, hy, r * 0.1, 0, Math.PI * 2);
+      ctx.arc(hx, hy, r * 0.12, 0, Math.PI * 2);
       ctx.fill();
     };
 
@@ -879,6 +879,7 @@
 
   function caption(ctx, text, opt) {
     const { W, H, y, age, pal, capWidth } = opt;
+    const capX = opt.cx || W / 2;
     const words = String(text || "").toUpperCase().split(/\s+/).filter(Boolean).slice(0, 10);
     if (!words.length) return;
     let size = W * 0.072;
@@ -895,7 +896,7 @@
     const total = words.length;
     lines.forEach((line, li) => {
       const lineWidth = ctx.measureText(line.join(" ")).width;
-      let cx = W / 2 - lineWidth / 2;
+      let cx = capX - lineWidth / 2;
       const cy = y - (lines.length - 1 - li) * lineH;
       for (const word of line) {
         const w = ctx.measureText(word).width;
@@ -926,7 +927,7 @@
     const p = clamp(age / 2.6, 0, 1);
     if (p < 1) {
       const barW = W * 0.5;
-      const bx = W / 2 - barW / 2;
+      const bx = clamp(capX, barW / 2 + 8, W - barW / 2 - 8) - barW / 2;
       const by = y + size * 0.9;
       ctx.fillStyle = "rgba(0,0,0,0.18)";
       rrect(ctx, bx, by, barW, size * 0.12, size * 0.06);
@@ -946,8 +947,8 @@
     let x = L.heroX + Math.sin(t * 0.9 + rand()) * L.W * 0.012;
     let lift = bounce;
     let rot = Math.sin(t * 2.2 + rand()) * 0.02;
-    let armL = 0.85 + Math.sin(t * 2 + rand()) * 0.15;
-    let armR = 0.85 + Math.sin(t * 2 + 1 + rand()) * 0.15;
+    let armL = 0.6 + Math.sin(t * 2 + rand()) * 0.15;
+    let armR = 0.6 + Math.sin(t * 2 + 1 + rand()) * 0.15;
     let legSwing = 0;
     let look = { x: 0, y: 0 };
     const action = scene.action || "wave";
@@ -955,34 +956,34 @@
       const eased = easeOutCubic(clamp(sceneTime / Math.max(0.1, sceneDur - 0.5), 0, 1));
       x = L.heroX + (eased - 0.5) * L.W * 0.16 + Math.sin(t * 3) * L.W * 0.01;
       legSwing = t * 7;
-      armL = 0.7 + Math.sin(t * 7) * 0.35;
-      armR = 0.7 - Math.sin(t * 7) * 0.35;
+      armL = 0.5 + Math.sin(t * 7) * 0.4;
+      armR = 0.5 - Math.sin(t * 7) * 0.4;
       look = { x: 1, y: 0 };
     } else if (action === "jump") {
       const cyc = (sceneTime % 1.15) / 1.15;
       lift = -Math.sin(cyc * Math.PI) * L.r * 0.75;
       legSwing = cyc > 0.4 ? 0.5 : 0;
-      armL = -0.95;
-      armR = -0.95;
+      armL = -1.0;
+      armR = -1.0;
     } else if (action === "wave") {
-      armR = -0.75 + Math.sin(t * 9) * 0.3;
+      armR = -0.65 + Math.sin(t * 9) * 0.35;
       rot = Math.sin(t * 2) * 0.03;
     } else if (action === "dance") {
       rot = Math.sin(t * 7) * 0.09;
       x = L.heroX + Math.sin(t * 3.5) * L.W * 0.05;
-      armL = -0.95 + Math.sin(t * 7) * 0.5;
-      armR = -0.95 - Math.sin(t * 7) * 0.5;
+      armL = -0.7 + Math.sin(t * 7) * 0.55;
+      armR = -0.7 - Math.sin(t * 7) * 0.55;
       lift = Math.abs(Math.sin(t * 7)) * L.r * 0.12;
       legSwing = t * 8;
     } else if (action === "point") {
       look = { x: 1, y: -0.6 };
       const dx = L.propX - L.heroX;
-      const dy = L.propY - (L.heroY + L.r * 0.9);
+      const dy = L.propY - (L.heroY + L.r * 1.0);
       armR = Math.atan2(dy, dx);
       rot = -0.02;
     } else if (action === "cheer") {
-      armL = -0.9 + Math.sin(t * 8) * 0.18;
-      armR = -0.9 - Math.sin(t * 8) * 0.18;
+      armL = -1.05 + Math.sin(t * 8) * 0.2;
+      armR = -1.05 - Math.sin(t * 8) * 0.2;
       lift = Math.abs(beat) * L.r * 0.14;
     }
     // blink every ~2.8s
@@ -1095,16 +1096,16 @@
     const idx = clamp(Math.floor(t / sceneDur), 0, scenes.length - 1);
     const sceneTime = t - idx * sceneDur;
     const scene = scenes[idx];
+    STYLE = story.style || "cocomelon";
     const L = layout(W, H);
     if (STYLE === "chibi") L.r *= 1.1;
     const pal = story.palette;
     const seed = story.seed || 7;
-    STYLE = story.style || "cocomelon";
 
     backdrop(ctx, { W, H, bg: scene.bg, t, pal, seed: seed + idx });
     // ground shadow under hero
     const poseNow = pose(scene, sceneTime, sceneDur, t, seed + idx, L);
-    const shadowY = Math.min(L.heroY + L.r * 1.7, H * 0.94);
+    const shadowY = Math.min(L.heroY + L.r * 1.95, H * 0.97);
     ctx.fillStyle = "rgba(0,0,0,0.16)";
     ctx.beginPath();
     ctx.ellipse(L.heroX, shadowY, L.r * (1.1 - (L.heroY - poseNow.y) / (L.r * 6)), L.r * 0.16, 0, 0, Math.PI * 2);
@@ -1125,12 +1126,12 @@
     if (scene.action === "cheer") confetti(ctx, W, H, t + 0.6, pal, 18);
 
     // captions in the safe area
-    caption(ctx, scene.caption, { W, H, y: L.captionY, age: sceneTime + 0.15, pal, capWidth: W * (L.vertical ? 0.86 : 0.7) });
+    caption(ctx, scene.caption, { W, H, y: L.captionY, age: sceneTime + 0.15, pal, capWidth: W * (L.vertical ? 0.86 : 0.52), cx: L.captionX });
 
     // global intro title
-    if (t < 2.1) {
+    if (t < 1.9) {
       const p = clamp(t / 0.5, 0, 1);
-      const out = clamp((2.1 - t) / 0.3, 0, 1);
+      const out = clamp((1.9 - t) / 0.25, 0, 1);
       const sc = 0.6 + 0.4 * easeOutBack(p);
       ctx.save();
       ctx.translate(W / 2, H * (L.vertical ? 0.17 : 0.19));
@@ -1171,12 +1172,6 @@
       ctx.globalAlpha = (1 - q) * 0.32;
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, W, H);
-      ctx.globalAlpha = 1 - q;
-      ctx.strokeStyle = rgba(pal[1], 0.8);
-      ctx.lineWidth = W * 0.02;
-      ctx.beginPath();
-      ctx.arc(W / 2, H * 0.55, (0.2 + q * 0.9) * W, 0, Math.PI * 2);
-      ctx.stroke();
       ctx.restore();
     }
     if (p > 0) {
@@ -1219,6 +1214,7 @@
   /* ------------------------------------------------------------ thumbs */
 
   function drawThumb(canvas, story, img, vertical) {
+    STYLE = story.style || "cocomelon";
     const W = canvas.width;
     const H = canvas.height;
     const ctx = canvas.getContext("2d");
@@ -1255,8 +1251,8 @@
 
     // hero
     const L = vertical
-      ? { r: W * 0.24, heroX: W * 0.5, heroY: H * 0.69, propX: W * 0.78, propY: H * 0.64, vertical: true, W, H }
-      : { r: H * 0.3, heroX: W * 0.72, heroY: H * 0.7, propX: W * 0.52, propY: H * 0.6, vertical: false, W, H };
+      ? { r: W * 0.24, heroX: W * 0.5, heroY: H * 0.69, vertical: true, W, H }
+      : { r: H * 0.225, heroX: W * 0.72, heroY: H * 0.607, vertical: false, W, H };
     ctx.fillStyle = "rgba(0,0,0,0.15)";
     ctx.beginPath();
     ctx.ellipse(L.heroX, L.heroY + L.r * 1.75, L.r * 1.1, L.r * 0.16, 0, 0, Math.PI * 2);
@@ -1268,10 +1264,9 @@
     }, story);
 
     if (img) {
-      const size = L.r * 1.35;
-      photoCard(ctx, img, vertical ? W * 0.16 : W * 0.14, vertical ? H * 0.56 : H * 0.25, size, 0.7, pal[1]);
+      const size = vertical ? W * 0.26 : H * 0.25;
+      photoCard(ctx, img, vertical ? W * 0.08 : W * 0.035, vertical ? H * 0.33 : H * 0.06, size, 0.7, pal[1]);
     }
-    STYLE = story.style || "cocomelon";
 
     // big words
     const text = String(story.thumbText || "WATCH THIS").toUpperCase().replace(/[!?]+$/, "");
@@ -1323,13 +1318,13 @@
     ctx.fillStyle = "#ff2d55";
     ctx.lineWidth = (vertical ? W : H) * 0.018;
     ctx.lineCap = "round";
-    const ax = vertical ? W * 0.75 : W * 0.52;
-    const ay = vertical ? H * 0.46 : H * 0.62;
-    const bx = L.heroX - L.r * 0.2;
-    const by = L.heroY - L.r * 0.6;
+    const ax = vertical ? W * 0.82 : W * 0.53;
+    const ay = vertical ? H * 0.44 : H * 0.55;
+    const bx = vertical ? L.heroX + L.r * 0.55 : L.heroX - L.r * 0.95;
+    const by = vertical ? L.heroY - L.r * 1.1 : L.heroY - L.r * 0.62;
     ctx.beginPath();
     ctx.moveTo(ax, ay);
-    ctx.quadraticCurveTo(ax + W * 0.04, by, bx, by);
+    ctx.quadraticCurveTo(ax - (ax - bx) * 0.25, ay + (by - ay) * 0.55, bx, by);
     ctx.stroke();
     const ang = Math.atan2(by - ay, bx - ax);
     ctx.beginPath();
