@@ -186,7 +186,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "5.3.0";
+const APP_VERSION = "5.4.0";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -3517,6 +3517,17 @@ function paintAvatar(dataUrl) {
 /* -------------------------------------------------------------- update log */
 
 const UPDATE_LOG = [
+  {
+    version: "5.4.0", date: "2026-11-23", platform: "windows",
+    title: "Long-form toons + stories",
+    points: [
+      "TOON lengths now go all the way up: 10s, 15s, 20s, 30s, 1m, 2m, 3m, 4m, 5m, 6m, 7m and 8m",
+      "STORIES lengths go to 1m, 2m and 3m - she paces the hook, beats and payoff across the whole film instead of stretching a short one",
+      "Long cuts get their own scene count, a scrolling progress track in the corner, and a lighter bitrate so an 8-minute cartoon stays a normal-sized MP4",
+      "Renders keep moving even when the window is in the background, and the soundtrack is synthesized per bar so multi-minute scores stay cheap",
+      "Rendering is real time by design - a 3-minute film takes about 3 minutes, an 8-minute toon about 8, and it all happens on your machine",
+    ],
+  },
   {
     version: "5.3.0", date: "2026-11-23", platform: "windows",
     title: "Stories studio + real casts",
