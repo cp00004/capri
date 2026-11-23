@@ -748,7 +748,7 @@
         <p class="dev-kicker">STUDIO</p>
         <div class="dev-platforms">
           <button type="button" class="dev-platform active" data-content-mode="shorts">▶ Shorts</button>
-          <button type="button" class="dev-platform" data-content-mode="cinema">◎ Cinema</button>
+          <button type="button" class="dev-platform" data-content-mode="story">▣ Stories</button>
           <button type="button" class="dev-platform" data-content-mode="toon">✎ Toon</button>
         </div>
         <div id="devContentShorts" class="dev-subpane">
@@ -762,38 +762,31 @@
           <div id="shortsFiles" class="dev-files hidden"></div>
           <p class="dev-hint">Pick one or several downloaded videos. The studio opens on the right: each video, its context, and every cut with its caption file.</p>
         </div>
-        <div id="devContentCinema" class="dev-subpane hidden">
-          <p class="dev-kicker">CAMERA MOVE</p>
+        <div id="devContentStory" class="dev-subpane hidden">
+          <p class="dev-kicker">FORMAT</p>
           <div class="dev-platforms dev-cams">
-            <button type="button" class="dev-platform active" data-cam="mix">Mix</button>
-            <button type="button" class="dev-platform" data-cam="push_in">Dolly In</button>
-            <button type="button" class="dev-platform" data-cam="pull_out">Dolly Out</button>
-            <button type="button" class="dev-platform" data-cam="crash_zoom">Crash Zoom</button>
-            <button type="button" class="dev-platform" data-cam="orbit">Orbit</button>
-            <button type="button" class="dev-platform" data-cam="crane">Crane Up</button>
-            <button type="button" class="dev-platform" data-cam="bullet">Bullet Time</button>
-            <button type="button" class="dev-platform" data-cam="fpv">FPV Drone</button>
-            <button type="button" class="dev-platform" data-cam="handheld">Handheld</button>
+            <button type="button" class="dev-platform active" data-story-type="whatif">What If</button>
+            <button type="button" class="dev-platform" data-story-type="how">How It Works</button>
+            <button type="button" class="dev-platform" data-story-type="truestory">True Story</button>
           </div>
+          <p class="dev-kicker">TOPIC</p>
+          <textarea id="storyTopic" rows="4" placeholder="e.g. what if the ocean went still for 60 seconds"></textarea>
           <p class="dev-kicker">FRAME</p>
           <div class="dev-platforms">
-            <button type="button" class="dev-platform active" data-cam-aspect="vertical">▯ 9:16</button>
-            <button type="button" class="dev-platform" data-cam-aspect="wide">▭ 16:9</button>
+            <button type="button" class="dev-platform active" data-story-aspect="vertical">▯ 9:16</button>
+            <button type="button" class="dev-platform" data-story-aspect="wide">▭ 16:9</button>
           </div>
-          <p class="dev-kicker">SHOT LENGTH</p>
+          <p class="dev-kicker">LENGTH</p>
           <div class="dev-platforms">
-            <button type="button" class="dev-platform" data-cam-secs="3">3s</button>
-            <button type="button" class="dev-platform active" data-cam-secs="4">4s</button>
-            <button type="button" class="dev-platform" data-cam-secs="6">6s</button>
+            <button type="button" class="dev-platform" data-story-secs="15">15s</button>
+            <button type="button" class="dev-platform active" data-story-secs="20">20s</button>
+            <button type="button" class="dev-platform" data-story-secs="30">30s</button>
           </div>
-          <button id="cinemaSeq" class="dev-mini wide" type="button" aria-pressed="false">SEQUENCE: OFF</button>
-          <button id="cinemaPick" class="dev-btn wide" type="button">PICK IMAGES</button>
-          <div id="cinemaFiles" class="dev-files hidden"></div>
-          <p class="dev-hint">Higgsfield-style camera moves, rendered on this machine. Pick stills, pick a move (Mix rolls a different move per image), and she pushes a real camera through each frame - no slideshow.</p>
+          <p class="dev-hint">She writes the hook, the beats and the payoff, then renders every frame here: miniature CGI scenes, slow dolly moves, volumetric light, film grain, documentary subtitles and a real MP4. Type any "what if", mechanism or true event.</p>
         </div>
         <div id="devContentToon" class="dev-subpane hidden">
           <p class="dev-kicker">IDEA</p>
-          <textarea id="toonPrompt" rows="4" placeholder="e.g. a baby bunny finds a giant rainbow balloon and learns to share it"></textarea>
+          <textarea id="toonPrompt" rows="4" placeholder="e.g. luffy punches zoro off the ship, or a cat races a dog through the city"></textarea>
           <p class="dev-kicker">STYLE</p>
           <div class="dev-platforms dev-cams">
             <button type="button" class="dev-platform active" data-toon-style="cocomelon">Toddler 3D</button>
