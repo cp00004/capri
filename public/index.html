@@ -749,6 +749,7 @@
         <div class="dev-platforms">
           <button type="button" class="dev-platform active" data-content-mode="shorts">▶ Shorts</button>
           <button type="button" class="dev-platform" data-content-mode="cinema">◎ Cinema</button>
+          <button type="button" class="dev-platform" data-content-mode="toon">✎ Toon</button>
         </div>
         <div id="devContentShorts" class="dev-subpane">
           <p class="dev-kicker">PLATFORM</p>
@@ -789,6 +790,32 @@
           <button id="cinemaPick" class="dev-btn wide" type="button">PICK IMAGES</button>
           <div id="cinemaFiles" class="dev-files hidden"></div>
           <p class="dev-hint">Higgsfield-style camera moves, rendered on this machine. Pick stills, pick a move (Mix rolls a different move per image), and she pushes a real camera through each frame - no slideshow.</p>
+        </div>
+        <div id="devContentToon" class="dev-subpane hidden">
+          <p class="dev-kicker">IDEA</p>
+          <textarea id="toonPrompt" rows="4" placeholder="e.g. a baby bunny finds a giant rainbow balloon and learns to share it"></textarea>
+          <p class="dev-kicker">STYLE</p>
+          <div class="dev-platforms dev-cams">
+            <button type="button" class="dev-platform active" data-toon-style="cocomelon">Toddler 3D</button>
+            <button type="button" class="dev-platform" data-toon-style="flat">Flat 2D</button>
+            <button type="button" class="dev-platform" data-toon-style="chibi">Chibi</button>
+            <button type="button" class="dev-platform" data-toon-style="sticker">Sticker</button>
+          </div>
+          <p class="dev-kicker">FRAME</p>
+          <div class="dev-platforms">
+            <button type="button" class="dev-platform active" data-toon-aspect="vertical">▯ 9:16</button>
+            <button type="button" class="dev-platform" data-toon-aspect="wide">▭ 16:9</button>
+          </div>
+          <p class="dev-kicker">LENGTH</p>
+          <div class="dev-platforms">
+            <button type="button" class="dev-platform" data-toon-secs="10">10s</button>
+            <button type="button" class="dev-platform active" data-toon-secs="15">15s</button>
+            <button type="button" class="dev-platform" data-toon-secs="20">20s</button>
+          </div>
+          <button id="toonMusic" class="dev-mini wide" type="button" aria-pressed="true">MUSIC: ON</button>
+          <button id="toonPick" class="dev-btn wide" type="button">ADD A PHOTO (OPTIONAL)</button>
+          <div id="toonFiles" class="dev-files hidden"></div>
+          <p class="dev-hint">Type an idea and she writes the beats, rigs a toddler toon, paints the world, animates every frame, scores it and cuts a real MP4. Add a photo and it becomes the story's special object.</p>
         </div>
       </div>
       <button id="devExit" class="dev-btn ghost wide dev-exit" type="button">&times; CLOSE DEV MODE</button>
@@ -835,6 +862,24 @@
           </header>
           <div id="cinemaProgress" class="dev-progress hidden"></div>
           <div id="cinemaResult" class="yt-results hidden"></div>
+        </div>
+      </div>
+      <div id="devToonView" class="dev-view hidden">
+        <div class="yt-scroll">
+          <header class="yt-head">
+            <div class="yt-head-text">
+              <p class="dev-kicker">TOON // CARTOON ENGINE</p>
+              <h3 id="toonTitle">No idea yet</h3>
+              <p id="toonMeta" class="yt-meta">Type an idea in the rail. She writes the story beats, animates a rigged toon with a painted world, scores it, and hands back a real MP4.</p>
+            </div>
+            <div class="toon-head-actions">
+              <button id="toonThumbRun" class="dev-btn" type="button" disabled>THUMBNAIL</button>
+              <button id="toonRun" class="dev-btn accent" type="button" disabled>ANIMATE SHORT</button>
+            </div>
+          </header>
+          <div id="toonStage" class="toon-stage hidden"></div>
+          <div id="toonProgress" class="dev-progress hidden"></div>
+          <div id="toonResult" class="yt-results hidden"></div>
         </div>
       </div>
       <div id="devChat" class="dev-view">
@@ -946,7 +991,8 @@
   <button id="noticeClose" class="toast-x" type="button" aria-label="Dismiss">&times;</button>
 </div>
 
-<script src="dev.js?v=5.1.2"></script>
-<script src="app.js?v=5.1.2"></script>
+<script src="toon.js?v=5.2.0"></script>
+<script src="dev.js?v=5.2.0"></script>
+<script src="app.js?v=5.2.0"></script>
 </body>
 </html>

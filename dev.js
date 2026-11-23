@@ -34,6 +34,13 @@
     camSeq: false,
     cinemaFiles: [],
     cinemaBusy: false,
+    toonStyle: "cocomelon",
+    toonAspect: "vertical",
+    toonSeconds: 15,
+    toonMusic: true,
+    toonPhoto: null,
+    toonBusy: false,
+    toonStory: null,
     nameMode: "",
     mainView: "chat",
   };
@@ -74,6 +81,17 @@
       cinemaResult: $("cinemaResult"),
       cinemaFiles: $("cinemaFiles"),
       cinemaSeq: $("cinemaSeq"),
+      toonView: $("devToonView"),
+      toonTitle: $("toonTitle"),
+      toonMeta: $("toonMeta"),
+      toonRun: $("toonRun"),
+      toonThumbRun: $("toonThumbRun"),
+      toonProgress: $("toonProgress"),
+      toonResult: $("toonResult"),
+      toonStage: $("toonStage"),
+      toonFiles: $("toonFiles"),
+      toonMusic: $("toonMusic"),
+      toonPrompt: $("toonPrompt"),
       ytTitle: $("ytVideoTitle"),
       ytMeta: $("ytVideoMeta"),
       ytContext: $("ytContext"),
@@ -178,14 +196,17 @@
       $("devChat").classList.add("hidden");
       $("devEditorView").classList.add("hidden");
       $("devTerminalView").classList.add("hidden");
-      const cinema = dev.contentMode === "cinema";
-      dev.els.ytView.classList.toggle("hidden", cinema);
-      dev.els.cinemaView.classList.toggle("hidden", !cinema);
-      if (cinema) paintCinema();
+      const mode = dev.contentMode;
+      dev.els.ytView.classList.toggle("hidden", mode !== "shorts");
+      dev.els.cinemaView.classList.toggle("hidden", mode !== "cinema");
+      dev.els.toonView.classList.toggle("hidden", mode !== "toon");
+      if (mode === "cinema") paintCinema();
+      else if (mode === "toon") paintToon();
       else paintStudio();
     } else {
       dev.els.ytView.classList.add("hidden");
       dev.els.cinemaView.classList.add("hidden");
+      dev.els.toonView.classList.add("hidden");
       showView(dev.mainView || "chat");
     }
   }
@@ -679,13 +700,14 @@
   /* ------------------------------------------------------------ cinema */
 
   function setContentMode(name) {
-    if (name !== "shorts" && name !== "cinema") return;
+    if (name !== "shorts" && name !== "cinema" && name !== "toon") return;
     dev.contentMode = name;
     for (const b of document.querySelectorAll("[data-content-mode]")) {
       b.classList.toggle("active", b.getAttribute("data-content-mode") === name);
     }
     $("devContentShorts").classList.toggle("hidden", name !== "shorts");
     $("devContentCinema").classList.toggle("hidden", name !== "cinema");
+    $("devContentToon").classList.toggle("hidden", name !== "toon");
     showTab("content");
   }
 
@@ -906,6 +928,381 @@
     again.className = "dev-mini";
     again.textContent = "RENDER AGAIN";
     again.addEventListener("click", () => runCinema());
+    actions.appendChild(again);
+    body.appendChild(actions);
+    card.appendChild(body);
+    box.appendChild(card);
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  /* ------------------------------------------------------------ toon */
+
+  const TOON_STYLES = { cocomelon: "Toddler 3D", flat: "Flat 2D", chibi: "Chibi", sticker: "Sticker" };
+
+  function setToonStyle(name) {
+    if (!TOON_STYLES[name]) return;
+    dev.toonStyle = name;
+    for (const b of document.querySelectorAll("[data-toon-style]")) {
+      b.classList.toggle("active", b.getAttribute("data-toon-style") === name);
+    }
+    paintToon();
+  }
+
+  function setToonAspect(name) {
+    dev.toonAspect = name === "wide" ? "wide" : "vertical";
+    for (const b of document.querySelectorAll("[data-toon-aspect]")) {
+      b.classList.toggle("active", b.getAttribute("data-toon-aspect") === dev.toonAspect);
+    }
+    paintToon();
+  }
+
+  function setToonSecs(value) {
+    const n = Number(value) || 15;
+    dev.toonSeconds = Math.min(20, Math.max(10, n));
+    for (const b of document.querySelectorAll("[data-toon-secs]")) {
+      b.classList.toggle("active", Number(b.getAttribute("data-toon-secs")) === dev.toonSeconds);
+    }
+    paintToon();
+  }
+
+  function toggleToonMusic() {
+    dev.toonMusic = !dev.toonMusic;
+    if (dev.els.toonMusic) {
+      dev.els.toonMusic.textContent = `MUSIC: ${dev.toonMusic ? "ON" : "OFF"}`;
+      dev.els.toonMusic.setAttribute("aria-pressed", String(dev.toonMusic));
+      dev.els.toonMusic.classList.toggle("active", dev.toonMusic);
+    }
+    paintToon();
+  }
+
+  function renderToonPhoto() {
+    const box = dev.els.toonFiles;
+    if (!box) return;
+    box.textContent = "";
+    if (!dev.toonPhoto) {
+      box.classList.add("hidden");
+      return;
+    }
+    box.classList.remove("hidden");
+    const row = document.createElement("div");
+    row.className = "dev-file";
+    row.style.paddingLeft = "52px";
+    const thumb = document.createElement("img");
+    thumb.alt = "";
+    thumb.style.cssText = "position:absolute;left:6px;top:6px;width:38px;height:38px;object-fit:cover;border:1px solid var(--line);";
+    row.appendChild(thumb);
+    D.readImage(dev.toonPhoto.path)
+      .then((r) => { thumb.src = r.dataUrl; })
+      .catch(() => { thumb.remove(); row.style.paddingLeft = ""; });
+    const name = document.createElement("span");
+    name.textContent = dev.toonPhoto.name;
+    row.appendChild(name);
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "dev-file-x";
+    x.setAttribute("aria-label", "Remove photo");
+    x.textContent = "\u00d7";
+    x.addEventListener("click", () => {
+      if (dev.toonBusy) return;
+      dev.toonPhoto = null;
+      renderToonPhoto();
+      paintToon();
+    });
+    row.appendChild(x);
+    box.appendChild(row);
+  }
+
+  async function pickToonPhoto() {
+    if (dev.toonBusy) return;
+    try {
+      const files = await D.pickImages();
+      if (!files.length) return;
+      dev.toonPhoto = files[0];
+      renderToonPhoto();
+      paintToon();
+    } catch (err) {
+      sysLine(`could not add that photo: ${err.message || err}`);
+    }
+  }
+
+  function toonProgress(text) {
+    const box = dev.els.toonProgress;
+    box.classList.remove("hidden");
+    box.textContent = text;
+  }
+
+  function shortIdea(text) {
+    const t = String(text || "").replace(/\s+/g, " ").trim();
+    return t.length > 64 ? `${t.slice(0, 61)}...` : t;
+  }
+
+  function paintToon() {
+    if (!dev.els?.toonTitle) return;
+    const prompt = String(dev.els.toonPrompt?.value || "").trim();
+    const frame = dev.toonAspect === "wide" ? "16:9" : "9:16";
+    dev.els.toonTitle.textContent = dev.toonStory?.title || (prompt ? shortIdea(prompt) : "No idea yet");
+    const bits = [TOON_STYLES[dev.toonStyle], frame, `${dev.toonSeconds}s`];
+    if (dev.toonPhoto) bits.push("photo in the story");
+    bits.push(dev.toonMusic ? "music" : "no music");
+    dev.els.toonMeta.textContent = prompt
+      ? `${bits.join(" · ")} · she writes the beats, then animates every frame on this machine · lands in ${dev.root ? `${dev.root}\\toon` : "toon/ after you open a folder"}`
+      : "Type an idea in the rail. She writes the story beats, animates a rigged toon in a painted world, scores it, and hands back a real MP4.";
+    if (dev.els.toonMusic) {
+      dev.els.toonMusic.textContent = `MUSIC: ${dev.toonMusic ? "ON" : "OFF"}`;
+      dev.els.toonMusic.setAttribute("aria-pressed", String(dev.toonMusic));
+      dev.els.toonMusic.classList.toggle("active", dev.toonMusic);
+    }
+    const ready = Boolean(prompt) && Boolean(dev.root) && !dev.toonBusy;
+    dev.els.toonRun.disabled = !ready;
+    dev.els.toonThumbRun.disabled = !ready;
+    renderToonPhoto();
+  }
+
+  async function readToonImage() {
+    if (!dev.toonPhoto) return "";
+    try {
+      const r = await D.readImage(dev.toonPhoto.path);
+      return r?.dataUrl || "";
+    } catch {
+      return "";
+    }
+  }
+
+  async function runToon() {
+    if (dev.toonBusy) return;
+    const prompt = String(dev.els.toonPrompt?.value || "").trim();
+    if (!prompt) {
+      toonProgress("TYPE AN IDEA FIRST\nThe rail holds the idea. One line is plenty.");
+      return;
+    }
+    if (!dev.root) {
+      toonProgress("OPEN A WORKSPACE FOLDER FIRST\nThe short is written into <folder>/toon.");
+      return;
+    }
+    if (!window.CapriToon) {
+      toonProgress("TOON ENGINE MISSING\nReload the app and try again.");
+      return;
+    }
+    dev.toonBusy = true;
+    dev.toonStory = null;
+    dev.els.toonResult.classList.add("hidden");
+    dev.els.toonStage.classList.remove("hidden");
+    dev.els.toonStage.textContent = "";
+    paintToon();
+    const started = Date.now();
+    let stage = "WRITING THE STORY";
+    const ticker = setInterval(() => {
+      toonProgress(`${stage}\n${Math.round((Date.now() - started) / 1000)}s`);
+    }, 1000);
+    toonProgress("WRITING THE STORY\nbuilding the beat sheet");
+    try {
+      const story = await D.toonScript({ prompt, seconds: dev.toonSeconds });
+      story.style = dev.toonStyle;
+      dev.toonStory = story;
+      stage = "ANIMATING";
+      toonProgress(`ANIMATING\n"${story.title}" · ${story.scenes.length} scenes`);
+      const imageDataUrl = await readToonImage();
+      const render = await window.CapriToon.renderShort({
+        story,
+        seconds: dev.toonSeconds,
+        aspect: dev.toonAspect,
+        host: dev.els.toonStage,
+        imageDataUrl,
+        onProgress: (p) => { stage = `ANIMATING ${Math.round(p * 100)}%`; },
+      });
+      stage = "SCORING";
+      toonProgress("SCORING\nbuilding the soundtrack");
+      const music = dev.toonMusic ? window.CapriToon.makeMusic(render.seconds) : null;
+      stage = "WRITING MP4";
+      toonProgress("WRITING MP4\nconverting the recording");
+      const r = await D.toonSave({
+        kind: "video",
+        name: story.title || prompt.slice(0, 40),
+        videoB64: render.videoB64,
+        wavB64: music?.wavB64 || "",
+        width: render.width,
+        height: render.height,
+        seconds: render.seconds,
+        aspect: render.aspect,
+      });
+      toonProgress(`DONE\n${r.seconds}s · ${r.aspect} · ${story.scenes.length} scenes · ${Math.round(r.bytes / 100000) / 10} MB\n${r.path}`);
+      renderToonResult(r, story);
+      sysLine(`toon short ready: ${r.path}`);
+    } catch (err) {
+      toonProgress(`FAILED\n${err.message || err}`);
+    } finally {
+      clearInterval(ticker);
+      dev.toonBusy = false;
+      paintToon();
+    }
+  }
+
+  async function runToonThumb() {
+    if (dev.toonBusy) return;
+    const prompt = String(dev.els.toonPrompt?.value || "").trim();
+    if (!prompt) {
+      toonProgress("TYPE AN IDEA FIRST\nThe rail holds the idea.");
+      return;
+    }
+    if (!dev.root) {
+      toonProgress("OPEN A WORKSPACE FOLDER FIRST\nThumbnails are written into <folder>/toon/thumbs.");
+      return;
+    }
+    if (!window.CapriToon) {
+      toonProgress("TOON ENGINE MISSING\nReload the app and try again.");
+      return;
+    }
+    dev.toonBusy = true;
+    dev.els.toonResult.classList.add("hidden");
+    paintToon();
+    const started = Date.now();
+    const ticker = setInterval(() => {
+      toonProgress(`DRAWING THUMBNAILS\n${Math.round((Date.now() - started) / 1000)}s`);
+    }, 1000);
+    toonProgress("DRAWING THUMBNAILS\nwriting the hook");
+    try {
+      const story = await D.toonScript({ prompt, seconds: dev.toonSeconds });
+      story.style = dev.toonStyle;
+      dev.toonStory = story;
+      const imageDataUrl = await readToonImage();
+      const t = await window.CapriToon.renderThumbs({ story, imageDataUrl });
+      toonProgress("WRITING PNGs\nsaving both crops");
+      const r = await D.toonSave({ kind: "thumb", name: story.title || "toon", pngs: t.pngs });
+      toonProgress(`DONE\n2 thumbnails · 1280x720 + 1080x1920\n${r.path}`);
+      renderToonResult(r, story);
+      sysLine(`thumbnails ready: ${r.path}`);
+    } catch (err) {
+      toonProgress(`FAILED\n${err.message || err}`);
+    } finally {
+      clearInterval(ticker);
+      dev.toonBusy = false;
+      paintToon();
+    }
+  }
+
+  function renderToonResult(r, story) {
+    const box = dev.els.toonResult;
+    box.textContent = "";
+    box.classList.remove("hidden");
+    const head = document.createElement("div");
+    head.className = "yt-results-head";
+    const h = document.createElement("h4");
+    h.textContent = r.kind === "thumb" ? "Thumbnails - wide + vertical cover" : `${story.title} · ${story.scenes.length} scenes`;
+    head.appendChild(h);
+    const reveal = document.createElement("button");
+    reveal.type = "button";
+    reveal.className = "dev-mini";
+    reveal.textContent = "OPEN TOON FOLDER";
+    reveal.addEventListener("click", () => D.reveal(r.kind === "thumb" ? r.files[0].path : r.path));
+    head.appendChild(reveal);
+    box.appendChild(head);
+
+    if (r.kind === "thumb") {
+      const card = document.createElement("article");
+      card.className = "yt-short";
+      card.style.gridTemplateColumns = "minmax(0, 1fr)";
+      const gallery = document.createElement("div");
+      gallery.className = "toon-thumbs";
+      for (const f of r.files) {
+        const fig = document.createElement("figure");
+        const img = document.createElement("img");
+        img.alt = f.label;
+        img.src = mediaUrl(f.abs);
+        const cap = document.createElement("figcaption");
+        cap.className = "yt-short-from";
+        cap.textContent = `${f.label} · ${f.width}x${f.height}`;
+        fig.appendChild(img);
+        fig.appendChild(cap);
+        const open = document.createElement("button");
+        open.type = "button";
+        open.className = "dev-mini";
+        open.textContent = "OPEN";
+        open.addEventListener("click", () => D.open(f.abs).catch((e) => sysLine(String(e.message || e))));
+        fig.appendChild(open);
+        gallery.appendChild(fig);
+      }
+      card.appendChild(gallery);
+      const body = document.createElement("div");
+      body.className = "yt-short-body";
+      const title = document.createElement("h4");
+      title.textContent = `"${story.thumbText}"`;
+      body.appendChild(title);
+      const when = document.createElement("div");
+      when.className = "dev-when";
+      when.textContent = `${story.scenes.length} scenes · palette ${story.palette.join(" ")}`;
+      body.appendChild(when);
+      const where = document.createElement("div");
+      where.className = "dev-tags";
+      where.textContent = r.files.map((f) => f.path).join("\n");
+      where.style.whiteSpace = "pre-wrap";
+      body.appendChild(where);
+      const actions = document.createElement("div");
+      actions.className = "dev-actions";
+      const again = document.createElement("button");
+      again.type = "button";
+      again.className = "dev-mini";
+      again.textContent = "REDRAW";
+      again.addEventListener("click", () => runToonThumb());
+      actions.appendChild(again);
+      body.appendChild(actions);
+      card.appendChild(body);
+      box.appendChild(card);
+      box.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    const card = document.createElement("article");
+    card.className = "yt-short";
+    if (r.aspect === "16:9") card.style.gridTemplateColumns = "minmax(0, 440px) minmax(0, 1fr)";
+    const frame = document.createElement("div");
+    frame.className = "yt-short-frame";
+    const player = document.createElement("video");
+    player.className = "yt-short-video";
+    player.controls = true;
+    player.loop = true;
+    player.autoplay = true;
+    player.muted = true;
+    player.playsInline = true;
+    player.style.aspectRatio = r.aspect === "16:9" ? "16 / 9" : "9 / 16";
+    player.src = mediaUrl(r.abs);
+    frame.appendChild(player);
+    const num = document.createElement("span");
+    num.className = "yt-short-num";
+    num.textContent = r.aspect;
+    frame.appendChild(num);
+    card.appendChild(frame);
+
+    const body = document.createElement("div");
+    body.className = "yt-short-body";
+    const title = document.createElement("h4");
+    title.textContent = story.title;
+    body.appendChild(title);
+    const when = document.createElement("div");
+    when.className = "dev-when";
+    when.textContent = `${r.seconds}s · ${r.width}x${r.height} · ${Math.round(r.bytes / 100000) / 10} MB · 30fps · ${story.source === "template" ? "local story beats" : "AI story beats"}`;
+    body.appendChild(when);
+    const beats = document.createElement("div");
+    beats.className = "yt-short-from";
+    beats.textContent = story.scenes.map((s, i) => `${i + 1}. ${s.caption} · ${s.action} · ${s.bg}`).join("\n");
+    beats.style.whiteSpace = "pre-wrap";
+    body.appendChild(beats);
+    const where = document.createElement("div");
+    where.className = "dev-tags";
+    where.textContent = r.path;
+    body.appendChild(where);
+    const actions = document.createElement("div");
+    actions.className = "dev-actions";
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "dev-mini";
+    openBtn.textContent = "OPEN FILE";
+    openBtn.addEventListener("click", () => D.open(r.abs).catch((e) => sysLine(String(e.message || e))));
+    actions.appendChild(openBtn);
+    const again = document.createElement("button");
+    again.type = "button";
+    again.className = "dev-mini";
+    again.textContent = "ANIMATE AGAIN";
+    again.addEventListener("click", () => runToon());
     actions.appendChild(again);
     body.appendChild(actions);
     card.appendChild(body);
@@ -1504,6 +1901,20 @@
     $("cinemaSeq").addEventListener("click", toggleCamSeq);
     $("cinemaPick").addEventListener("click", pickCinemaImages);
     $("cinemaRun").addEventListener("click", runCinema);
+    document.querySelectorAll("[data-toon-style]").forEach((b) => {
+      b.addEventListener("click", () => setToonStyle(b.getAttribute("data-toon-style")));
+    });
+    document.querySelectorAll("[data-toon-aspect]").forEach((b) => {
+      b.addEventListener("click", () => setToonAspect(b.getAttribute("data-toon-aspect")));
+    });
+    document.querySelectorAll("[data-toon-secs]").forEach((b) => {
+      b.addEventListener("click", () => setToonSecs(b.getAttribute("data-toon-secs")));
+    });
+    $("toonMusic").addEventListener("click", toggleToonMusic);
+    $("toonPick").addEventListener("click", pickToonPhoto);
+    $("toonRun").addEventListener("click", runToon);
+    $("toonThumbRun").addEventListener("click", runToonThumb);
+    dev.els.toonPrompt.addEventListener("input", paintToon);
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && dev.open) {
         if (dev.promptResolve) { dev.promptResolve("deny"); return; }
