@@ -731,7 +731,7 @@
 
   function setStorySecs(value) {
     const n = Number(value) || 20;
-    dev.storySeconds = Math.min(30, Math.max(15, n));
+    dev.storySeconds = Math.min(180, Math.max(15, n));
     for (const b of document.querySelectorAll("[data-story-secs]")) {
       b.classList.toggle("active", Number(b.getAttribute("data-story-secs")) === dev.storySeconds);
     }
@@ -748,7 +748,7 @@
     const frame = dev.storyAspect === "wide" ? "16:9" : "9:16";
     dev.els.storyTitle.textContent = dev.storyScript?.title || (topic ? shortIdea(topic) : "No topic yet");
     dev.els.storyMeta.textContent = topic
-      ? `${STORY_TYPES[dev.storyType]} · ${frame} · ${dev.storySeconds}s · she writes the hook and beats, then renders every frame here · lands in ${dev.root ? `${dev.root}\\stories` : "stories/ after you open a folder"}`
+      ? `${STORY_TYPES[dev.storyType]} · ${frame} · ${fmtLen(dev.storySeconds)} · she writes the hook and beats, then renders every frame here · lands in ${dev.root ? `${dev.root}\\stories` : "stories/ after you open a folder"}`
       : "Pick a format and type a topic in the rail. What If pushes one idea to its limit, How It Works opens it up, True Story retells a real event.";
     dev.els.storyRun.disabled = !(topic && dev.root) || dev.storyBusy;
   }
@@ -808,8 +808,8 @@
         kind: "video",
         folder: "stories",
         name: script.title || topic.slice(0, 40),
-        videoB64: render.videoB64,
-        wavB64: music?.wavB64 || "",
+        videoBuf: render.videoBuf,
+        wavBuf: music?.wavBuf || null,
         width: render.width,
         height: render.height,
         seconds: render.seconds,
@@ -926,7 +926,7 @@
 
   function setToonSecs(value) {
     const n = Number(value) || 15;
-    dev.toonSeconds = Math.min(20, Math.max(10, n));
+    dev.toonSeconds = Math.min(480, Math.max(10, n));
     for (const b of document.querySelectorAll("[data-toon-secs]")) {
       b.classList.toggle("active", Number(b.getAttribute("data-toon-secs")) === dev.toonSeconds);
     }
@@ -1010,12 +1010,20 @@
     return t.length > 64 ? `${t.slice(0, 61)}...` : t;
   }
 
+  function fmtLen(sec) {
+    const s = Math.max(0, Math.round(Number(sec) || 0));
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return r ? `${m}m ${r}s` : `${m}m`;
+  }
+
   function paintToon() {
     if (!dev.els?.toonTitle) return;
     const prompt = String(dev.els.toonPrompt?.value || "").trim();
     const frame = dev.toonAspect === "wide" ? "16:9" : "9:16";
     dev.els.toonTitle.textContent = dev.toonStory?.title || (prompt ? shortIdea(prompt) : "No idea yet");
-    const bits = [TOON_STYLES[dev.toonStyle], frame, `${dev.toonSeconds}s`];
+    const bits = [TOON_STYLES[dev.toonStyle], frame, fmtLen(dev.toonSeconds)];
     if (dev.toonPhotos.length) bits.push(`${dev.toonPhotos.length} character photo${dev.toonPhotos.length > 1 ? "s" : ""}`);
     bits.push(dev.toonMusic ? "music" : "no music");
     dev.els.toonMeta.textContent = prompt
@@ -1093,8 +1101,8 @@
       const r = await D.toonSave({
         kind: "video",
         name: story.title || prompt.slice(0, 40),
-        videoB64: render.videoB64,
-        wavB64: music?.wavB64 || "",
+        videoBuf: render.videoBuf,
+        wavBuf: music?.wavBuf || null,
         width: render.width,
         height: render.height,
         seconds: render.seconds,

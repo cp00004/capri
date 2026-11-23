@@ -1162,15 +1162,6 @@
 
   /* ------------------------------------------------------------ score */
 
-  function toB64(bytes) {
-    let s = "";
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      s += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-    }
-    return btoa(s);
-  }
-
   function makeScore(seconds, type) {
     const rate = 44100;
     const dur = Math.max(2, Number(seconds) || 20);
@@ -1231,18 +1222,20 @@
     for (let i = 0; i < total; i += 1) {
       view.setInt16(44 + i * 2, clamp(out[i], -1, 1) * 32767, true);
     }
-    return { wavB64: toB64(data), seconds: dur };
+    return { wavBuf: data, seconds: dur };
   }
 
   /* ------------------------------------------------------------ render */
 
-  function blobToB64(blob) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || "").replace(/^data:[^,]*,/, ""));
-      reader.onerror = () => reject(new Error("Could not read the recording."));
-      reader.readAsDataURL(blob);
-    });
+  function blobToBytes(blob) {
+    return blob.arrayBuffer().then((buf) => new Uint8Array(buf));
+  }
+
+  function bitsFor(seconds) {
+    if (seconds <= 60) return 9_000_000;
+    if (seconds <= 150) return 6_500_000;
+    if (seconds <= 300) return 5_000_000;
+    return 3_500_000;
   }
 
   async function renderStory(opt) {
@@ -1250,7 +1243,7 @@
     const vertical = String(aspect || "vertical") !== "wide";
     const W = vertical ? 1080 : 1920;
     const H = vertical ? 1920 : 1080;
-    const dur = clamp(Number(seconds) || 20, 8, 45);
+    const dur = clamp(Number(seconds) || 20, 8, 180);
     if (!window.MediaRecorder) throw new Error("This build cannot record video.");
     if (host) {
       host.textContent = "";
@@ -1274,7 +1267,7 @@
     const mime = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]
       .find((m) => MediaRecorder.isTypeSupported(m)) || "";
     if (!mime) throw new Error("No webm encoder on this build.");
-    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 9_000_000 });
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: bitsFor(dur) });
     const chunks = [];
     rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
     const stopped = new Promise((resolve) => { rec.onstop = resolve; });
@@ -1291,7 +1284,9 @@
           resolve();
           return;
         }
-        requestAnimationFrame(loop);
+        // rAF freezes in hidden windows; timers keep long renders moving
+        if (document.hidden) setTimeout(loop, 33);
+        else requestAnimationFrame(loop);
       };
       requestAnimationFrame(loop);
     });
@@ -1301,7 +1296,7 @@
     const blob = new Blob(chunks, { type: mime });
     if (!blob.size) throw new Error("The recorder wrote zero bytes.");
     return {
-      videoB64: await blobToB64(blob),
+      videoBuf: await blobToBytes(blob),
       width: W,
       height: H,
       seconds: dur,
