@@ -97,10 +97,10 @@
         vertical, W, H,
         r: W * 0.215,
         heroX: W * 0.5,
-        heroY: H * 0.64,
+        heroY: H * 0.585,
         propX: W * 0.80,
-        propY: H * 0.585,
-        captionY: H * 0.855,
+        propY: H * 0.55,
+        captionY: H * 0.885,
         photoX: W * 0.18,
         photoY: H * 0.255,
         photoSize: W * 0.30,
@@ -109,11 +109,12 @@
     return {
       vertical, W, H,
       r: H * 0.225,
-      heroX: W * 0.665,
-      heroY: H * 0.665,
-      propX: W * 0.255,
-      propY: H * 0.55,
-      captionY: H * 0.855,
+      heroX: W * 0.71,
+      heroY: H * 0.585,
+      propX: W * 0.48,
+      propY: H * 0.52,
+      captionY: H * 0.84,
+      captionX: W * 0.29,
       photoX: W * 0.115,
       photoY: H * 0.245,
       photoSize: H * 0.34,
@@ -600,28 +601,28 @@
     for (const s of [-1, 1]) {
       const swing = legSwing * s;
       const footX = s * r * 0.24 + Math.sin(swing) * r * 0.2;
-      const footY = r * 1.62 + Math.abs(Math.cos(swing)) * r * 0.05;
+      const footY = r * 1.86 + Math.abs(Math.cos(swing)) * r * 0.05;
       ctx.beginPath();
-      ctx.moveTo(s * r * 0.24, r * 1.08);
+      ctx.moveTo(s * r * 0.24, r * 1.42);
       ctx.lineTo(footX, footY);
       ctx.stroke();
       ctx.strokeStyle = skin;
       ctx.lineWidth = r * 0.14;
       ctx.beginPath();
-      ctx.moveTo(s * r * 0.24, r * 1.08);
+      ctx.moveTo(s * r * 0.24, r * 1.42);
       ctx.lineTo(footX, footY);
       ctx.stroke();
       ctx.strokeStyle = outline;
       ctx.lineWidth = r * 0.2;
     }
 
-    // arms behind body
+    // arms (drawn after the head so waves read)
     const arm = (side, angle) => {
       ctx.strokeStyle = outline;
       ctx.lineWidth = r * 0.19;
       ctx.lineCap = "round";
-      const sx = side * r * 0.5;
-      const sy = r * 0.82;
+      const sx = side * r * 0.54;
+      const sy = r * 0.92;
       const hx = sx + Math.cos(angle) * side * r * 0.62;
       const hy = sy + Math.sin(angle) * r * 0.62;
       ctx.beginPath();
@@ -639,19 +640,17 @@
       ctx.arc(hx, hy, r * 0.1, 0, Math.PI * 2);
       ctx.fill();
     };
-    arm(-1, armL);
-    arm(1, armR);
 
     // body
     ctx.fillStyle = pal[2];
-    rrect(ctx, -r * 0.5, r * 0.62, r, r * 1.02, r * 0.38);
+    rrect(ctx, -r * 0.54, r * 0.55, r * 1.08, r * 1.0, r * 0.42);
     ctx.fill();
     ctx.strokeStyle = outline;
-    ctx.lineWidth = r * 0.045;
+    ctx.lineWidth = r * 0.045 * OW;
     ctx.stroke();
     // overalls
     ctx.fillStyle = shade(pal[3], -0.05);
-    rrect(ctx, -r * 0.44, r * 1.08, r * 0.88, r * 0.5, r * 0.2);
+    rrect(ctx, -r * 0.46, r * 1.02, r * 0.92, r * 0.48, r * 0.2);
     ctx.fill();
     ctx.stroke();
     // straps
@@ -659,15 +658,15 @@
     ctx.lineWidth = r * 0.09;
     for (const s of [-1, 1]) {
       ctx.beginPath();
-      ctx.moveTo(s * r * 0.3, r * 0.68);
-      ctx.lineTo(s * r * 0.34, r * 1.06);
+      ctx.moveTo(s * r * 0.3, r * 0.6);
+      ctx.lineTo(s * r * 0.36, r * 1.02);
       ctx.stroke();
     }
     // buttons
     ctx.fillStyle = "#ffd43b";
     for (const s of [-1, 1]) {
       ctx.beginPath();
-      ctx.arc(s * r * 0.3, r * 1.06, r * 0.045, 0, Math.PI * 2);
+      ctx.arc(s * r * 0.33, r * 1.01, r * 0.045, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -711,6 +710,8 @@
     }
 
     face(ctx, r, kind, mood, st.t || 0, blink, look);
+    arm(-1, armL);
+    arm(1, armR);
 
     // bow / cap accessory
     if (kind !== "kid" && story.seed % 2 === 0) {
@@ -945,14 +946,14 @@
     let x = L.heroX + Math.sin(t * 0.9 + rand()) * L.W * 0.012;
     let lift = bounce;
     let rot = Math.sin(t * 2.2 + rand()) * 0.02;
-    let armL = 0.9 + Math.sin(t * 2 + rand()) * 0.15;
-    let armR = 0.9 + Math.sin(t * 2 + 1 + rand()) * 0.15;
+    let armL = 0.85 + Math.sin(t * 2 + rand()) * 0.15;
+    let armR = 0.85 + Math.sin(t * 2 + 1 + rand()) * 0.15;
     let legSwing = 0;
     let look = { x: 0, y: 0 };
     const action = scene.action || "wave";
     if (action === "walk") {
       const eased = easeOutCubic(clamp(sceneTime / Math.max(0.1, sceneDur - 0.5), 0, 1));
-      x = L.W * (0.35 + 0.3 * eased) + Math.sin(t * 3) * L.W * 0.01;
+      x = L.heroX + (eased - 0.5) * L.W * 0.16 + Math.sin(t * 3) * L.W * 0.01;
       legSwing = t * 7;
       armL = 0.7 + Math.sin(t * 7) * 0.35;
       armR = 0.7 - Math.sin(t * 7) * 0.35;
@@ -961,27 +962,27 @@
       const cyc = (sceneTime % 1.15) / 1.15;
       lift = -Math.sin(cyc * Math.PI) * L.r * 0.75;
       legSwing = cyc > 0.4 ? 0.5 : 0;
-      armL = -2.2;
-      armR = -2.2;
+      armL = -0.95;
+      armR = -0.95;
     } else if (action === "wave") {
-      armR = -2.35 + Math.sin(t * 9) * 0.45;
+      armR = -0.75 + Math.sin(t * 9) * 0.3;
       rot = Math.sin(t * 2) * 0.03;
     } else if (action === "dance") {
       rot = Math.sin(t * 7) * 0.09;
       x = L.heroX + Math.sin(t * 3.5) * L.W * 0.05;
-      armL = -2 + Math.sin(t * 7) * 0.6;
-      armR = -2 - Math.sin(t * 7) * 0.6;
+      armL = -0.95 + Math.sin(t * 7) * 0.5;
+      armR = -0.95 - Math.sin(t * 7) * 0.5;
       lift = Math.abs(Math.sin(t * 7)) * L.r * 0.12;
       legSwing = t * 8;
     } else if (action === "point") {
       look = { x: 1, y: -0.6 };
       const dx = L.propX - L.heroX;
-      const dy = L.propY - (L.heroY + L.r * 0.8);
+      const dy = L.propY - (L.heroY + L.r * 0.9);
       armR = Math.atan2(dy, dx);
       rot = -0.02;
     } else if (action === "cheer") {
-      armL = -2.3 + Math.sin(t * 8) * 0.2;
-      armR = -2.3 - Math.sin(t * 8) * 0.2;
+      armL = -0.9 + Math.sin(t * 8) * 0.18;
+      armR = -0.9 - Math.sin(t * 8) * 0.18;
       lift = Math.abs(beat) * L.r * 0.14;
     }
     // blink every ~2.8s
