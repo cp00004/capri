@@ -186,7 +186,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "5.1.2";
+const APP_VERSION = "5.2.0";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -3517,6 +3517,17 @@ function paintAvatar(dataUrl) {
 /* -------------------------------------------------------------- update log */
 
 const UPDATE_LOG = [
+  {
+    version: "5.2.0", date: "2026-11-23", platform: "windows",
+    title: "Toon studio",
+    points: [
+      "Dev mode CONTENT now has a TOON studio next to SHORTS and CINEMA",
+      "Type an idea or attach a photo - Capri writes the story beats and animates a real cartoon short frame by frame, not a slideshow",
+      "Four looks (Toddler 3D, Flat 2D, Chibi, Sticker), 9:16 or 16:9, 10/15/20 seconds, with synthesized background music",
+      "One tap also renders click-bait thumbnails in 1280x720 and 1080x1920 - big outlined words, arrow, kicker and character",
+      "Everything renders on your device and saves under the Capri workspace toon folder",
+    ],
+  },
   {
     version: "5.1.2", date: "2026-11-23", platform: "windows",
     title: "Cinema camera engine",
