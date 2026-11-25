@@ -105,6 +105,47 @@ test("does not call plain loud speech a laugh or a scream", () => {
   assert.equal(falsePositive.length, 0, `loud speech read as laughter: ${JSON.stringify(falsePositive)}`);
 });
 
+// Regression: an utterance that begins after a pause used to read as an ~80 dB
+// energy jump, so every sentence was tagged a scream. On real speech that
+// produced seventeen "screams" in forty seconds of calm talking.
+test("a sentence starting after silence is not a scream", () => {
+  const pcm = concat(voiced(3), silence(1.5), voiced(3), silence(1.5), voiced(3));
+  const r = analyze(pcm, SR);
+  const shouts = r.events.filter((e) => e.type === "scream");
+  assert.equal(shouts.length, 0, `onsets read as screams: ${JSON.stringify(shouts.map((e) => e.start))}`);
+});
+
+// Regression: an utterance onset also satisfied the old excitement rule, so the
+// event list was a list of sentences rather than of reactions.
+test("ordinary talking produces no excitement events", () => {
+  const pcm = concat(voiced(4), silence(1), voiced(4), silence(1), voiced(4));
+  const r = analyze(pcm, SR);
+  const noise = r.events.filter((e) => e.type === "excitement" || e.type === "scream");
+  assert.equal(noise.length, 0, `talking reported as a reaction: ${JSON.stringify(noise.map((e) => [e.type, e.start]))}`);
+});
+
+// The other direction matters just as much: filtering must not silence a real
+// shout, or the feature would only ever be safe and never useful.
+test("a real shout interrupting speech is still detected", () => {
+  const pcm = concat(voiced(4, { amp: 0.05 }), voiced(0.9, { f0: 700, amp: 0.5 }), voiced(1.5, { amp: 0.05 }), silence(2));
+  const r = analyze(pcm, SR);
+  const shout = r.events.find((e) => e.type === "scream" || e.type === "excitement");
+  assert.ok(shout, `a genuine shout was suppressed: ${JSON.stringify(r.events.map((e) => [e.type, e.start]))}`);
+  assert.ok(shout.start >= 2.5 && shout.start <= 5.5, `shout located at ${shout.start}s, expected near 4s`);
+});
+
+// Consonants are what make speech not-laughter; this pins the property rather
+// than the threshold by requiring a clean laugh and a clean rejection together.
+test("speech and laughter are separated by voice quality, not volume", () => {
+  const pcm = concat(voiced(3), silence(1.5), voiced(2, { laugh: 1 }), silence(2));
+  const r = analyze(pcm, SR);
+  const laughs = r.events.filter((e) => e.type === "laughter" || e.type === "group_laughter");
+  assert.equal(laughs.length, 1, `expected one laugh, got ${JSON.stringify(laughs)}`);
+  assert.ok(laughs[0].start >= 3.8 && laughs[0].start <= 5.6, `laugh located at ${laughs[0].start}s`);
+  assert.equal(r.events.filter((e) => (e.type === "laughter" || e.type === "group_laughter") && e.start < 3.8).length, 0,
+    "ordinary speech was read as laughter");
+});
+
 test("returns a reaction curve aligned to the detected events", () => {
   const pcm = concat(voiced(2), voiced(2, { laugh: 1 }), voiced(2));
   const r = analyze(pcm, SR);
