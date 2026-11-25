@@ -144,6 +144,30 @@ test("refine leaves a boundary alone when speech has already stopped", () => {
   assert.ok(out.end <= 33.6, `clip was extended to ${out.end}s with no speech there`);
 });
 
+test("refine does not open a clip on the tail of the previous sentence", () => {
+  // The real defect: the cut landed inside "me.", the last word before the story
+  // starts, so the short opened on a pronoun with nothing before it.
+  const line = words([
+    ["light", 21.6, 22.0], ["at", 22.0, 22.2], ["me.", 22.4, 23.15],
+    ["So", 23.78, 23.96], ["I", 23.96, 24.12], ["unplugged", 24.12, 24.62], ["it,", 24.62, 25.06],
+  ]);
+  const out = math.refine({
+    start: 22.6, end: 25.0, words: line, pauses: [],
+    duration: 38.6, minClip: 2, maxClip: 40,
+  });
+  assert.ok(out.start >= 23.6, `clip opened at ${out.start}s on "...at me." instead of the next sentence`);
+});
+
+test("refine keeps a start that lands mid-sentence with no pause", () => {
+  // A full stop with no gap is punctuation, not a boundary: the words in between
+  // were actually spoken and must not be dropped.
+  const line = words([["done.", 1.0, 1.3], ["And", 1.32, 1.5], ["then", 1.5, 1.7], ["more", 1.7, 2.0]]);
+  const out = math.refine({
+    start: 1.1, end: 2.0, words: line, pauses: [], duration: 10, minClip: 0.5, maxClip: 40,
+  });
+  assert.ok(out.start <= 1.4, `clip start moved to ${out.start}s and dropped spoken words`);
+});
+
 test("snapStart leaves a boundary that already sits between words alone", () => {
   // 1.02s is a 50ms gap between "in" and "and": nothing to fix.
   const at = math.snapStart(1.02, SPEECH);

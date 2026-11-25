@@ -1842,9 +1842,15 @@
     // 6. Cut.
     const cutCache = new Map();
     const pfx = ctx.multi ? (platform === "tiktok" ? "-tt" : "-yt") : "";
-    for (let i = 0; i < picks.length; i += 1) {
-      const pick = picks[i];
-      // Snap to a real word and a real pause before anything is rendered.
+
+    // Rank compares the model's own windows, but the boundaries that actually get
+    // cut are different: snapping can move a start or end by a second or more, and
+    // two proposals that looked separate can collapse onto the same footage. On the
+    // fixture that split one joke across two files - a setup clip and a punchline
+    // clip - which is worse than shipping one. So refine first, then drop anything
+    // that now overlaps a better-ranked pick.
+    const planned = [];
+    for (const pick of picks) {
       const bounds = CM().refine({
         start: pick.start,
         end: pick.end,
@@ -1854,10 +1860,28 @@
         minClip: CLIP.min,
         maxClip: CLIP.max,
       });
-      const start = bounds.start;
-      const end = bounds.end;
+      const clash = planned.find((p) => Math.min(p.end, bounds.end) - Math.max(p.start, bounds.start) > 0.35);
+      if (clash) {
+        report.degraded.push(`${clock(bounds.start)}-${clock(bounds.end)} overlapped ${clock(clash.start)}-${clock(clash.end)} once snapped, so it was not cut`);
+        continue;
+      }
+      planned.push({ ...pick, start: bounds.start, end: bounds.end });
+    }
+
+    // Dropping overlaps must never empty the run: the first pick is the highest
+    // scored, so if anything survives it is that one.
+    if (!planned.length) planned.push({
+      ...picks[0],
+      start: CM().refine({ start: picks[0].start, end: picks[0].end, words: read.words, pauses: read.pauses, duration: info.duration, minClip: CLIP.min, maxClip: CLIP.max }).start,
+      end: CM().refine({ start: picks[0].start, end: picks[0].end, words: read.words, pauses: read.pauses, duration: info.duration, minClip: CLIP.min, maxClip: CLIP.max }).end,
+    });
+
+    for (let i = 0; i < planned.length; i += 1) {
+      const pick = planned[i];
+      const start = pick.start;
+      const end = pick.end;
       const length = end - start;
-      shortsProgress(`VIDEO ${tag}${label} · CUTTING ${i + 1}/${picks.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s · ${pick.score}/100`);
+      shortsProgress(`VIDEO ${tag}${label} · CUTTING ${i + 1}/${planned.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s · ${pick.score}/100`);
       try {
         const key = `${start.toFixed(2)}|${end.toFixed(2)}`;
         let hold = cutCache.get(key);
