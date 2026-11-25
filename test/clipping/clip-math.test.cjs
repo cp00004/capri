@@ -48,6 +48,24 @@ test("snapEnd padding never runs into the word that follows", () => {
   assert.ok(at >= 0.5 - 0.06, `end ${at}s stopped short of the word's own end`);
 });
 
+// A model often ends a window a few hundredths into the first word of the next
+// sentence. Keeping that word makes the clip run past the punchline; finishing
+// it drags in a whole new thought. The pause before it is the right end.
+test("snapEnd backs up to the pause when the cut lands in a new utterance", () => {
+  const line = words([["me.", 0, 0.44], ["So", 1.16, 1.34], ["I", 1.34, 1.5]]);
+  const at = math.snapEnd(1.18, line);
+  assert.ok(at <= 0.44 + 0.02, `end ${at}s kept the next sentence`);
+  assert.ok(at >= 0.44 - 0.02, `end ${at}s fell short of the finished sentence`);
+});
+
+test("snapEnd still finishes a word that follows a normal mid-sentence gap", () => {
+  // The gap is real but short (0.2s), so this is the same sentence: the word
+  // must be completed rather than dropped.
+  const line = words([["page", 0, 0.4], ["fourteen", 0.6, 1.0]]);
+  const at = math.snapEnd(0.62, line);
+  assert.ok(at >= 1.0, `end ${at}s truncated the word`);
+});
+
 test("snapStart leaves a boundary that already sits between words alone", () => {
   // 1.02s is a 50ms gap between "in" and "and": nothing to fix.
   const at = math.snapStart(1.02, SPEECH);

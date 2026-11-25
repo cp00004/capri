@@ -145,8 +145,19 @@ async function main() {
   });
   const moments = propose.json?.moments || [];
   console.log(`    provider=${(propose.json?.providers || []).join(",")} moments=${moments.length} in ${propose.ms}ms`);
+  if (propose.status !== 200) {
+    // A 502 here means every provider refused, which is not the same as "there
+    // was nothing funny". Say so rather than reading it as an empty result.
+    console.log(`    PASS ONE FAILED (${propose.status}): ${String(propose.text || "").slice(0, 300)}`);
+    report.degraded.push(`pass one failed: ${String(propose.text || "").slice(0, 200)}`);
+  }
   for (const m of moments) console.log(`    ${clock(m.start)}-${clock(m.end)} ${m.kind} conf=${m.confidence}: ${m.why}`);
   if (propose.json?.failures?.length) report.degraded.push(`pass one failures: ${propose.json.failures[0].error}`);
+  if (!moments.length) {
+    console.log(`\nRESULT     nothing proposed${propose.status !== 200 ? " - pass one could not run" : ""}`);
+    console.log(`degraded:  ${report.degraded.join(" | ") || "none"}`);
+    return;
+  }
 
   console.log("\n[6] pass two: review each");
   const reviewed = [];

@@ -568,7 +568,10 @@ function friendlyError(status, raw, provider = "groq", model = MODEL) {
   let message = raw;
   try {
     const parsed = JSON.parse(raw);
-    message = parsed?.error?.message || raw;
+    // OpenAI-compatible relays disagree on where the sentence lives: most nest
+    // it under error.message, some put it at the top level. Reading only the
+    // nested form dumped a whole JSON object in front of the user.
+    message = parsed?.error?.message || parsed?.message || raw;
   } catch {
     /* keep raw */
   }
@@ -583,6 +586,11 @@ function friendlyError(status, raw, provider = "groq", model = MODEL) {
           : provider === "mistral"
             ? `Mistral rejected the key. ${where}`
             : `Groq rejected the key. ${where}`;
+  }
+  if (status === 402) {
+    // A credit problem is not a bug in the request. Name the provider and what
+    // it wants, because "you need a subscription" buried in JSON reads as a crash.
+    return `${provider} is out of credit for ${model} - ${String(message).slice(0, 160)}`;
   }
   if (status === 403 && /check-?in/i.test(message)) {
     return "FreeTheAI wants today's check-in. Open freetheai.org/checkin once, then ask again.";
