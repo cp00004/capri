@@ -61,6 +61,15 @@
     if (hit < 0) return +at.toFixed(2);
 
     const speaking = list[hit];
+    const prev = list[hit - 1];
+    // Landing a few hundredths into a word that starts a new utterance is a
+    // mistimed cut: the clip should end on the pause before it, not swallow the
+    // first word of the next sentence. Only do this when a real gap exists, so a
+    // word mid-sentence is still finished rather than dropped.
+    if (prev && speaking.start - prev.end > 0.35 && at - speaking.start < 0.25) {
+      return +prev.end.toFixed(2);
+    }
+
     const next = list[hit + 1];
     // The padding must not run into the next word: ending 0.25s after "unplugged"
     // lands inside "it," and clips its first syllable. Stop at the next onset.
