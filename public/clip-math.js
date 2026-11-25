@@ -54,17 +54,18 @@
     const at = Number(t) || 0;
     const list = sortedWords(words);
     if (!list.length) return +at.toFixed(2);
-    let speaking = null;
-    let next = null;
-    for (const w of list) {
-      if (w.start > at + 0.6) { next = w; break; }
-      if (w.end > at) speaking = w;
-    }
-    if (!speaking) return +at.toFixed(2);
+
+    // The word being spoken at this instant. If the cut already sits in a gap
+    // between words, nothing is being truncated and the model's choice stands.
+    const hit = list.findIndex((w) => at >= w.start - 0.04 && at <= w.end);
+    if (hit < 0) return +at.toFixed(2);
+
+    const speaking = list[hit];
+    const next = list[hit + 1];
     // The padding must not run into the next word: ending 0.25s after "unplugged"
     // lands inside "it," and clips its first syllable. Stop at the next onset.
-    const room = next ? Math.max(0, next.start - 0.02) : Infinity;
-    return +Math.min(at + 1.4, speaking.end + pad, Math.max(speaking.end, room)).toFixed(2);
+    const room = next ? Math.max(speaking.end, next.start - 0.02) : Infinity;
+    return +Math.min(at + 1.4, speaking.end + pad, room).toFixed(2);
   }
 
   /**
