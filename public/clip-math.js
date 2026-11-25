@@ -1,79 +1,147 @@
 /* CAPRI // clip boundaries + word-accurate subtitles
    Pure functions: no DOM, no Electron, so the rules can be tested and the
    renderer only has to call them. Loaded as a classic script into
-   window.CapriClipMath, and require()-able from Node for the tests. */
+   window.CapriClipMath.
+
+   Everything here works in *source-video* seconds. Converting to clip-relative
+   time happens in one place, at the end, so a boundary bug cannot hide in a
+   second coordinate system. */
 (function (root) {
   "use strict";
 
+  const sortedWords = (words) =>
+    (Array.isArray(words) ? words : [])
+      .filter((w) => Number.isFinite(Number(w?.start)) && Number.isFinite(Number(w?.end)))
+      .map((w) => ({ word: String(w.word ?? w.text ?? "").trim(), start: Number(w.start), end: Number(w.end) }))
+      .filter((w) => w.word && w.end > w.start)
+      .sort((a, b) => a.start - b.start);
+
   /**
-   * Move a start back to just before the first word it should include, and an
-   * end to just after the last word it should include. Cutting on a word
-   * timestamp instead of an arbitrary second is what stops punchlines and
-   * reactions being sliced in half.
+   * Move a start back to just before the word it would otherwise cut into.
+   *
+   * A cut inside a word is the most audible defect a short can have: the first
+   * syllable arrives clipped. Snapping back by `pad` keeps a little air before
+   * the word but never drags in the previous sentence.
    */
   function snapStart(t, words, pad = 0.12) {
-    if (!Array.isArray(words) || !words.length) return t;
-    let best = null;
-    for (const w of words) {
-      if (w.start >= t - 1.1) { best = w; break; }
-      best = w;
-    }
-    if (!best) return t;
-    // Snap back to the word that is actually starting here, not to a word that
-    // already finished well before the cut.
-    if (best.end < t - 1.1) return Math.max(0, t);
-    return Math.max(0, +(best.start - pad).toFixed(2));
-  }
+    const at = Number(t) || 0;
+    const list = sortedWords(words);
+    if (!list.length) return +at.toFixed(2);
 
-  function snapEnd(t, words, pad = 0.3) {
-    if (!Array.isArray(words) || !words.length) return t;
-    let last = null;
-    for (const w of words) {
-      if (w.start > t + 0.6) break;
-      if (w.end <= t + 0.6) last = w;
+    // Words that are speaking at, or just after, this instant.
+    let pick = null;
+    for (const w of list) {
+      if (w.end < at - 0.35) continue;
+      if (w.start > at + 0.45) break;
+      if (!pick || Math.abs(w.start - at) < Math.abs(pick.start - at)) pick = w;
     }
-    if (!last) return t;
-    // Never extend far past what the caller asked for; a reaction that starts
-    // after the cut stays out.
-    return +Math.min(t + 1.2, Math.max(t, last.end + pad)).toFixed(2);
+    if (!pick) return +at.toFixed(2);
+    // Never jump further back than half a second; past that the model's own
+    // boundary is likely right and this is the wrong word.
+    const lead = Math.min(pad, 0.3);
+    return +Math.max(0, Math.max(at - 0.5, pick.start - lead)).toFixed(2);
   }
 
   /**
-   * Prefer the nearest silence so a clip opens and closes cleanly. Falls back to
-   * word snapping when no pause is near.
+   * Move an end forward until the word being spoken has finished.
+   *
+   * Cutting mid-word truncates a punchline, which is worse than a slightly
+   * longer clip. The extension is capped so a trailing reaction cannot double
+   * the length of the short.
    */
-  function snapToSilence(t, pauses, tolerance = 0.5) {
-    if (!Array.isArray(pauses) || !pauses.length) return null;
+  function snapEnd(t, words, pad = 0.25) {
+    const at = Number(t) || 0;
+    const list = sortedWords(words);
+    if (!list.length) return +at.toFixed(2);
+    let speaking = null;
+    for (const w of list) {
+      if (w.start > at + 0.6) break;
+      if (w.end > at) speaking = w;
+    }
+    if (!speaking) return +at.toFixed(2);
+    return +Math.min(at + 1.4, speaking.end + pad).toFixed(2);
+  }
+
+  /**
+   * Nearest pause, optionally only in one direction.
+   *
+   * Opening on silence and closing on silence is what makes a cut feel edited
+   * rather than chopped, so pauses win over word snapping when one is close.
+   */
+  function snapToSilence(t, pauses, tolerance = 0.5, direction = "nearest") {
+    const at = Number(t) || 0;
     let best = null;
-    for (const p of pauses) {
-      const d = Math.abs(Number(p) - t);
-      if (d <= tolerance && (best === null || d < Math.abs(best - t))) best = Number(p);
+    for (const raw of Array.isArray(pauses) ? pauses : []) {
+      const p = Number(raw);
+      if (!Number.isFinite(p)) continue;
+      const delta = p - at;
+      if (Math.abs(delta) > tolerance) continue;
+      if (direction === "before" && delta > 0.08) continue;
+      if (direction === "after" && delta < -0.08) continue;
+      if (best === null || Math.abs(delta) < Math.abs(best - at)) best = p;
     }
     return best === null ? null : +best.toFixed(2);
   }
 
   /**
-   * Decide the final boundaries for a reviewed clip.
+   * Pause midpoints from a loudness contour (one value per `hopMs`).
    *
-   * Order of preference at each edge: a pause very close by, then the word
-   * boundary, then the model's own choice. Hard limits are enforced last.
+   * Same rule the chopper uses: silence sits clearly under the speech level,
+   * computed from percentiles so a stream with a loud noise floor still has a
+   * reachable threshold.
+   */
+  function pausesFromContour(values, opts = {}) {
+    const list = Array.isArray(values) ? values : Array.from(values || []);
+    if (list.length < 4) return [];
+    const hopMs = Math.max(5, Number(opts.hopMs) || 20);
+    const minPause = Math.max(0.15, Number(opts.minPause) || 0.3);
+    const sorted = [...list].sort((a, b) => a - b);
+    const p10 = sorted[Math.floor(sorted.length * 0.1)] ?? -60;
+    const p50 = sorted[Math.floor(sorted.length * 0.5)] ?? -25;
+    const floor = Math.min(p50 - 8, Math.max(p10 + 12, p50 - 18));
+
+    const out = [];
+    let runStart = -1;
+    const framesPerSecond = 1000 / hopMs;
+    for (let i = 0; i <= list.length; i += 1) {
+      const quiet = i < list.length && list[i] < floor;
+      if (quiet) {
+        if (runStart < 0) runStart = i;
+        continue;
+      }
+      if (runStart >= 0) {
+        if ((i - runStart) / framesPerSecond >= minPause) {
+          let quietest = runStart;
+          for (let j = runStart; j < i; j += 1) if (list[j] < list[quietest]) quietest = j;
+          out.push(+((quietest * hopMs) / 1000).toFixed(2));
+        }
+        runStart = -1;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Final boundaries for a reviewed clip.
+   *
+   * Each edge prefers a nearby pause, then a word boundary, then the model's
+   * own choice. Hard limits are applied last and never silently ignored.
    */
   function refine({ start, end, words = [], pauses = [], duration = 0, minClip = 6, maxClip = 75 }) {
-    const total = Number(duration) || 0;
-    let a = Number(start) || 0;
-    let b = Number(end) || 0;
+    const total = Math.max(0, Number(duration) || 0);
+    let a = Math.max(0, Number(start) || 0);
+    let b = Math.max(a, Number(end) || 0);
 
-    const pauseStart = snapToSilence(a, pauses, 0.45);
-    a = pauseStart !== null ? pauseStart : snapStart(a, words);
-    const pauseEnd = snapToSilence(b, pauses, 0.6);
-    b = pauseEnd !== null ? Math.max(b, pauseEnd) : snapEnd(b, words);
+    const pauseA = snapToSilence(a, pauses, 0.5, "before");
+    a = pauseA !== null ? pauseA : snapStart(a, words);
+    const pauseB = snapToSilence(b, pauses, 0.7, "after");
+    b = pauseB !== null ? Math.max(b, pauseB) : snapEnd(b, words);
 
-    // Word snapping can invert a very short clip; keep it legal.
-    if (b - a < minClip) b = Math.min(total || b + minClip, a + minClip);
-    if (b - a < minClip) a = Math.max(0, b - minClip);
+    // Word snapping can invert a very short clip; grow it, then clamp.
+    if (b - a < minClip) b = a + minClip;
+    if (total && b > total) { b = total; if (b - a < minClip) a = Math.max(0, b - minClip); }
     if (b - a > maxClip) b = a + maxClip;
-    a = Math.max(0, a);
-    if (total) b = Math.min(total, b);
+    a = Math.max(0, Math.min(a, Math.max(0, b - 0.5)));
     return { start: +a.toFixed(2), end: +b.toFixed(2) };
   }
 
@@ -85,53 +153,49 @@
    * text cannot drift away from the voice.
    */
   function cuesFromWords(words, from, to, opts = {}) {
-    const maxChars = opts.maxChars || 42;
-    const maxDur = opts.maxDur || 4.5;
-    const gapBreak = opts.gapBreak || 0.55;
-    const list = (Array.isArray(words) ? words : [])
-      .filter((w) => w.end > from && w.start < to)
-      .sort((x, y) => x.start - y.start);
+    const maxChars = Math.max(12, Number(opts.maxChars) || 42);
+    const maxDur = Math.max(1, Number(opts.maxDur) || 4.5);
+    const gapBreak = Math.max(0.1, Number(opts.gapBreak) || 0.55);
+    const list = sortedWords(words).filter((w) => w.end > from && w.start < to);
+
     const cues = [];
     let cur = null;
     for (const w of list) {
-      const text = String(w.word || "").trim();
-      if (!text) continue;
-      const startsSentence = /^[A-Z0-9"']/.test(text) && /[.!?]$/.test(cur ? String(cur.words[cur.words.length - 1] || "") : "");
+      const endsSentence = cur ? /[.!?]["')\]]?$/.test(cur.text) : false;
       const breakHere = !cur
-        || (w.start - cur.end > gapBreak)
-        || (cur.text.length + text.length + 1 > maxChars)
-        || (w.end - cur.start > maxDur)
-        || startsSentence;
+        || endsSentence
+        || w.start - cur.end > gapBreak
+        || cur.text.length + w.word.length + 1 > maxChars
+        || w.end - cur.start > maxDur;
       if (breakHere) {
         if (cur) cues.push(cur);
-        cur = { start: w.start, end: w.end, words: [text] };
+        cur = { start: w.start, end: w.end, text: w.word };
       } else {
-        cur.words.push(text);
+        cur.text += cur.text ? ` ${w.word}` : w.word;
         cur.end = w.end;
       }
     }
     if (cur) cues.push(cur);
+
     return cues
-      .filter((c) => c.wordCount !== 0 && (c.end - c.start) > 0.05)
       .map((c) => ({
         start: +(Math.max(from, c.start) - from).toFixed(2),
         end: +(Math.min(to, c.end) - from).toFixed(2),
-        text: c.words.join(" ").replace(/\s+([,.!?])/g, "$1").replace(/\s+/g, " ").trim(),
+        text: c.text.replace(/\s+([,.!?;:])/g, "$1").replace(/\s+/g, " ").trim(),
       }))
       .filter((c) => c.text && c.end > c.start);
   }
 
   /**
-   * Fallback cues from coarse segment timing, but split on punctuation and
-   * apportioned by *character count within the segment's real span* rather than
-   * spread over the whole clip. This is the old behaviour's weak spot, so it is
-   * reported to the caller as approximate.
+   * Fallback cues from coarse segment timing, split on punctuation and
+   * apportioned by character count inside the segment's real span. This is
+   * approximate by nature, so the caller reports it as such.
    */
   function cuesFromSegments(segments, from, to) {
     const cues = [];
-    for (const seg of (Array.isArray(segments) ? segments : [])) {
-      const a = Math.max(Number(seg.start) || 0, from);
-      const b = Math.min(Number(seg.end) || 0, to);
+    for (const seg of Array.isArray(segments) ? segments : []) {
+      const a = Math.max(Number(seg?.start) || 0, from);
+      const b = Math.min(Number(seg?.end) || 0, to);
       if (b - a < 0.25) continue;
       const sentences = String(seg.text || "").split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
       if (!sentences.length) continue;
@@ -147,11 +211,15 @@
         at += span;
       }
     }
-    return cues.filter((c) => c.end > c.start);
+    return cues.filter((c) => c.text && c.end > c.start);
   }
 
-  /** Choose the best cue source and report which one was used. */
-  function buildCues({ words = [], segments = [], from, to }) {
+  /**
+   * Choose the best cue source and say which one was used, so the UI can tell
+   * the truth about caption accuracy instead of implying word sync it does not
+   * have.
+   */
+  function buildCues({ words = [], segments = [], from = 0, to = 0 }) {
     if (Array.isArray(words) && words.length) {
       const cues = cuesFromWords(words, from, to);
       if (cues.length) return { cues, source: "word" };
@@ -160,10 +228,7 @@
     return { cues, source: cues.length ? "segment" : "none" };
   }
 
-  /**
-   * Group cues into at most `maxRows` display lines that fit the frame width.
-   * Captions are burned at 1080 wide, so the budget is characters, not words.
-   */
+  /** Split a caption into display rows that fit a 1080-wide burn-in. */
   function wrapCue(text, maxChars = 26, maxRows = 3) {
     const words = String(text || "").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
     const rows = [];
@@ -177,40 +242,45 @@
   }
 
   /**
-   * Retime cues that would overlap or run too fast. Burned captions need a floor
-   * so a one-word cue stays readable, and no cue may overrun the next.
+   * Retime cues so a one-word cue stays readable and no cue overruns the next.
    */
   function settleCues(cues, opts = {}) {
-    const minDur = opts.minDur || 0.55;
-    const minGap = opts.minGap ?? 0.02;
+    const minDur = Math.max(0.1, Number(opts.minDur) || 0.55);
+    const minGap = Number.isFinite(Number(opts.minGap)) ? Number(opts.minGap) : 0.02;
     const out = [];
     for (let i = 0; i < cues.length; i += 1) {
       const cue = { ...cues[i] };
       const next = cues[i + 1];
-      const limit = next ? next.start - minGap : Infinity;
-      if (cue.end - cue.start < minDur) cue.end = Math.min(cue.end + (minDur - (cue.end - cue.start)), limit);
-      if (cue.end <= cue.start) cue.end = cue.start + Math.min(minDur, 0.3);
-      if (next && cue.end > next.start) cue.end = Math.max(cue.start + 0.15, next.start - minGap);
+      const limit = next ? Math.max(cue.start + 0.1, next.start - minGap) : Infinity;
+      if (cue.end - cue.start < minDur) cue.end = Math.min(cue.start + minDur, limit);
+      if (next && cue.end > limit) cue.end = limit;
       out.push(cue);
     }
-    return out.filter((c) => c.end > c.start && c.text);
+    return out.filter((c) => c.end > c.start && String(c.text || "").trim());
   }
 
-  /** Which audio events fall inside the final clip, for the UI and the info file. */
+  /**
+   * Which acoustic events fall inside the clip, in clip-relative seconds.
+   * Used by the info file and the Developer Mode evidence panel.
+   */
   function eventsWithin(events, start, end) {
+    const a = Number(start) || 0;
+    const b = Number(end) || 0;
     return (Array.isArray(events) ? events : [])
-      .filter((e) => Number(e.end) > start && Number(e.start) < end)
+      .filter((e) => Number(e?.end) > a && Number(e?.start) < b)
       .map((e) => ({
-        type: e.type,
-        start: +Math.max(Number(e.start), start - start).toFixed(2),
-        end: +Math.min(Number(e.end), end - start).toFixed(2),
+        type: String(e.type || "event"),
+        start: +(Math.max(Number(e.start), a) - a).toFixed(2),
+        end: +(Math.min(Number(e.end), b) - a).toFixed(2),
         confidence: Number(e.confidence) || 0,
-      }));
+      }))
+      .filter((e) => e.end > e.start);
   }
 
   const api = {
     snapStart, snapEnd, snapToSilence, refine,
-    cuesFromWords, cuesFromSegments, buildCues, wrapCue, settleCues, eventsWithin,
+    pausesFromContour, cuesFromWords, cuesFromSegments, buildCues,
+    wrapCue, settleCues, eventsWithin,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (root) root.CapriClipMath = api;
