@@ -1337,110 +1337,173 @@
     dev.els.shortsProgress.textContent = text;
   }
 
-  // The whole timeline is cut into back-to-back slices, so no stretch of the
-  // video goes unheard. Five-minute slices keep every transcript inside the
-  // model's context; only longer footage gets bigger slices, never gaps.
-  function scanWindows(duration) {
-    if (duration <= 300) return [{ start: 0, end: duration }];
-    const count = Math.min(20, Math.max(2, Math.round(duration / 300)));
-    const span = duration / count;
-    const list = [];
-    for (let i = 0; i < count; i += 1) {
-      list.push({ start: i * span, end: i === count - 1 ? duration : (i + 1) * span });
-    }
-    return list;
+  // Clip length rules, mirrored from the server's scoring defaults so the UI
+  // and the ranker cannot disagree.
+  const CLIP = { min: 6, idealMin: 14, idealMax: 45, max: 75 };
+  const CM = () => window.CapriClipMath;
+
+  // Everything the read learns that is not a clip: what degraded and why. Kept
+  // on the entry so Developer Mode can tell the truth about the pass.
+  function blankReport() {
+    return {
+      audio: { ok: false, reason: "", events: 0 },
+      scenes: { ok: false, reason: "", cuts: 0 },
+      stt: { ok: false, granularity: "none", chunks: 0, words: 0, providers: [] },
+      ocr: { ok: false, reason: "", samples: 0 },
+      vision: { frames: 0, sent: 0, failed: 0 },
+      passes: { proposed: 0, reviewed: 0, accepted: 0, rejected: 0 },
+      degraded: [],
+    };
   }
 
-  async function transcribe(video, duration, windows) {
-    // 30s chunks cut the number of ffmpeg/STT round-trips by a fifth, and three
-    // workers keep a batch from reading one video at a time. STT is the slowest
-    // step, so this is where the wall-clock time actually drops.
-    const CHUNK = 30;
-    const WORKERS = 3;
-    const jobs = [];
-    for (const w of windows) {
-      for (let at = w.start; at < w.end - 1; at += CHUNK) {
-        jobs.push({ start: at, span: Math.min(CHUNK, w.end - at) });
-      }
+  /**
+   * Read the stream once: acoustic events, speech regions, shot cuts, then a
+   * word-level transcript per speech region.
+   *
+   * The order matters. Speech regions come from the loudness contour, so every
+   * transcript chunk starts and ends in a real pause - which is what makes the
+   * word timestamps usable for clip boundaries instead of approximate blocks.
+   * The audio pass and the scene pass do not depend on each other, so they run
+   * together.
+   */
+  async function readVideo(video, info, report) {
+    const [audio, chunks, scenes] = await Promise.all([
+      D.audioAnalyse({ video, sampleRate: 16000 }).catch((err) => ({ ok: false, reason: String(err?.message || err), events: [] })),
+      D.speechChunks({ video, targetSeconds: 45, maxSeconds: 90, minSeconds: 8 }).catch((err) => ({ ok: false, reason: String(err?.message || err), chunks: [] })),
+      D.scenes({ video, threshold: 0.32 }).catch((err) => ({ ok: false, reason: String(err?.message || err), times: [] })),
+    ]);
+
+    report.audio = { ok: Boolean(audio?.ok), reason: audio?.reason || "", events: (audio?.events || []).length };
+    report.scenes = { ok: scenes?.ok !== false, reason: scenes?.reason || "", cuts: (scenes?.times || []).length };
+    if (!audio?.ok) report.degraded.push(`no acoustic analysis: ${audio?.reason || "audio decode failed"}`);
+
+    const chunksOk = Boolean(chunks?.ok && (chunks.chunks || []).length);
+    if (!chunksOk) report.degraded.push(`speech regions unavailable: ${chunks?.reason || "no audio"}`);
+
+    const regions = chunksOk ? chunks.chunks : [{ start: 0, end: Math.max(1, info.duration) }];
+    const pauses = chunksOk ? (chunks.pauses || []) : [];
+
+    const { words, segments, granularity, providers, failed } = await transcribeChunks(video, regions, report);
+    report.stt = {
+      ok: words.length > 0 || segments.length > 0,
+      granularity,
+      chunks: failed ? regions.length - failed : regions.length,
+      words: words.length,
+      providers: [...new Set(providers)],
+    };
+    if (granularity === "none") {
+      throw new Error("I could not hear any speech in that video.");
     }
+    if (granularity === "segment") {
+      report.degraded.push("word-level timing unavailable - captions and cuts are approximate");
+    }
+
+    return {
+      events: audio?.events || [],
+      curve: audio?.curve || [],
+      pauses,
+      scenes: scenes?.times || [],
+      words,
+      segments,
+      granularity,
+    };
+  }
+
+  /**
+   * Transcribe each speech region with word timing.
+   *
+   * Word timestamps come back relative to each chunk, so they are shifted onto
+   * the stream's own clock here. If a chunk only yields sentence timing, that is
+   * recorded rather than being dressed up as word-accurate.
+   */
+  async function transcribeChunks(video, regions, report) {
+    const WORKERS = 3;
+    const words = [];
     const segments = [];
-    let next = 0;
-    let done = 0;
+    const providers = [];
     let failed = 0;
-    const ask = async (job) => {
-      const wav = await D.wav({ video, start: job.start, duration: job.span });
+    let wordChunks = 0;
+    let done = 0;
+    let next = 0;
+
+    const ask = async (region) => {
+      const span = Math.max(1, region.end - region.start);
+      const wav = await D.wav({ video, start: region.start, duration: span });
       const bytes = Uint8Array.from(atob(wav.data), (c) => c.charCodeAt(0));
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 60_000);
+      const timer = setTimeout(() => ctrl.abort(), 120_000);
       try {
-        const res = await bridge().api("/api/stt", {
+        const res = await bridge().api("/api/stt/words?lang=en", {
           method: "POST",
           headers: { "Content-Type": "audio/wav" },
           body: new Blob([bytes], { type: "audio/wav" }),
           signal: ctrl.signal,
         });
-        if (!res.ok) return "";
-        const data = await res.json();
-        return String(data.text || "").trim();
+        if (!res.ok) throw new Error(`speech reader refused (${res.status})`);
+        return await res.json();
       } finally {
         clearTimeout(timer);
       }
     };
+
     const worker = async () => {
-      while (next < jobs.length) {
-        const job = jobs[next++];
-        let text = "";
+      while (next < regions.length) {
+        const region = regions[next++];
+        let data = null;
         try {
-          text = await ask(job);
-          if (!text) { await new Promise((r) => setTimeout(r, 350)); text = await ask(job); }
-        } catch { failed += 1; /* one dead chunk should not kill the read */ }
-        if (text && !/^\[?(silence|blank|music|no speech)/i.test(text)) {
-          segments.push({ start: job.start, end: job.start + job.span, text });
+          data = await ask(region);
+        } catch (err) {
+          failed += 1;
+          report.degraded.push(`speech chunk ${clock(region.start)} failed: ${err?.message || err}`);
+        }
+        if (data) {
+          providers.push(data.provider || "unknown");
+          const offset = region.start;
+          if ((data.words || []).length) {
+            wordChunks += 1;
+            for (const w of data.words) {
+              words.push({ word: String(w.word || "").trim(), start: +(w.start + offset).toFixed(3), end: +(w.end + offset).toFixed(3) });
+            }
+          } else if ((data.segments || []).length) {
+            for (const s of data.segments) {
+              segments.push({ start: +(s.start + offset).toFixed(3), end: +(s.end + offset).toFixed(3), text: String(s.text || "").trim() });
+            }
+          } else if (String(data.text || "").trim()) {
+            // Plain text with no timing at all: keep it for the model, but flag
+            // it so nothing downstream pretends to know when it was said.
+            segments.push({ start: offset, end: offset + (region.end - region.start), text: String(data.text).trim() });
+          }
         }
         done += 1;
-        shortsProgress(`READING THE VIDEO\n${done}/${jobs.length} speech chunks · ${segments.length} lines heard`);
+        shortsProgress(`READING THE VIDEO\n${done}/${regions.length} speech regions · ${words.length} words timed`);
       }
     };
-    await Promise.all(Array.from({ length: WORKERS }, () => worker()));
+
+    await Promise.all(Array.from({ length: Math.min(WORKERS, regions.length) }, () => worker()));
+    words.sort((a, b) => a.start - b.start);
     segments.sort((a, b) => a.start - b.start);
-    if (!segments.length && failed) {
-      throw new Error(`the speech reader dropped ${failed} of ${jobs.length} chunks - run that video again.`);
-    }
-    return segments;
+
+    const granularity = words.length ? "word" : segments.length ? "segment" : "none";
+    // A mixed read is word-accurate in places and approximate in others; call it
+    // segment so nothing overstates its precision.
+    const mixed = wordChunks > 0 && wordChunks < regions.length - failed;
+    return { words, segments, granularity: mixed ? "segment" : granularity, providers, failed };
   }
 
-  async function sampleFrames(video, duration, windows) {
-    // Frames are independent grabs: three ffmpeg readers at once instead of a
-    // line of them. A 10-minute video used to spend a minute just on stills.
-    const frames = [];
-    const spots = [];
-    if (windows.length === 1) {
-      const count = Math.max(6, Math.min(20, Math.ceil(duration / 25)));
-      for (let i = 0; i < count; i += 1) {
-        spots.push(Math.max(0, Math.min(duration - 0.2, duration * ((i + 0.5) / count))));
-      }
-    } else {
-      for (const w of windows) {
-        for (let i = 0; i < 3; i += 1) {
-          spots.push(Math.max(0, Math.min(duration - 0.2, w.start + ((w.end - w.start) * (i + 0.5)) / 3)));
-        }
-      }
-    }
-    let next = 0;
-    let done = 0;
-    const worker = async () => {
-      while (next < spots.length) {
-        const t = spots[next++];
-        const b64 = await D.frame({ video, at: t });
-        if (b64) frames.push({ t, dataUrl: `data:image/jpeg;base64,${b64}` });
-        done += 1;
-        shortsProgress(`READING THE VIDEO\n${done}/${spots.length} frames grabbed · ${Math.round(duration)}s of footage`);
-      }
-    };
-    await Promise.all([worker(), worker(), worker()]);
-    frames.sort((a, b) => a.t - b.t);
-    return frames;
+  /**
+   * Frames at the timestamps the analysis chose, in batches small enough that a
+   * single IPC call stays quick and a vision provider is not handed a wall of
+   * images.
+   */
+  async function framesAtTimes(video, times, width = 720) {
+    const spots = [...new Set(times.map((t) => +Number(t).toFixed(2)))]
+      .filter((t) => Number.isFinite(t) && t >= 0)
+      .sort((a, b) => a - b);
+    if (!spots.length) return { frames: [], failed: 0, reason: "no timestamps to grab" };
+    const r = await D.frames({ video, times: spots, width, quality: 4, concurrency: 3 });
+    return { frames: r?.frames || [], failed: r?.failed || 0, reason: r?.reason || "" };
   }
+
 
   function clock(t) {
     const s = Math.max(0, Math.round(Number(t) || 0));
@@ -1479,6 +1542,20 @@
     return cues;
   }
 
+  /**
+   * Captions for one clip. Word timing when the read has it, segment timing
+   * otherwise, and the caller is told which so the UI can be honest.
+   */
+  function cuesForClip(read, start, end) {
+    const built = CM().buildCues({
+      words: read.words || [],
+      segments: read.segments || [],
+      from: start,
+      to: end,
+    });
+    return { cues: CM().settleCues(built.cues), source: built.source };
+  }
+
   function buildSrt(cues) {
     return cues.map((c, i) => `${i + 1}\n${srtTime(c.start)} --> ${srtTime(c.end)}\n${c.text}`).join("\n\n") + "\n";
   }
@@ -1510,18 +1587,7 @@
       "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ];
     const lines = cues.map((c) => {
-      let text = String(c.text).replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
-      if (text.length > 26) {
-        const words = text.split(" ");
-        const rows = [];
-        let row = "";
-        for (const word of words) {
-          if (row && `${row} ${word}`.length > 26) { rows.push(row); row = word; }
-          else row = row ? `${row} ${word}` : word;
-        }
-        if (row) rows.push(row);
-        text = rows.slice(0, 3).join("\\N");
-      }
+      const text = CM().wrapCue(String(c.text).replace(/[{}]/g, ""), 26, 3).join("\\N");
       return `Dialogue: 0,${assTime(c.start)},${assTime(Math.max(c.end, c.start + 0.7))},Capri,,0,0,0,,${text}`;
     });
     return [...head, ...lines].join("\n") + "\n";
