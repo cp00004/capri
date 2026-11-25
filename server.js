@@ -720,11 +720,14 @@ function serveStatic(req, res, pathname) {
 const MAX_STEPS = 8;
 const MAX_TOOL_CALLS = 20;
 
-async function chatCompletion({ provider, messages, tools, signal }) {
+async function chatCompletion({ provider, messages, tools, signal, temperature }) {
   const payload = {
     model: provider.model,
     stream: true,
-    temperature: 0.85,
+    // Chat wants personality; a judge does not. Callers that are scoring pass
+    // their own temperature so the same clip does not flip between accept and
+    // reject on identical input.
+    temperature: Number.isFinite(Number(temperature)) ? Number(temperature) : 0.85,
     // Long lists and full explanations were being cut off at four items by a
     // 900-token cap. Free relays all accept 4k output; a short reply still
     // stops when the model stops.
@@ -987,14 +990,14 @@ function devToolError(res, status, message) {
   return json(res, status, { error: "dev_failed", message });
 }
 
-async function collectDevCompletion({ messages, tools }) {
+async function collectDevCompletion({ messages, tools, temperature }) {
   const candidates = devCandidates(devHasImages(messages));
   let lastErr = null;
   for (let i = 0; i < Math.min(candidates.length, 6); i += 1) {
     const provider = candidates[i];
     let upstream;
     try {
-      upstream = await chatCompletion({ provider, messages, tools });
+      upstream = await chatCompletion({ provider, messages, tools, temperature });
     } catch (err) {
       lastErr = err;
       const status = Number(err.status);
@@ -1120,16 +1123,16 @@ function cleanShortsClip(raw, ws, we, duration, platform) {
   };
 }
 
-async function shortsCompletion(messages) {
+async function shortsCompletion(messages, temperature) {
   try {
-    return await collectDevCompletion({ messages, tools: undefined });
+    return await collectDevCompletion({ messages, tools: undefined, temperature });
   } catch (err) {
     // Some vision relays allow only a handful of images; re-ask from the transcript alone.
     if (/image|vision|media/i.test(String(err?.message || "")) && devHasImages(messages)) {
       const textOnly = messages.map((m) =>
         Array.isArray(m.content) ? { role: m.role, content: m.content.filter((p) => p?.type === "text") } : m
       );
-      return collectDevCompletion({ messages: textOnly, tools: undefined });
+      return collectDevCompletion({ messages: textOnly, tools: undefined, temperature });
     }
     throw err;
   }
@@ -1350,7 +1353,7 @@ async function handleClipPropose(req, res) {
     const out = await shortsCompletion([
       { role: "system", content: analysis.PASS_ONE_SYSTEM(platform) },
       { role: "user", content },
-    ]);
+    ], 0.3);
     let parsed;
     try { parsed = analysis.parseModelJson(out.content); } catch { throw new Error("the model returned unreadable JSON"); }
     const list = Array.isArray(parsed?.moments) ? parsed.moments
@@ -1453,7 +1456,7 @@ async function handleClipReview(req, res) {
     out = await shortsCompletion([
       { role: "system", content: analysis.PASS_TWO_SYSTEM(platform) },
       { role: "user", content },
-    ]);
+    ], 0.2);
   } catch (err) {
     return devToolError(res, 502, String(err?.message || "The review could not run."));
   }
