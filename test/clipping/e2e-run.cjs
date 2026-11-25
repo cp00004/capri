@@ -117,6 +117,15 @@ async function main() {
   const candidates = (plan.json?.candidates || []).filter((c) => c.end - c.start >= 4);
   console.log(`    ${candidates.length} windows in ${plan.ms}ms`);
   for (const c of candidates) console.log(`    ${clock(c.start)}-${clock(c.end)} ${c.kind} strength=${c.strength}${c.bareReaction ? " BARE" : ""} events=${(c.events || []).length}`);
+  if (!candidates.length) {
+    // Nothing worth watching is a real answer, not a failure: a music-only ad has
+    // no spoken moment to clip. The studio stops here with "nothing happens", so
+    // this does too - asking a model about zero windows is a request the server
+    // correctly refuses, and reporting that as a provider outage would be a lie.
+    console.log(`\nRESULT     nothing to look at - no moment in that file has speech or a reaction`);
+    console.log(`degraded:  ${report.degraded.join(" | ") || "none"}`);
+    return;
+  }
 
   console.log("\n[4] frames at the evidence");
   const spots = [];
