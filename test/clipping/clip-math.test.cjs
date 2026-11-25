@@ -88,6 +88,62 @@ test("a deliberate one-word line after a pause keeps its own card", () => {
   assert.equal(cues[1].text, "Yes!");
 });
 
+// --- the clip must close a thought, not a word -----------------------------
+
+// Real fixture line. A speaker breathes after "it printed", which is exactly the
+// worst place to stop: the joke is the eleven words that follow.
+const PUNCHLINE = words([
+  ["me.", 22.12, 22.54],
+  ["So", 23.78, 23.96], ["I", 23.96, 24.12], ["unplugged", 24.12, 24.62], ["it,", 24.62, 25.06],
+  ["plugged", 25.06, 25.48], ["it", 25.48, 25.64], ["back", 25.64, 25.90], ["in,", 25.90, 26.24],
+  ["and", 26.40, 26.64], ["it", 26.84, 26.96], ["printed", 26.96, 27.22],
+  ["the", 27.46, 27.68], ["same", 27.68, 28.02], ["page", 28.02, 28.44], ["again", 28.44, 28.72],
+  ["out", 28.72, 28.90], ["of", 28.90, 29.04], ["pure", 29.04, 29.40], ["spite.", 29.40, 30.20],
+]);
+const PUNCH_PAUSES = [22.54, 23.78, 26.24, 27.34, 30.52];
+
+test("refine runs past a breath to the end of the sentence", () => {
+  // 27.0 lands between "printed" and "the": a pause sits at 27.34, so the old
+  // code accepted it and shipped a clip whose last words were "it printed".
+  const out = math.refine({
+    start: 23.78, end: 27.0, words: PUNCHLINE, pauses: PUNCH_PAUSES,
+    duration: 38.6, minClip: 4, maxClip: 40,
+  });
+  assert.ok(out.end >= 30.2, `clip ended at ${out.end}s, before the punchline`);
+  const said = PUNCHLINE.filter((w) => w.end > out.start && w.start < out.end).map((w) => w.word);
+  assert.ok(said.includes("spite."), `punchline missing: "${said.join(" ")}"`);
+});
+
+test("refine does not swallow the next thought to finish a sentence", () => {
+  // "spite." closes the joke; "I am going to leave that there." is a new one, and
+  // a window that already ends on the punchline must stay there.
+  const line = [...PUNCHLINE, ...words([["I", 31.20, 31.34], ["am", 31.34, 31.48],
+    ["going", 31.48, 31.76], ["to", 31.76, 31.86], ["leave", 31.86, 32.20],
+    ["that", 32.20, 32.40], ["there.", 32.40, 32.90]])];
+  const out = math.refine({
+    start: 23.78, end: 30.3, words: line, pauses: [...PUNCH_PAUSES, 31.10],
+    duration: 38.6, minClip: 4, maxClip: 40,
+  });
+  assert.ok(out.end <= 30.6, `clip ran on to ${out.end}s, past the punchline into the outro`);
+});
+
+test("refine respects the length cap even when a sentence is unfinished", () => {
+  // A limit the user set is honest; a clip that silently triples in length is not.
+  const long = words(Array.from({ length: 60 }, (_, i) => [`word${i}`, i * 0.5, i * 0.5 + 0.4]));
+  const out = math.refine({ start: 0, end: 2, words: long, pauses: [], duration: 40, minClip: 4, maxClip: 12 });
+  assert.ok(out.end - out.start <= 12.01, `clip ${out.end - out.start}s broke the 12s cap`);
+});
+
+test("refine leaves a boundary alone when speech has already stopped", () => {
+  // 33.5 is three seconds after the last word: nothing is pending, so no
+  // extension should be invented.
+  const out = math.refine({
+    start: 23.78, end: 33.5, words: PUNCHLINE, pauses: [30.52],
+    duration: 38.6, minClip: 4, maxClip: 40,
+  });
+  assert.ok(out.end <= 33.6, `clip was extended to ${out.end}s with no speech there`);
+});
+
 test("snapStart leaves a boundary that already sits between words alone", () => {
   // 1.02s is a 50ms gap between "in" and "and": nothing to fix.
   const at = math.snapStart(1.02, SPEECH);
