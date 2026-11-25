@@ -37,6 +37,7 @@ import {
 } from "./lib/profiles.js";
 import { listMemory, searchMemory, forgetMemory, memoryStats, exportMemory } from "./lib/memory-vault.js";
 import { createPublisher } from "./lib/publish.js";
+import analysis from "./lib/clipping/analysis.cjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -1289,6 +1290,171 @@ Return ONLY JSON:
     provider: picks[0].provider,
     watched: { windows: windows.length, candidates: found.length },
   });
+}
+
+/* ---------------------------------------------------------- clipping 2.0 */
+
+/**
+ * Pass one: propose moments inside each candidate window.
+ *
+ * One request per window, three in flight, each carrying its own evidence.
+ * Failures are collected rather than thrown so a single rate-limited window
+ * cannot lose the whole video, and the caller is told which windows failed.
+ */
+async function handleClipPropose(req, res) {
+  let body;
+  try { body = await readBody(req, 24_000_000); } catch (err) { return devToolError(res, 400, err.message); }
+  const duration = Math.max(1, Number(body.duration) || 0);
+  const platform = String(body.platform || "youtube").toLowerCase() === "tiktok" ? "tiktok" : "youtube";
+  const transcript = body.transcript || {};
+  const events = Array.isArray(body.events) ? body.events.slice(0, 4000) : [];
+  const ocr = Array.isArray(body.ocr) ? body.ocr.slice(0, 200) : [];
+  const windows = (Array.isArray(body.windows) ? body.windows : []).slice(0, 40)
+    .map((w) => ({ start: Math.max(0, Number(w?.start) || 0), end: Math.min(duration, Number(w?.end) || 0) }))
+    .filter((w) => w.end - w.start >= 4);
+
+  if (!windows.length) return devToolError(res, 400, "No candidate windows were proposed for that video.");
+
+  const framesFor = (w) => (Array.isArray(body.frames) ? body.frames : []).filter((f) => {
+    const t = Number(f?.t);
+    return Number.isFinite(t) && t >= w.start - 3 && t <= w.end + 3;
+  }).slice(0, 5);
+
+  const runWindow = async (w) => {
+    const lines = analysis.transcriptBlock(transcript, w.start, w.end);
+    const spoken = lines.replace(/\s+/g, " ").length;
+    const evLines = analysis.eventBlock(events, w.start, w.end);
+    const text = analysis.ocrBlock(ocr, w.start, w.end);
+
+    // A window with neither speech nor an event cannot produce a clip, and
+    // asking the model about it only spends quota.
+    if (spoken < 20 && !evLines) {
+      return { window: w, moments: [], skipped: "no speech or audio events" };
+    }
+
+    const content = [{
+      type: "text",
+      text: [
+        `Stream length: ${analysis.fmt(duration)}. This window: ${analysis.fmt(w.start)} - ${analysis.fmt(w.end)}.`,
+        evLines ? `\nDetected acoustic events:\n${evLines}` : "\nNo acoustic events were detected in this window.",
+        text ? `\nText detected on screen:\n${text}` : "",
+        `\nTranscript (${transcript.granularity === "word" ? "word-accurate" : "approximate" } timing):\n${lines || "(no speech)"}`,
+        framesFor(w).length ? "\nFrames from this window are attached, each labelled with its timestamp." : "\nNo frames attached for this window.",
+      ].filter(Boolean).join("\n"),
+    }];
+    for (const f of framesFor(w)) {
+      content.push({ type: "text", text: `Frame at ${analysis.fmt(f.t)}:` });
+      content.push(devImagePart(f.dataUrl));
+    }
+
+    const out = await shortsCompletion([
+      { role: "system", content: analysis.PASS_ONE_SYSTEM(platform) },
+      { role: "user", content },
+    ]);
+    let parsed;
+    try { parsed = parseJsonLoose(out.content); } catch { throw new Error("the model returned unreadable JSON"); }
+    const list = Array.isArray(parsed?.moments) ? parsed.moments
+      : Array.isArray(parsed?.clips) ? parsed.clips
+        : parsed?.start != null ? [parsed] : [];
+    const moments = list.map((m) => analysis.coerceMoment(m, w, duration)).filter(Boolean).slice(0, 3);
+    return { window: w, moments, provider: out.provider };
+  };
+
+  const results = [];
+  let next = 0;
+  const workers = async () => {
+    while (next < windows.length) {
+      const w = windows[next];
+      next += 1;
+      try {
+        results.push(await runWindow(w));
+      } catch (err) {
+        results.push({ window: w, moments: [], error: String(err?.message || err) });
+      }
+    }
+  };
+  await Promise.all([workers(), workers(), workers()]);
+
+  const moments = results.flatMap((r) => (r.moments || []).map((m) => ({ ...m, window: r.window, provider: r.provider })));
+  const failures = results.filter((r) => r.error).map((r) => ({ window: r.window, error: r.error }));
+  const providers = [...new Set(results.map((r) => r.provider).filter(Boolean))];
+
+  if (!moments.length && failures.length === results.length) {
+    return devToolError(res, 502, failures[0]?.error || "Every window failed.");
+  }
+
+  return json(res, 200, {
+    moments,
+    failures,
+    providers,
+    degraded: analysis.scoring ? false : false,
+    watched: { windows: windows.length, failed: failures.length },
+  });
+}
+
+/**
+ * Pass two: review one proposed moment against its own evidence.
+ */
+async function handleClipReview(req, res) {
+  let body;
+  try { body = await readBody(req, 16_000_000); } catch (err) { return devToolError(res, 400, err.message); }
+  const duration = Math.max(1, Number(body.duration) || 0);
+  const platform = String(body.platform || "youtube").toLowerCase() === "tiktok" ? "tiktok" : "youtube";
+  const moment = body.moment || {};
+  if (!Number.isFinite(Number(moment.start)) || !Number.isFinite(Number(moment.end))) {
+    return devToolError(res, 400, "That moment has no usable timestamps.");
+  }
+  const transcript = body.transcript || {};
+  const events = Array.isArray(body.events) ? body.events.slice(0, 4000) : [];
+  const ocr = Array.isArray(body.ocr) ? body.ocr.slice(0, 200) : [];
+  const frames = (Array.isArray(body.frames) ? body.frames : []).slice(0, 10);
+  const limits = {
+    minClip: Math.max(3, Number(body.minClip) || 6),
+    maxClip: Math.max(10, Number(body.maxClip) || 75),
+    slackBefore: 10,
+    slackAfter: 10,
+  };
+
+  const beforeStart = Number(moment.start) - 25;
+  const afterEnd = Number(moment.end) + 25;
+  const content = [{
+    type: "text",
+    text: [
+      `Proposed clip: ${analysis.fmt(moment.start)} - ${analysis.fmt(moment.end)} (${(Number(moment.end) - Number(moment.start)).toFixed(1)}s) of a ${analysis.fmt(duration)} stream.`,
+      moment.kind ? `Proposed kind: ${moment.kind}` : "",
+      moment.why ? `Proposer's reason: ${moment.why}` : "",
+      moment.setup ? `Proposed setup: ${moment.setup}` : "",
+      moment.payoff ? `Proposed payoff: ${moment.payoff}` : "",
+      moment.uses?.length ? `Evidence the proposer relied on: ${moment.uses.join(", ")}` : "",
+      `\nWhat happens just BEFORE the clip (context only, do not include unless the joke needs it):\n${analysis.transcriptBlock(transcript, beforeStart, Number(moment.start) - 0.1, 2000) || "(nothing)"}`,
+      `\nSpeech inside the clip:\n${analysis.transcriptBlock(transcript, moment.start, moment.end) || "(no speech inside the proposed clip)"}`,
+      `\nWhat happens just AFTER the clip (context only):\n${analysis.transcriptBlock(transcript, Number(moment.end) + 0.1, afterEnd, 2000) || "(nothing)"}`,
+      `\nAcoustic events in and around the clip:\n${analysis.eventBlock(events, Number(moment.start) - 6, Number(moment.end) + 6) || "(none)"}`,
+      analysis.ocrBlock(ocr, Number(moment.start) - 6, Number(moment.end) + 6) ? `\nOn-screen text:\n${analysis.ocrBlock(ocr, Number(moment.start) - 6, Number(moment.end) + 6)}` : "",
+      frames.length ? `\n${frames.length} frames from inside the clip are attached in order, each labelled with its timestamp.` : "\nNo frames attached; judge from the audio and transcript.",
+      `\nLegal clip length: ${limits.minClip}s to ${limits.maxClip}s. You may move the start or end by up to 10s to keep the setup and payoff intact.`,
+    ].filter(Boolean).join("\n"),
+  }];
+  for (const f of frames) {
+    content.push({ type: "text", text: `Frame at ${analysis.fmt(f.t)}:` });
+    content.push(devImagePart(f.dataUrl));
+  }
+
+  let out;
+  try {
+    out = await shortsCompletion([
+      { role: "system", content: analysis.PASS_TWO_SYSTEM(platform) },
+      { role: "user", content },
+    ]);
+  } catch (err) {
+    return devToolError(res, 502, String(err?.message || "The review could not run."));
+  }
+  let parsed;
+  try { parsed = parseJsonLoose(out.content); } catch { return devToolError(res, 502, "The review returned unreadable JSON."); }
+  const review = analysis.coerceReview(parsed, moment, duration, limits);
+  if (!review) return devToolError(res, 502, "The review returned nothing usable.");
+
+  return json(res, 200, { review, provider: out.provider });
 }
 
 function actionLabel(name, args) {
@@ -3854,6 +4020,15 @@ const handler = async (req, res) => {
     if (req.method === "POST" && pathname === "/api/dev/shorts") {
       if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
       return handleDevShorts(req, res);
+    }
+    // Clipping 2.0: propose moments per window, then review each one.
+    if (req.method === "POST" && pathname === "/api/dev/clip/propose") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      return handleClipPropose(req, res);
+    }
+    if (req.method === "POST" && pathname === "/api/dev/clip/review") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      return handleClipReview(req, res);
     }
     if (req.method === "POST" && pathname === "/api/tts") return handleTts(req, res);
     if (req.method === "POST" && pathname === "/api/stt") return handleStt(req, res);
