@@ -4089,6 +4089,14 @@ const handler = async (req, res) => {
       return handleDevShorts(req, res);
     }
     // Clipping 2.0: propose moments per window, then review each one.
+    if (req.method === "POST" && pathname === "/api/dev/clip/plan") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      return handleClipPlan(req, res);
+    }
+    if (req.method === "POST" && pathname === "/api/dev/clip/rank") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      return handleClipRank(req, res);
+    }
     if (req.method === "POST" && pathname === "/api/dev/clip/propose") {
       if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
       return handleClipPropose(req, res);
