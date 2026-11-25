@@ -192,17 +192,21 @@
     }
     if (cur) cues.push(cur);
 
-    // A cue of one short word looks broken on screen ("me." alone on its own
-    // card). Pull it back into the previous cue when that still fits, unless the
-    // single word is the whole sentence.
+    // A cue of one short word looks broken on screen ("spite." alone on its own
+    // card). Pull it back into the previous cue when it reads as the tail of the
+    // same sentence: adjacent in time, and the join does not make the card
+    // absurdly long. Sentence-final words are preferred, since a stray fragment
+    // is exactly what looks like a mistake, while a deliberate one-word line
+    // ("Yes!" after a silence) is left alone by the gap check.
     for (let i = cues.length - 1; i > 0; i -= 1) {
       const cue = cues[i];
       const prev = cues[i - 1];
       if (cue.text.split(" ").length > 1) continue;
-      if (cue.text.length > 4) continue;
+      if (cue.start - prev.end > 0.45) continue;
       const joined = `${prev.text} ${cue.text}`;
-      if (joined.length > maxChars + 10) continue;
-      if (joined.length > maxChars && !/[,.!?]$/.test(cue.text)) continue;
+      const finishesSentence = /[.!?]["')\]]?$/.test(cue.text);
+      if (joined.length > maxChars + 14) continue;
+      if (!finishesSentence && joined.length > maxChars) continue;
       prev.text = joined;
       prev.end = cue.end;
       cues.splice(i, 1);
