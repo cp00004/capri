@@ -1485,9 +1485,9 @@ async function handleClipPropose(req, res) {
   if (!windows.length) return devToolError(res, 400, "No candidate windows were proposed for that video.");
 
   // One frame, not five. Measured on this machine: a 720px still costs ~770 input
-  // tokens and the free relay's whole budget is 7000 per minute, so a screening
-  // pass cannot afford more than one frame per window. The decisive read in pass
-  // two gets two. Sending five only guaranteed a rate limit on every window.
+  // tokens against a free relay's whole budget of 7000 per minute, and a run makes
+  // four framed calls. One each is what fits; asking for five only guaranteed a
+  // rate limit on every window and a transcript-only fallback.
   const framesFor = (w) => (Array.isArray(body.frames) ? body.frames : []).filter((f) => {
     const t = Number(f?.t);
     return Number.isFinite(t) && t >= w.start - 3 && t <= w.end + 3;
