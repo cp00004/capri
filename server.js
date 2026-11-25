@@ -1292,8 +1292,7 @@ Return ONLY JSON:
 }
 
 function actionLabel(name, args) {
-  if (name === "call_me") return `call them ${String(args?.name || "").slice(0, 40)}`;
-  if (name === "remember_fact") return String(args?.fact || "remembering").slice(0, 90);
+  if (name === "call_me") return `call them ${String(args?.name || "").slice(0, 40)}`;  if (name === "remember_fact") return String(args?.fact || "remembering").slice(0, 90);
   if (name === "set_preference") return `${String(args?.key || "setting")} = ${JSON.stringify(args?.value ?? "").slice(0, 60)}`;
   if (name === "get_time") return "reading the clock";
   if (name === "set_reminder") return `reminder: ${String(args?.message || "").slice(0, 50)}`;
