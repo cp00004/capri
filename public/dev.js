@@ -2081,8 +2081,73 @@
       pre.textContent = meta || "";
       info.appendChild(pre);
       body.appendChild(info);
+
+      // Developer Mode transparency: what the engine actually detected and how
+      // the clip was validated. This is the difference between "it scored 71"
+      // and "here is why it scored 71, and here is what it could not check".
+      const whyBox = document.createElement("details");
+      whyBox.className = "yt-short-info";
+      const whySum = document.createElement("summary");
+      whySum.textContent = "WHY THIS CLIP";
+      whyBox.appendChild(whySum);
+      const grid = document.createElement("div");
+      grid.className = "clip-evidence";
+      const scoreWord = (n) => (n >= 70 ? "strong" : n >= 50 ? "fair" : "weak");
+      const rows = [
+        ["ENTERTAINMENT", `${pick.score ?? "?"}/100 · ${scoreWord(Number(pick.score))}`, "score"],
+        ["WHY IT WAS PICKED", pick.why || entry.pick?.why || "not explained", ""],
+        ["WINDOW", `${clock(entry.suggested?.start ?? pick.start)} → ${clock(entry.suggested?.end ?? pick.end)} suggested · ${clock(pick.start)} → ${clock(pick.end)} cut`, ""],
+        ["AUDIO EVENTS", (entry.evidence || []).length
+          ? entry.evidence.map((e) => `${e.type.replace(/_/g, " ")} ${e.start}-${e.end}s (${Math.round((e.confidence || 0) * 100)}%)`).join("\n")
+          : "none detected inside this clip", ""],
+        ["FULL VALIDATION", entry.pick?.passTwo === "accepted" ? "yes — second read accepted it" : "no — accepted on the first pass only", "warn"],
+        ["CAPTIONS", entry.captionSource === "word" ? "word-accurate timing" : entry.captionSource === "segment" ? "approximate — sentence timing only" : "none", entry.captionSource === "word" ? "" : "warn"],
+      ];
+      const comp = entry.components || {};
+      const parts = ["humor", "unexpected", "reaction", "entertainment", "context", "replay", "hook"]
+        .filter((k) => Number.isFinite(Number(comp[k])))
+        .map((k) => `${k} ${comp[k]}`);
+      if (parts.length) rows.splice(1, 0, ["RUBRIC", parts.join(" · "), ""]);
+      for (const [label, value, tone] of rows) {
+        const cell = document.createElement("div");
+        cell.className = `clip-evidence-row${tone ? ` ${tone}` : ""}`;
+        const key = document.createElement("span");
+        key.className = "clip-evidence-key";
+        key.textContent = label;
+        const val = document.createElement("span");
+        val.className = "clip-evidence-val";
+        val.textContent = value;
+        cell.append(key, val);
+        grid.appendChild(cell);
+      }
+      whyBox.appendChild(grid);
+      body.appendChild(whyBox);
+
       card.appendChild(body);
       box.appendChild(card);
+    }
+
+    // Per-video report: what ran, what degraded, and why anything was skipped.
+    const reports = [];
+    for (const entry of entries) if (entry.report && !reports.includes(entry.report)) reports.push(entry.report);
+    for (const report of reports) {
+      if (!report.degraded?.length && report.ocr?.ok) continue;
+      const warn = document.createElement("div");
+      warn.className = "clip-report";
+      const lines = [];
+      if (report.degraded?.length) lines.push(...report.degraded);
+      if (!report.ocr?.ok && report.ocr?.reason) lines.push(`on-screen text unavailable: ${report.ocr.reason}`);
+      const head = document.createElement("strong");
+      head.textContent = "DEGRADED THIS RUN";
+      warn.appendChild(head);
+      const list = document.createElement("ul");
+      for (const line of [...new Set(lines)]) {
+        const li = document.createElement("li");
+        li.textContent = line;
+        list.appendChild(li);
+      }
+      warn.appendChild(list);
+      box.appendChild(warn);
     }
     if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
   }
