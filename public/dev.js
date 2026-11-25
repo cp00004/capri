@@ -1863,9 +1863,12 @@
         minClip: CLIP.min,
         maxClip: CLIP.max,
       });
-      // Abutting windows: a mid-sentence gap of under a quarter second between one
-      // clip's end and another's start is the same bit of speech continuing.
-      const neighbour = merged.find((p) => Math.abs(p.end - bounds.start) < 0.25 || Math.abs(bounds.end - p.start) < 0.25);
+      // Abutting windows. A gap under 1.2s is shorter than a breath - the same
+      // threshold `refine` uses to decide speech has stopped - so two clips either
+      // side of it are the continuations of one run of speech, not two different
+      // moments. Snapping widened the gap here to 0.6s, which at 0.25s looked like
+      // two separate clips and shipped a setup without its punchline.
+      const neighbour = merged.find((p) => Math.abs(p.end - bounds.start) < 1.2 || Math.abs(bounds.end - p.start) < 1.2);
       if (neighbour) {
         const joined = CM().refine({
           start: Math.min(neighbour.start, bounds.start),

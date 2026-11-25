@@ -39,7 +39,7 @@ const picks = [
 const planned = [];
 for (const pick of picks) {
   const bounds = math.refine({ ...pick, words, pauses, duration: 38.6, ...CLIP });
-  const neighbour = planned.find((p) => Math.abs(p.end - bounds.start) < 0.25 || Math.abs(bounds.end - p.start) < 0.25);
+  const neighbour = planned.find((p) => Math.abs(p.end - bounds.start) < 1.2 || Math.abs(bounds.end - p.start) < 1.2);
   if (neighbour) {
     const joined = math.refine({
       start: Math.min(neighbour.start, bounds.start), end: Math.max(neighbour.end, bounds.end),
