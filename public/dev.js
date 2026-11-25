@@ -2007,10 +2007,23 @@
 
   // One block per short: the finished vertical file plays right there, the
   // caption/info script sits next to it, and the copy buttons grab the post.
-  function renderShortsResults(entries, scroll = true) {
+  // With no clips it still renders the reason, because a run that produced
+  // nothing needs an explanation more than a success does.
+  function renderShortsResults(entries, scroll = true, failingReports = []) {
     const box = dev.els.shortsResult;
     box.textContent = "";
     box.classList.remove("hidden");
+    if (!entries.length) {
+      const head = document.createElement("div");
+      head.className = "yt-results-head";
+      const h = document.createElement("h4");
+      h.textContent = "nothing postable";
+      head.appendChild(h);
+      box.appendChild(head);
+      appendReport(box, failingReports.length ? failingReports : dev.videos.map((v) => v.clipReport).filter(Boolean));
+      if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     const head = document.createElement("div");
     head.className = "yt-results-head";
     const h = document.createElement("h4");
