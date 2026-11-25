@@ -2157,18 +2157,37 @@
     // Per-video report: what ran, what degraded, and why anything was skipped.
     const reports = [];
     for (const entry of entries) if (entry.report && !reports.includes(entry.report)) reports.push(entry.report);
-    for (const report of reports) {
-      if (!report.degraded?.length && report.ocr?.ok) continue;
-      const warn = document.createElement("div");
-      warn.className = "clip-report";
+    appendReport(box, reports);
+    if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  /**
+   * "DEGRADED THIS RUN": everything the pipeline could not do, said plainly.
+   *
+   * Shared by the success and the nothing-postable paths, because a run with no
+   * clips needs this explanation more than a run that worked.
+   */
+  function appendReport(box, reports) {
+    for (const report of reports || []) {
+      if (!report) continue;
       const lines = [];
       if (report.degraded?.length) lines.push(...report.degraded);
-      if (!report.ocr?.ok && report.ocr?.reason) lines.push(`on-screen text unavailable: ${report.ocr.reason}`);
+      if (report.audio && report.audio.ok === false && report.audio.reason) lines.push(`no acoustic analysis: ${report.audio.reason}`);
+      if (report.stt && report.stt.ok === false && !report.degraded?.some((d) => /speech|hear/i.test(d))) {
+        lines.push(`speech reader unavailable: ${report.stt.reason || report.stt.granularity || "no timing"}`);
+      }
+      if (!report.ocr?.ok && report.ocr?.reason && report.ocr.reason !== "no readable on-screen text") {
+        lines.push(`on-screen text unavailable: ${report.ocr.reason}`);
+      }
+      const unique = [...new Set(lines)];
+      if (!unique.length) continue;
+      const warn = document.createElement("div");
+      warn.className = "clip-report";
       const head = document.createElement("strong");
       head.textContent = "DEGRADED THIS RUN";
       warn.appendChild(head);
       const list = document.createElement("ul");
-      for (const line of [...new Set(lines)]) {
+      for (const line of unique) {
         const li = document.createElement("li");
         li.textContent = line;
         list.appendChild(li);
@@ -2176,7 +2195,6 @@
       warn.appendChild(list);
       box.appendChild(warn);
     }
-    if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   /* ------------------------------------------------------------ open/close */
