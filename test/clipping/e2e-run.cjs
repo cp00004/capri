@@ -162,6 +162,9 @@ async function main() {
   }
   for (const m of moments) console.log(`    ${clock(m.start)}-${clock(m.end)} ${m.kind} conf=${m.confidence}: ${m.why}`);
   if (propose.json?.failures?.length) report.degraded.push(`pass one failures: ${propose.json.failures[0].error}`);
+  if (propose.json?.visionGaps?.length) {
+    report.degraded.push(`pass one was partly blind: ${propose.json.visionGaps[0]}`);
+  }
   if (!moments.length) {
     console.log(`\nRESULT     nothing proposed${propose.status !== 200 ? " - pass one could not run" : ""}`);
     console.log(`degraded:  ${report.degraded.join(" | ") || "none"}`);
@@ -182,6 +185,7 @@ async function main() {
     });
     const review = rv.json?.review;
     console.log(`    ${review?.decision} [${review?.start}-${review?.end}] humor=${review?.humor} ent=${review?.entertainment} hook=${review?.hook} "${review?.title || review?.reject_reason}" (${rv.ms}ms)`);
+    if (rv.json?.vision) report.degraded.push(`review at ${clock(m.start)} was partly blind: ${rv.json.vision}`);
     if (!review) continue;
     if (review.decision === "reject") {
       reviewed.push({ id: `${m.start}-${m.end}`, start: m.start, end: m.end, rejected: true, moment: m, candidate, review });

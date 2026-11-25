@@ -999,8 +999,14 @@ function devToolError(res, status, message) {
 }
 
 async function collectDevCompletion({ messages, tools, temperature }) {
-  const candidates = devCandidates(devHasImages(messages));
+  const vision = devHasImages(messages);
+  const candidates = devCandidates(vision);
   let lastErr = null;
+  // With pictures attached the *last* error is usually a text-only relay saying
+  // it has no credit, which says nothing about why the pictures failed. The
+  // meaningful cause is the vision-capable provider tried first, so keep that one
+  // separately and let it be the message.
+  let visionErr = null;
   for (let i = 0; i < Math.min(candidates.length, 6); i += 1) {
     const provider = candidates[i];
     let upstream;
@@ -1008,6 +1014,7 @@ async function collectDevCompletion({ messages, tools, temperature }) {
       upstream = await chatCompletion({ provider, messages, tools, temperature });
     } catch (err) {
       lastErr = err;
+      if (vision && !visionErr) visionErr = err;
       const status = Number(err.status);
       if (status === 429) coolDown(provider, Number(err.retryAfter) || 20);
       else if (status === 401 || status === 403) coolDown(provider, 300);
@@ -1065,7 +1072,7 @@ async function collectDevCompletion({ messages, tools, temperature }) {
     }
     return { content: content.trim(), tool_calls: toolCalls, provider: provider.name };
   }
-  throw lastErr || new Error(cappedMessage());
+  throw (vision ? (visionErr || lastErr) : lastErr) || new Error(cappedMessage());
 }
 
 async function handleDevStep(req, res) {
