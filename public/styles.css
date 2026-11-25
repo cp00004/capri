@@ -1336,6 +1336,15 @@ body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 
 .yt-short-info { margin-top: 6px; }
 .yt-short-info summary { cursor: pointer; font-family: var(--mono); font-size: 10px; letter-spacing: 0.8px; color: var(--pink); }
 .yt-short-txt { margin: 8px 0 0; max-height: 260px; overflow: auto; white-space: pre-wrap; background: rgba(0, 0, 0, 0.45); border: 1px solid var(--line); padding: 10px; font-size: 11px; color: var(--ink-dim); }
+.clip-evidence { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--line); padding: 10px; }
+.clip-evidence-row { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 10px; align-items: baseline; }
+.clip-evidence-key { font-family: var(--mono); font-size: 9.5px; letter-spacing: 1px; color: var(--ink-faint); }
+.clip-evidence-val { font-size: 11px; color: var(--ink-dim); white-space: pre-wrap; word-break: break-word; }
+.clip-evidence-row.warn .clip-evidence-val { color: var(--amber, #f0b429); }
+.clip-evidence-row.warn .clip-evidence-key { color: var(--amber, #f0b429); }
+.clip-report { border: 1px solid var(--line-2); border-left: 2px solid var(--amber, #f0b429); background: rgba(240, 180, 41, 0.06); padding: 12px 14px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+.clip-report strong { display: block; font-size: 10px; letter-spacing: 1px; color: var(--amber, #f0b429); margin-bottom: 6px; }
+.clip-report ul { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; }
 
 .dev-subpane { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: auto; }
 @media (max-width: 980px) {
