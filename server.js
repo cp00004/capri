@@ -1333,23 +1333,66 @@ async function handleClipPlan(req, res) {
 async function handleClipRank(req, res) {
   let body;
   try { body = await readBody(req, 8_000_000); } catch (err) { return devToolError(res, 400, err.message); }
-  const clips = (Array.isArray(body.clips) ? body.clips : []).filter((c) =>
-    Number.isFinite(Number(c?.start)) && Number.isFinite(Number(c?.end)) && Number(c.end) > Number(c.start));
-  if (!clips.length) return json(res, 200, { picks: [], rejected: [], belowBar: [], considered: 0, rubric: analysis.scoring.RUBRIC });
+  const DEFAULTS = analysis.scoring.DEFAULTS;
+  const minClip = Math.max(2, Number(body.minClip) || DEFAULTS.minClip);
+  const maxClip = Math.max(minClip, Number(body.maxClip) || DEFAULTS.maxClip);
 
-  const ranking = analysis.scoring.rankClips(clips, {
-    minScore: Number.isFinite(Number(body.minScore)) ? Number(body.minScore) : undefined,
-    max: Math.max(1, Math.min(12, Number(body.max) || 6)),
-    minClip: Math.max(2, Number(body.minClip) || analysis.scoring.DEFAULTS.minClip),
+  const raw = (Array.isArray(body.clips) ? body.clips : []).filter((c) =>
+    Number.isFinite(Number(c?.start)) && Number.isFinite(Number(c?.end)) && Number(c.end) > Number(c.start));
+
+  if (!raw.length) {
+    return json(res, 200, { picks: [], rejected: [], belowBar: [], considered: 0, rubric: analysis.scoring.RUBRIC });
+  }
+
+  // Every clip gets its components from the same rubric call. A model's own
+  // 0-100 impression is not comparable across calls, so it only supplies the
+  // subjective inputs; duration, evidence and support are decided here.
+  const prepared = raw.map((clip) => {
+    const review = clip.review || {};
+    const candidate = clip.candidate || { kind: "dialogue", strength: 0, events: [] };
+    const components = analysis.scoring.scoreComponents(clip, candidate, {
+      humor: review.humor,
+      unexpected: review.unexpected,
+      entertainment: review.entertainment,
+      hookQuality: (Number(review.hook) || 0) / 100,
+      hasDialogue: Boolean(clip.hasDialogue),
+      minClip,
+      maxClip,
+    });
+    return {
+      id: clip.id,
+      start: Number(clip.start),
+      end: Number(clip.end),
+      score: analysis.scoring.weightedScore(components),
+      components,
+      candidate,
+      bareReaction: Boolean(clip.bareReaction),
+      passTwo: clip.passTwo,
+    };
   });
 
+  const ranking = analysis.scoring.rankClips(prepared, {
+    minScore: Number.isFinite(Number(body.minScore)) ? Number(body.minScore) : undefined,
+    max: Math.max(1, Math.min(12, Number(body.max) || 6)),
+    minClip,
+  });
+
+  const ids = (list) => list.map((c) => ({
+    id: c.id ?? c.clip?.id,
+    start: c.start ?? c.clip?.start,
+    end: c.end ?? c.clip?.end,
+    score: c.score,
+    components: c.components ?? c.clip?.components,
+    reasons: c.reasons,
+  }));
+
   return json(res, 200, {
-    picks: ranking.picks,
-    rejected: ranking.rejected.map((r) => ({ start: r.clip.start, end: r.clip.end, score: r.score, reasons: r.reasons })),
-    belowBar: ranking.belowBar.map((c) => ({ start: c.start, end: c.end, score: c.score })),
+    picks: ids(ranking.picks),
+    rejected: ids(ranking.rejected),
+    belowBar: ids(ranking.belowBar),
     considered: ranking.considered,
     rubric: analysis.scoring.RUBRIC,
-    defaults: analysis.scoring.DEFAULTS,
+    defaults: { ...DEFAULTS, minClip, maxClip },
   });
 }
 
