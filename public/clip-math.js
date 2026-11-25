@@ -77,6 +77,57 @@
     return +Math.min(at + 1.4, speaking.end + pad, room).toFixed(2);
   }
 
+  const SENTENCE_END = /[.!?]["')\]]?$/;
+
+  /**
+   * Extend an end boundary to the close of the sentence it stops inside.
+   *
+   * Neither a pause nor a word boundary knows where a thought ends. A speaker
+   * draws breath after "it printed" and the rest - "the same page again out of
+   * pure spite" - carries the joke. Stopping there cuts the punchline off the
+   * clip, which is worse than any amount of extra length.
+   *
+   * `limit` is the latest instant the clip may end. When finishing the sentence
+   * would break that limit the boundary is left alone, because a limit the user
+   * set is honest while a truncated joke is not.
+   */
+  function finishSentence(t, words, limit = Infinity) {
+    const at = Number(t) || 0;
+    const list = sortedWords(words);
+    if (!list.length) return +at.toFixed(2);
+
+    // The last word spoken at or before this instant.
+    let hit = -1;
+    for (let i = 0; i < list.length; i += 1) {
+      if (list[i].start > at + 0.04) break;
+      hit = i;
+    }
+    if (hit < 0) return +at.toFixed(2);
+
+    const last = list[hit];
+    // Already a finished thought, or the speaker stopped for long enough that
+    // nothing is pending: the boundary is fine as it stands.
+    if (SENTENCE_END.test(last.word)) return +at.toFixed(2);
+    if (at > last.end + 1.2) return +at.toFixed(2);
+
+    const cap = Number.isFinite(limit) ? limit : Infinity;
+    let end = Math.max(at, last.end);
+    for (let i = hit + 1; i < list.length; i += 1) {
+      const w = list[i];
+      const prev = list[i - 1];
+      // A pause long enough to be a breath ends the thought without punctuation.
+      if (w.start - prev.end > 1.2) return +end.toFixed(2);
+      if (w.end > cap) return +at.toFixed(2);
+      // Guard against a runaway monologue: a sentence this long is not one
+      // thought the clip is missing.
+      if (w.end - last.end > 15) return +at.toFixed(2);
+      end = w.end;
+      if (SENTENCE_END.test(w.word)) return +end.toFixed(2);
+    }
+    // Speech ran out before punctuation did: the last word is the end of it.
+    return +end.toFixed(2);
+  }
+
   /**
    * Nearest pause, optionally only in one direction.
    *
