@@ -80,6 +80,33 @@
   const SENTENCE_END = /[.!?]["')\]]?$/;
 
   /**
+   * Move a start past a fragment that only finishes the sentence before it.
+   *
+   * Word snapping cannot know where a thought begins. On the fixture a cut at
+   * 22.6s landed on "me." - the last word of the previous line - so the short
+   * opened on a pronoun with no antecedent before starting the real story. When
+   * the first word inside a clip closes a sentence and a real pause follows it,
+   * the clip should open on the next word instead.
+   */
+  function trimLeadingTail(t, words, pad = 0.12) {
+    const at = Number(t) || 0;
+    const list = sortedWords(words);
+    if (!list.length) return +at.toFixed(2);
+
+    const first = list.find((w) => w.end > at);
+    if (!first || !SENTENCE_END.test(first.word)) return +at.toFixed(2);
+
+    const next = list[list.indexOf(first) + 1];
+    if (!next) return +at.toFixed(2);
+    // Only a genuine utterance boundary qualifies. A full stop mid-flow with no
+    // pause is just how the transcript punctuates; moving the cut there would drop
+    // words the speaker actually said.
+    if (next.start - first.end < 0.3) return +at.toFixed(2);
+
+    return +Math.max(0, next.start - pad).toFixed(2);
+  }
+
+  /**
    * Extend an end boundary to the close of the sentence it stops inside.
    *
    * Neither a pause nor a word boundary knows where a thought ends. A speaker
@@ -200,6 +227,8 @@
 
     const pauseA = snapToSilence(a, pauses, 0.5, "before");
     a = pauseA !== null ? pauseA : snapStart(a, words);
+    // A clip that opens on the tail of the previous sentence starts mid-thought.
+    a = Math.max(a, trimLeadingTail(a, words));
 
     // The end has to close a thought, not just a word. Snapping to the nearest
     // pause looks right and is wrong: speakers breathe mid-sentence, so on real
@@ -373,7 +402,7 @@
   }
 
   const api = {
-    snapStart, snapEnd, snapToSilence, refine, finishSentence,
+    snapStart, snapEnd, snapToSilence, refine, finishSentence, trimLeadingTail,
     pausesFromContour, cuesFromWords, cuesFromSegments, buildCues,
     wrapCue, settleCues, eventsWithin,
   };
