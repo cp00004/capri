@@ -28,18 +28,19 @@
     const list = sortedWords(words);
     if (!list.length) return +at.toFixed(2);
 
-    // Words that are speaking at, or just after, this instant.
-    let pick = null;
-    for (const w of list) {
-      if (w.end < at - 0.35) continue;
-      if (w.start > at + 0.45) break;
-      if (!pick || Math.abs(w.start - at) < Math.abs(pick.start - at)) pick = w;
-    }
-    if (!pick) return +at.toFixed(2);
-    // Never jump further back than half a second; past that the model's own
-    // boundary is likely right and this is the wrong word.
+    // Only a boundary that lands on a word needs moving. If it already sits in
+    // the gap between two words, the model's choice is fine.
+    const hit = list.findIndex((w) => at >= w.start - 0.04 && at <= w.end);
+    if (hit < 0) return +at.toFixed(2);
+
+    const target = list[hit];
     const lead = Math.min(pad, 0.3);
-    return +Math.max(0, Math.max(at - 0.5, pick.start - lead)).toFixed(2);
+    let candidate = Math.max(at - 0.5, target.start - lead);
+    // Padding back must not land inside the previous word, or the short opens
+    // on the tail of the sentence before it.
+    const prev = hit > 0 ? list[hit - 1] : null;
+    if (prev && candidate < prev.end) candidate = Math.min(prev.end, target.start);
+    return +Math.max(0, candidate).toFixed(2);
   }
 
   /**
