@@ -1011,6 +1011,7 @@ async function collectDevCompletion({ messages, tools, temperature }) {
       const status = Number(err.status);
       if (status === 429) coolDown(provider, Number(err.retryAfter) || 20);
       else if (status === 401 || status === 403) coolDown(provider, 300);
+      else if (status === 402) coolDown(provider, 1800);
       else if (status === 404) coolDown(provider, 600);
       else coolDown(provider, 15);
       continue;
