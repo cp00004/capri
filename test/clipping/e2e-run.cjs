@@ -115,11 +115,16 @@ async function main() {
   console.log("\n[4] frames at the evidence");
   const spots = [];
   for (const c of candidates) {
+    // Same rule as probeTimes() in the renderer: event peaks first, then even
+    // coverage so a window with no acoustic event still gets looked at.
     for (const e of (c.events || []).slice(0, 2)) spots.push(+(e.peak ?? e.start).toFixed(2));
+    const span = Math.max(1, c.end - c.start);
+    for (let i = 1; i <= 3; i += 1) spots.push(+(c.start + span * (i / 4)).toFixed(2));
   }
-  const frames = await media.framesAt({ video, times: spots.slice(0, 12), width: 720, quality: 4, concurrency: 3 });
+  const unique = [...new Set(spots)].filter((t) => Number.isFinite(t) && t >= 0).sort((a, b) => a - b);
+  const frames = await media.framesAt({ video, times: unique.slice(0, 12), width: 720, quality: 4, concurrency: 3 });
   console.log(`    ${frames.frames.length} frames, ${frames.failed} failed, ${frames.width}px`);
-  const ocr = await media.readText({ video, times: spots.slice(0, 6), width: 900 });
+  const ocr = await media.readText({ video, times: unique.slice(0, 6), width: 900 });
   console.log(`    ocr ok=${ocr.ok} samples=${ocr.samples.length}${ocr.reason ? ` (${ocr.reason})` : ""}`);
 
   console.log("\n[5] pass one: propose");
