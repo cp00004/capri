@@ -3345,7 +3345,6 @@ async function handleSttWord(req, res) {
   if (!result.ok) return json(res, 502, { error: "stt_failed", message: result.reason, attempts: result.attempts });
   return json(res, 200, result);
 }
-
 // ---------------------------------------------------------------- pairing + access
 async function handlePair(req, res) {
   const ip = req.socket.remoteAddress || "?";
