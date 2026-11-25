@@ -1845,11 +1845,14 @@
 
     // Rank compares the model's own windows, but the boundaries that actually get
     // cut are different: snapping can move a start or end by a second or more, and
-    // two proposals that looked separate can collapse onto the same footage. On the
-    // fixture that split one joke across two files - a setup clip and a punchline
-    // clip - which is worse than shipping one. So refine first, then drop anything
-    // that now overlaps a better-ranked pick.
-    const planned = [];
+    // two proposals that looked separate can collapse onto the same footage.
+    //
+    // Two distinct ways one joke got split across two files on the fixture: the
+    // windows overlapped after snapping, and - more subtly - they met exactly, so a
+    // setup clip ending at 22.54 and a punchline clip starting at 22.54 looked like
+    // neighbours rather than a divided bit. So refine first, then merge a clip whose
+    // start is the other's end, and drop anything that genuinely overlaps.
+    const merged = [];
     for (const pick of picks) {
       const bounds = CM().refine({
         start: pick.start,
@@ -1860,13 +1863,34 @@
         minClip: CLIP.min,
         maxClip: CLIP.max,
       });
-      const clash = planned.find((p) => Math.min(p.end, bounds.end) - Math.max(p.start, bounds.start) > 0.35);
+      // Abutting windows: a mid-sentence gap of under a quarter second between one
+      // clip's end and another's start is the same bit of speech continuing.
+      const neighbour = merged.find((p) => Math.abs(p.end - bounds.start) < 0.25 || Math.abs(bounds.end - p.start) < 0.25);
+      if (neighbour) {
+        const joined = CM().refine({
+          start: Math.min(neighbour.start, bounds.start),
+          end: Math.max(neighbour.end, bounds.end),
+          words: read.words,
+          pauses: read.pauses,
+          duration: info.duration,
+          minClip: CLIP.min,
+          maxClip: CLIP.max,
+        });
+        if (joined.end - joined.start <= CLIP.max) {
+          report.degraded.push(`${clock(bounds.start)}-${clock(bounds.end)} was the other half of ${clock(neighbour.start)}-${clock(neighbour.end)}, so they were joined`);
+          neighbour.start = joined.start;
+          neighbour.end = joined.end;
+          continue;
+        }
+      }
+      const clash = merged.find((p) => Math.min(p.end, bounds.end) - Math.max(p.start, bounds.start) > 0.35);
       if (clash) {
         report.degraded.push(`${clock(bounds.start)}-${clock(bounds.end)} overlapped ${clock(clash.start)}-${clock(clash.end)} once snapped, so it was not cut`);
         continue;
       }
-      planned.push({ ...pick, start: bounds.start, end: bounds.end });
+      merged.push({ ...pick, start: bounds.start, end: bounds.end });
     }
+    const planned = merged;
 
     for (let i = 0; i < planned.length; i += 1) {
       const pick = planned[i];
