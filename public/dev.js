@@ -2192,8 +2192,16 @@
       const lines = [];
       if (report.degraded?.length) lines.push(...report.degraded);
       if (report.audio && report.audio.ok === false && report.audio.reason) lines.push(`no acoustic analysis: ${report.audio.reason}`);
-      if (report.stt && report.stt.ok === false && !report.degraded?.some((d) => /speech|hear/i.test(d))) {
-        lines.push(`speech reader unavailable: ${report.stt.reason || report.stt.granularity || "no timing"}`);
+      // A silent file already explains itself above. "speech reader unavailable:
+      // none" is not a cause, it is the absence of one - `granularity` reads
+      // "none" precisely because there was no audio to transcribe - so saying it
+      // adds a second, vaguer line about the same problem.
+      const audioDead = report.audio && report.audio.ok === false;
+      if (report.stt && report.stt.ok === false && !audioDead
+        && !report.degraded?.some((d) => /speech|hear/i.test(d))) {
+        const why = report.stt.reason
+          || (report.stt.granularity && report.stt.granularity !== "none" ? report.stt.granularity : "");
+        if (why) lines.push(`speech reader unavailable: ${why}`);
       }
       if (!report.ocr?.ok && report.ocr?.reason && report.ocr.reason !== "no readable on-screen text") {
         lines.push(`on-screen text unavailable: ${report.ocr.reason}`);

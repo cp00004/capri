@@ -3,7 +3,10 @@
  *
  * The run report is the user's only explanation for why a clip is weaker than it
  * should be, so each shape it can take is checked against the real strings the
- * pipeline produces - including the vision downgrades measured on this machine.
+ * pipeline produces - including the vision downgrade measured on this machine.
+ *
+ * The function is lifted straight out of public/dev.js by brace matching rather
+ * than copied, so this cannot drift from what ships.
  */
 "use strict";
 const fs = require("fs");
@@ -12,80 +15,83 @@ const vm = require("vm");
 
 const ROOT = path.resolve(__dirname, "../..");
 
+function braceExtract(source, name) {
+  const at = source.indexOf(`function ${name}`);
+  if (at < 0) throw new Error(`${name} not found`);
+  const open = source.indexOf("{", at);
+  let depth = 0;
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    else if (source[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(at, i + 1);
+    }
+  }
+  throw new Error(`${name} braces did not balance`);
+}
+
 function makeEl(tag = "div") {
   const el = {
-    tagName: tag.toUpperCase(), style: {}, dataset: {}, children: [], classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
-    setAttribute() {}, getAttribute: () => null, appendChild(c) { this.children.push(c); return c; },
-    removeChild(c) { this.children = this.children.filter((x) => x !== c); },
-    addEventListener() {}, removeEventListener() {}, focus() {}, click() {},
-    querySelector: () => null, querySelectorAll: () => [], closest: () => null,
-    insertBefore(c) { this.children.push(c); return c; }, replaceChildren() {},
-    getBoundingClientRect: () => ({ width: 800, height: 600 }), scrollIntoView() {},
+    tagName: String(tag).toUpperCase(), style: {}, dataset: {}, children: [],
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
+    setAttribute() {}, getAttribute: () => null,
+    appendChild(c) { this.children.push(c); return c; },
+    removeChild() {}, addEventListener() {}, removeEventListener() {},
   };
-  let text = "";
-  Object.defineProperty(el, "textContent", {
-    get: () => text,
-    set(v) { text = String(v); el.children = []; },
-  });
-  Object.defineProperty(el, "innerHTML", { get: () => "", set() {} });
+  Object.defineProperty(el, "textContent", { get: () => el._t || "", set(v) { el._t = String(v); } });
   return el;
 }
 
+const src = fs.readFileSync(path.join(ROOT, "public/dev.js"), "utf8");
+const fn = braceExtract(src, "appendReport");
+
 const ctx = vm.createContext({
-  window: {}, document: {
-    getElementById: () => makeEl(), querySelector: () => makeEl(), querySelectorAll: () => [],
-    createElement: (t) => makeEl(t), addEventListener() {}, body: makeEl(), head: makeEl(),
-  },
-  navigator: { userAgent: "node" }, location: { href: "http://x", search: "" },
-  localStorage: { getItem: () => null, setItem() {} }, fetch: async () => ({ json: async () => ({}) }),
-  console: { log() {}, warn() {}, error() {} },
-  setTimeout, clearTimeout, setInterval: () => 0, clearInterval() {}, Promise, JSON, Math, Date,
-  URL, Blob, TextEncoder, TextDecoder, AbortController, Image: function () { return makeEl(); },
-  capri: {},
+  document: { createElement: (t) => makeEl(t) },
+  console,
 });
-ctx.window = ctx;
-ctx.globalThis = ctx;
-vm.runInContext(fs.readFileSync(path.join(ROOT, "public/clip-math.js"), "utf8"), ctx, { filename: "clip-math.js" });
-vm.runInContext(fs.readFileSync(path.join(ROOT, "public/dev.js"), "utf8"), ctx, { filename: "dev.js" });
-
-// Reach the internal helper the pipeline renders with.
-const sandboxSource = fs.readFileSync(path.join(ROOT, "public/dev.js"), "utf8");
-const expose = sandboxSource.replace(
-  /\n\}\)\(\);\s*$/,
-  "\n  window.__test = { appendReport };\n})();\n"
-);
-if (expose === sandboxSource) { console.log("could not expose appendReport"); process.exit(1); }
-vm.runInContext(expose, ctx, { filename: "dev-exposed.js" });
-
-const { appendReport } = ctx.window.__test;
 const box = makeEl();
-const textOf = (el) => `${el.textContent || ""}${(el.children || []).map(textOf).join("\n")}`;
+vm.runInContext(`${fn}\nglobalThis.appendReport = appendReport;`, ctx, { filename: "appendReport.js" });
+const appendReport = ctx.appendReport;
+
+const textOf = (el) => `${el._t || ""}${(el.children || []).map((c) => `\n${textOf(c)}`).join("")}`;
 
 // 1. A clean run must have nothing to report.
 appendReport(box, [{ degraded: [], audio: { ok: true }, stt: { ok: true }, ocr: { ok: true } }]);
-console.log(`clean run      -> blocks=${box.children.length} (expected 0)`);
+console.log(`clean run       blocks=${box.children.length}  (expected 0)\n`);
 
 // 2. The vision downgrade actually produced by the free relay on this machine.
-const vision = { degraded: [], audio: { ok: true }, stt: { ok: true }, ocr: { ok: true }, vision: { partial: 2 } };
-vision.degraded.push("pass one was partly blind: only the first 2 of 5 frames could be sent - Rate limit reached for model `qwen/qwen3.8-27b` (ITPM). Judged from fewer frames.");
+const vision = {
+  degraded: [
+    "pass one was partly blind: only the first 2 of 5 frames could be sent - Rate limit reached for model qwen3.8-27b (ITPM 7000). Judged from fewer frames.",
+  ],
+  audio: { ok: true }, stt: { ok: true }, ocr: { ok: true }, vision: { partial: 2 },
+};
 appendReport(box, [vision]);
-console.log(`vision gap     -> blocks=${box.children.length}`);
-console.log(indent(textOf(box.children[0])));
+console.log(`vision gap      blocks=${box.children.length}`);
+console.log(textOf(box.children[0]).split("\n").filter(Boolean).map((l) => `   ${l}`).join("\n"), "\n");
 
 // 3. The state that used to be reported as "nothing was funny".
-const silent = {
+const outage = {
   degraded: ["pass one failed: mistral is out of credit for ministral-8b-latest - You need a subscription to access this API."],
+  audio: { ok: true }, stt: { ok: true }, ocr: { ok: true },
+};
+appendReport(box, [outage]);
+console.log(`provider outage blocks=${box.children.length}`);
+console.log(textOf(box.children[1]).split("\n").filter(Boolean).map((l) => `   ${l}`).join("\n"), "\n");
+
+// 4. A silent file: the missing track must be named once, not twice.
+const silent = {
+  degraded: [],
   audio: { ok: false, reason: "this file has no audio track" },
   stt: { ok: false, granularity: "none" },
   ocr: { ok: false, reason: "no readable on-screen text" },
 };
 appendReport(box, [silent]);
-console.log(`provider outage -> blocks=${box.children.length}`);
-console.log(indent(textOf(box.children[1])));
-
-// 4. A missing audio track should not be reported twice.
-console.log(`\nduplicate "no audio" lines: ${(textOf(box.children[1]).match(/no acoustic analysis/g) || []).length}`);
-
-function indent(s) {
-  return s.split("\n").filter(Boolean).map((l) => "   " + l).join("\n");
-}
+const silentText = textOf(box.children[2]);
+console.log(`silent file     blocks=${box.children.length}`);
+console.log(silentText.split("\n").filter(Boolean).map((l) => `   ${l}`).join("\n"));
+console.log(`\nhonest checks:`);
+console.log(`  names the real cause            ${/no audio track/.test(silentText)}`);
+console.log(`  no phantom "speech reader" line ${!/speech reader unavailable/.test(silentText)}`);
+console.log(`  no noise about absent OCR text  ${!/on-screen text unavailable/.test(silentText)}`);
+console.log(`  says it once, not twice         ${(silentText.match(/no audio track/g) || []).length === 1}`);
