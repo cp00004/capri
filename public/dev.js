@@ -1597,6 +1597,326 @@
     return String(text || "short").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "short";
   }
 
+  /** Does the clip contain speech that could carry a joke? */
+  function speechInside(read, start, end) {
+    if ((read.words || []).some((w) => w.end > start && w.start < end)) return true;
+    return (read.segments || []).some((s) =>
+      s.end > start && s.start < end && String(s.text || "").trim().length > 3);
+  }
+
+  /**
+   * Where to look inside one candidate window.
+   *
+   * Frames are chosen from the evidence, not a grid: the peaks of the strongest
+   * acoustic events, any shot cut, then even coverage as a floor. That way a
+   * three-second visual gag gets a frame even in a two-minute window.
+   */
+  function probeTimes(w, read, limit = 3) {
+    const times = [];
+    const events = (read.events || [])
+      .filter((e) => Number(e.end) > w.start && Number(e.start) < w.end)
+      .sort((a, b) => (Number(b.confidence) || 0) - (Number(a.confidence) || 0))
+      .slice(0, 2);
+    for (const e of events) {
+      const at = Number.isFinite(Number(e.peak)) ? Number(e.peak) : Number(e.start);
+      times.push(Math.min(w.end - 0.1, Math.max(w.start, at)));
+    }
+    for (const cut of read.scenes || []) {
+      if (cut > w.start + 0.3 && cut < w.end - 0.3) times.push(cut);
+    }
+    const span = Math.max(1, w.end - w.start);
+    for (let i = 1; i <= 3; i += 1) times.push(w.start + span * (i / 4));
+
+    const out = [];
+    for (const raw of times) {
+      const t = +Number(raw).toFixed(2);
+      if (!Number.isFinite(t) || t < w.start || t > w.end) continue;
+      if (out.some((o) => Math.abs(o - t) < 1.2)) continue;
+      out.push(t);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  /** Frames evenly spread through a reviewed clip, for the strict second read. */
+  function reviewTimes(start, end, count = 5) {
+    const span = Math.max(0.5, end - start);
+    const out = [];
+    for (let i = 0; i < count; i += 1) {
+      const t = +(start + span * ((i + 0.5) / count)).toFixed(2);
+      out.push(Math.min(Math.max(0, t), Math.max(0, end - 0.2)));
+    }
+    return [...new Set(out)];
+  }
+
+  async function apiJson(path, body, timeoutMs) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await bridge().api(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.message || data?.error || `request refused (${res.status})`);
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * The read for one platform: plan, propose, review, rank, then cut.
+   *
+   * Nothing here decides what is funny. The endpoints do that, and the ranker
+   * compares every survivor together with one rubric.
+   */
+  async function runPlatform(ctx) {
+    const { entry, video, info, read, platform, tag, report, stamp, state } = ctx;
+    const feed = PLATFORMS[platform].name;
+    const label = ctx.multi ? ` · ${feed.toUpperCase()}` : "";
+    const before = state.made.length;
+
+    // 1. Which windows are even worth asking about.
+    const plan = await apiJson("/api/dev/clip/plan", {
+      duration: info.duration,
+      events: read.events,
+      segments: read.segments,
+      maxCandidates: 12,
+    }, 60_000);
+    const candidates = (plan?.candidates || []).filter((c) => c.end - c.start >= 4);
+    if (!candidates.length) {
+      if (!ctx.multi) throw new Error("She read the whole video and found nothing that happens.");
+      return { nothing: true };
+    }
+    shortsProgress(`VIDEO ${tag}${label}\n${candidates.length} moment${candidates.length === 1 ? "" : "s"} to look at · grabbing frames`);
+
+    // 2. Frames at the evidence, plus on-screen text.
+    const want = new Set();
+    for (const c of candidates) for (const t of probeTimes(c, read)) want.add(t);
+    const probeSpots = [...want].slice(0, 40);
+    const [shot, ocr] = await Promise.all([
+      framesAtTimes(video.path, probeSpots, 720).catch((err) => ({ frames: [], failed: probeSpots.length, reason: String(err?.message || err) })),
+      D.ocr({ video: video.path, times: probeSpots.slice(0, 14), width: 900 }).catch((err) => ({ ok: false, reason: String(err?.message || err), samples: [] })),
+    ]);
+    report.vision.frames += shot.frames.length;
+    report.ocr = { ok: Boolean(ocr?.ok), reason: ocr?.reason || "", samples: (ocr?.samples || []).length };
+    if (!shot.frames.length) report.degraded.push(`frame grabs failed: ${shot.reason || "no frames"}`);
+
+    // 3. Pass one: propose moments inside those windows.
+    let waited = 0;
+    ctx.tick = setInterval(() => {
+      waited += 1;
+      shortsProgress(`VIDEO ${tag}${label} · READING THE MOMENTS\n${candidates.length} windows · ${read.granularity === "word" ? "word-accurate" : "approximate"} transcript · ${shot.frames.length} frames · ${waited}s`);
+    }, 1000);
+    let proposed;
+    try {
+      proposed = await apiJson("/api/dev/clip/propose", {
+        duration: info.duration,
+        platform,
+        transcript: { words: read.words, segments: read.segments, granularity: read.granularity },
+        events: read.events,
+        ocr: ocr?.samples || [],
+        frames: shot.frames,
+        windows: candidates.map((c) => ({ start: c.start, end: c.end })),
+      }, 600_000);
+    } finally {
+      if (ctx.tick) { clearInterval(ctx.tick); ctx.tick = null; }
+    }
+
+    const moments = (proposed?.moments || []);
+    report.passes.proposed += moments.length;
+    if (proposed?.failures?.length) {
+      report.degraded.push(`${proposed.failures.length} window(s) failed in pass one: ${proposed.failures[0].error}`);
+    }
+    if (!moments.length) {
+      if (!ctx.multi) throw new Error("She watched the whole video and found nothing worth posting.");
+      return { nothing: true };
+    }
+
+    // 4. Pass two: review every proposal on its own evidence.
+    const reviewed = [];
+    let ri = 0;
+    const reviewWorker = async () => {
+      while (ri < moments.length) {
+        const moment = moments[ri++];
+        const index = ri;
+        shortsProgress(`VIDEO ${tag}${label} · REVIEWING ${index}/${moments.length}\n${clock(moment.start)} -> ${clock(moment.end)}`);
+        const candidate = candidates.find((c) => moment.end > c.start && moment.start < c.end) || {
+          kind: "dialogue", strength: 0.3, events: [],
+        };
+        const times = reviewTimes(Number(moment.start), Number(moment.end));
+        const shot2 = await framesAtTimes(video.path, times, 720).catch(() => ({ frames: [], failed: times.length }));
+        report.vision.frames += shot2.frames.length;
+        if (!shot2.frames.length) report.vision.failed += 1;
+        try {
+          const data = await apiJson("/api/dev/clip/review", {
+            duration: info.duration,
+            platform,
+            moment,
+            transcript: { words: read.words, segments: read.segments, granularity: read.granularity },
+            events: read.events,
+            ocr: ocr?.samples || [],
+            frames: shot2.frames,
+            minClip: CLIP.min,
+            maxClip: CLIP.max,
+          }, 180_000);
+          const review = data?.review;
+          if (!review) return;
+          report.passes.reviewed += 1;
+          if (review.decision === "reject") {
+            report.passes.rejected += 1;
+            reviewed.push({
+              id: `${platform}:${moment.start}-${moment.end}`,
+              rejected: true,
+              moment, candidate, review,
+              start: Number(moment.start), end: Number(moment.end),
+              reasons: [review.reject_reason || "rejected on review"],
+            });
+            return;
+          }
+          report.passes.accepted += 1;
+          reviewed.push({
+            id: `${platform}:${review.start}-${review.end}`,
+            moment, candidate, review,
+            start: Number(review.start), end: Number(review.end),
+            bareReaction: Boolean(candidate.bareReaction),
+            hasDialogue: speechInside(read, Number(review.start), Number(review.end)),
+            passTwo: "accepted",
+          });
+        } catch (err) {
+          report.passes.reviewed += 1;
+          report.degraded.push(`review failed at ${clock(moment.start)}: ${err?.message || err}`);
+          // A failed review is not an acceptance: the proposal is dropped rather
+          // than posted unvalidated.
+        }
+      }
+    };
+    await Promise.all([reviewWorker(), reviewWorker(), reviewWorker()]);
+
+    if (!reviewed.some((r) => !r.rejected)) {
+      if (!ctx.multi) throw new Error("Nothing survived the second read - the proposals did not hold up.");
+      return { nothing: true };
+    }
+
+    // 5. Global ranking with one rubric.
+    const ranked = await apiJson("/api/dev/clip/rank", {
+      clips: reviewed.map((r) => ({
+        id: r.id,
+        start: r.start,
+        end: r.end,
+        review: r.review,
+        candidate: {
+          kind: r.candidate.kind,
+          strength: r.candidate.strength,
+          events: (r.candidate.events || []).map((e) => ({ type: e.type, start: e.start, end: e.end, confidence: e.confidence })),
+        },
+        bareReaction: r.bareReaction,
+        hasDialogue: r.hasDialogue,
+        passTwo: r.rejected ? "rejected" : "accepted",
+      })),
+      minClip: CLIP.min,
+      maxClip: CLIP.max,
+      max: 6,
+    }, 60_000);
+    report.rank = ranked;
+
+    const byId = new Map(reviewed.map((r) => [r.id, r]));
+    const picks = (ranked?.picks || []).map((p) => ({ ...byId.get(p.id), ...p })).filter((p) => p.moment);
+    if (!picks.length) {
+      if (!ctx.multi) throw new Error("Nothing cleared the bar for posting.");
+      return { nothing: true };
+    }
+
+    // 6. Cut.
+    const cutCache = new Map();
+    const pfx = ctx.multi ? (platform === "tiktok" ? "-tt" : "-yt") : "";
+    for (let i = 0; i < picks.length; i += 1) {
+      const pick = picks[i];
+      // Snap to a real word and a real pause before anything is rendered.
+      const bounds = CM().refine({
+        start: pick.start,
+        end: pick.end,
+        words: read.words,
+        pauses: read.pauses,
+        duration: info.duration,
+        minClip: CLIP.min,
+        maxClip: CLIP.max,
+      });
+      const start = bounds.start;
+      const end = bounds.end;
+      const length = end - start;
+      shortsProgress(`VIDEO ${tag}${label} · CUTTING ${i + 1}/${picks.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s · ${pick.score}/100`);
+      try {
+        const key = `${start.toFixed(2)}|${end.toFixed(2)}`;
+        let hold = cutCache.get(key);
+        let captionSource = "none";
+        if (!hold) {
+          state.seq += 1;
+          const fileBase = `${slug(pick.review?.title || pick.moment?.kind || "short")}-${stamp}-${state.seq}`;
+          const built = cuesForClip(read, start, end);
+          captionSource = built.source;
+          await D.write(`shorts/${fileBase}.srt`, buildSrt(built.cues));
+          await D.write(`shorts/${fileBase}.ass`, buildAss(built.cues));
+          const cut = await D.cut({
+            video: video.path,
+            start,
+            duration: length,
+            out: `shorts/${fileBase}.mp4`,
+            captions: `shorts/${fileBase}.ass`,
+            width: info.width,
+            height: info.height,
+          });
+          hold = { cut, fileBase, cues: built.cues.length, captionSource };
+          cutCache.set(key, hold);
+        }
+        captionSource = hold.captionSource;
+
+        const evidence = CM().eventsWithin(read.events, start, end);
+        const components = pick.components || {};
+        const review = pick.review || {};
+        const base = `${hold.fileBase}${pfx}`;
+        const meta = [
+          `VIDEO\n${entry.name}`,
+          `PLATFORM\n${feed}`,
+          `TITLE\n${review.title || ""}`,
+          `HOOK\n${review.hook_line || ""}`,
+          `CAPTION\n${review.caption || ""}`,
+          `HASHTAGS\n${(review.hashtags || []).map((h) => `#${h}`).join(" ")}`,
+          `DESCRIPTION\n${review.description || ""}`,
+          `WHY IT KEEPS VIEWERS\n${review.why || pick.moment?.why || ""}`,
+          `ENTERTAINMENT SCORE\n${pick.score ?? "?"}/100`,
+          `SCORE BREAKDOWN\nhumor ${components.humor ?? "?"} · unexpected ${components.unexpected ?? "?"} · reaction ${components.reaction ?? "?"} · entertainment ${components.entertainment ?? "?"} · context ${components.context ?? "?"} · replay ${components.replay ?? "?"} · hook ${components.hook ?? "?"}`,
+          `EVIDENCE\n${evidence.length ? evidence.map((e) => `${e.type} @ ${e.start}-${e.end}s (${Math.round(e.confidence * 100)}%)`).join(", ") : "none inside the clip"}`,
+          `VALIDATION\npass two ${pick.passTwo === "accepted" ? "accepted" : "not reviewed"} · captions ${captionSource === "word" ? "word-accurate" : captionSource === "segment" ? "approximate" : "none"}`,
+          `SOURCE\n${video.path}`,
+          `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
+          `FILE\nshorts/${hold.fileBase}.mp4`,
+        ].join("\n\n");
+        await D.write(`shorts/${base}.txt`, meta);
+        state.made.push({
+          pick: { ...review, start, end, score: pick.score },
+          cut: hold.cut,
+          base,
+          meta,
+          videoName: entry.name,
+          platform,
+          report,
+          evidence,
+          components,
+          captionSource,
+          suggested: { start: pick.start, end: pick.end, score: pick.score },
+        });
+      } catch (err) {
+        state.failures.push(`${entry.name}${ctx.multi ? ` ${feed}` : ""} ${clock(start)}-${clock(end)}: ${err.message || err}`);
+      }
+    }
+    entry.state = state.made.length > before ? "done" : "nothing postable";
+    return { made: state.made.length - before };
+  }
+
   async function runShorts() {
     if (dev.shortsBusy) return;
     const queue = dev.videos.filter((v) => v.info?.hasAudio && v.state !== "working");
@@ -1605,14 +1925,15 @@
       shutdown("Open a workspace folder first - the shorts and their scripts are written into it.");
       return;
     }
+    if (!CM()) {
+      shutdown("FAILED\nclip-math.js did not load - reload the app and try again.");
+      return;
+    }
     dev.shortsBusy = true;
     dev.els.shortsRun.disabled = true;
     dev.els.shortsResult.classList.add("hidden");
-    let ticker = null;
-    const made = [];
-    const failures = [];
+    const state = { made: [], failures: [], seq: 0 };
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    let seq = 0;
     try {
       for (let vi = 0; vi < queue.length; vi += 1) {
         const entry = queue[vi];
@@ -1621,141 +1942,69 @@
         const tag = `${vi + 1}/${queue.length} · ${entry.name}`;
         entry.state = "working";
         renderVideoList();
+        const report = blankReport();
+        entry.clipReport = report;
         try {
-          shortsProgress(`VIDEO ${tag}\nreading · ${clock(info.duration)}`);
-          const windows = scanWindows(info.duration);
-          // Reading the audio and grabbing stills do not depend on each other,
-          // so they run together. A re-run of the same file reuses the read
-          // instead of paying for the same transcript twice.
-          let segments;
-          let frames;
-          if (entry.read && entry.read.duration === info.duration) {
-            ({ segments, frames } = entry.read);
+          shortsProgress(`VIDEO ${tag}\nreading the audio · ${clock(info.duration)}`);
+          // One read per file, reused on a re-run at the same length.
+          let read = entry.read;
+          if (!read || read.duration !== info.duration) {
+            read = await readVideo(video.path, info, report);
+            entry.read = { ...read, duration: info.duration };
           } else {
-            [segments, frames] = await Promise.all([
-              transcribe(video.path, info.duration, windows),
-              sampleFrames(video.path, info.duration, windows),
-            ]);
-            entry.read = { duration: info.duration, segments, frames };
+            // The cached read is still valid; copy its shape into the report so
+            // Developer Mode shows what actually ran.
+            report.audio = { ok: (read.events || []).length > 0 || !report.degraded.length, reason: "", events: (read.events || []).length };
+            report.scenes = { ok: true, reason: "", cuts: (read.scenes || []).length };
+            report.stt = {
+              ok: true, granularity: read.granularity,
+              chunks: 0, words: (read.words || []).length, providers: [],
+            };
           }
-          if (!segments.length) throw new Error("I could not hear any speech in that video.");
-          // BOTH runs the same footage through each feed's own read: YouTube
-          // keeps its retention/loop wording, TikTok its first-second hook. The
-          // vertical encode is shared when both pick the same window.
+          report.stt.granularity = read.granularity;
+          report.duration = info.duration;
+
           const targets = dev.platform === "both" ? ["youtube", "tiktok"] : [dev.platform];
-          const cutCache = new Map();
-          const before = made.length;
+          const multi = targets.length > 1;
+          const ctx = { entry, video, info, read, tag, report, stamp, state, multi, tick: null };
+          const results = [];
           for (const platform of targets) {
-            const feed = PLATFORMS[platform].name;
-            let waited = 0;
-            ticker = setInterval(() => {
-              waited += 1;
-              shortsProgress(
-                `VIDEO ${tag}${targets.length > 1 ? ` · ${feed.toUpperCase()}` : ""} · WATCHING THE WHOLE VIDEO\n${windows.length} slice${windows.length === 1 ? "" : "s"} across ${clock(info.duration)} · ${segments.length} lines read · scoring every moment · ${waited}s`
-              );
-            }, 1000);
-            const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 480_000);
-            let data;
+            ctx.platform = platform;
             try {
-              const res = await bridge().api("/api/dev/shorts", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  duration: info.duration,
-                  platform,
-                  segments,
-                  frames,
-                  windows,
-                }),
-                signal: ctrl.signal,
-              });
-              data = await res.json().catch(() => null);
-              if (!res.ok) throw new Error(data?.message || `analysis refused (${res.status})`);
+              results.push(await runPlatform(ctx));
+            } catch (err) {
+              state.failures.push(`${entry.name}${multi ? ` ${PLATFORMS[platform].name}` : ""}: ${err.message || err}`);
+              results.push({ failed: String(err.message || err) });
             } finally {
-              clearTimeout(timer);
-              if (ticker) { clearInterval(ticker); ticker = null; }
-            }
-            const list = Array.isArray(data?.shorts) && data.shorts.length ? data.shorts : data?.pick ? [data.pick] : [];
-            if (!list.length) {
-              if (targets.length === 1) throw new Error("She watched the whole video and found nothing worth posting.");
-              failures.push(`${entry.name} · ${feed}: nothing worth posting`);
-              continue;
-            }
-            for (let i = 0; i < list.length; i += 1) {
-              const pick = list[i];
-              const start = Math.max(0, Number(pick.start) || 0);
-              const end = Math.min(info.duration, Number(pick.end) || 0);
-              if (end - start < 8) continue;
-              const length = end - start;
-              const key = `${start.toFixed(2)}|${end.toFixed(2)}`;
-              const pfx = targets.length > 1 ? (platform === "tiktok" ? "-tt" : "-yt") : "";
-              shortsProgress(
-                `VIDEO ${tag}${targets.length > 1 ? ` · ${feed.toUpperCase()}` : ""} · CUTTING ${i + 1}/${list.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s${pick.score ? ` · score ${pick.score}` : ""}`
-              );
-              try {
-                let hold = cutCache.get(key);
-                if (!hold) {
-                  seq += 1;
-                  const fileBase = `${slug(pick.title)}-${stamp}-${seq}`;
-                  const cues = buildCues(segments, start, end);
-                  await D.write(`shorts/${fileBase}.srt`, buildSrt(cues));
-                  await D.write(`shorts/${fileBase}.ass`, buildAss(cues));
-                  const cut = await D.cut({
-                    video: video.path,
-                    start,
-                    duration: length,
-                    out: `shorts/${fileBase}.mp4`,
-                    captions: `shorts/${fileBase}.ass`,
-                    width: info.width,
-                    height: info.height,
-                  });
-                  hold = { cut, fileBase };
-                  cutCache.set(key, hold);
-                }
-                const base = `${hold.fileBase}${pfx}`;
-                const meta = [
-                  `VIDEO\n${entry.name}`,
-                  `PLATFORM\n${feed}`,
-                  `TITLE\n${pick.title || ""}`,
-                  `HOOK\n${pick.hook || ""}`,
-                  `CAPTION\n${pick.caption || ""}`,
-                  `HASHTAGS\n${(pick.hashtags || []).map((h) => `#${h}`).join(" ")}`,
-                  `DESCRIPTION\n${pick.description || ""}`,
-                  `WHY IT KEEPS VIEWERS\n${pick.why || ""}`,
-                  `RETENTION SCORE\n${pick.score || "?"}/100`,
-                  `SOURCE\n${video.path}`,
-                  `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
-                  `FILE\nshorts/${hold.fileBase}.mp4`,
-                ].join("\n\n");
-                await D.write(`shorts/${base}.txt`, meta);
-                made.push({ pick, cut: hold.cut, base, meta, videoName: entry.name, platform });
-              } catch (err) {
-                failures.push(`${entry.name}${targets.length > 1 ? ` ${feed}` : ""} ${clock(start)}-${clock(end)}: ${err.message || err}`);
-              }
+              if (ctx.tick) { clearInterval(ctx.tick); ctx.tick = null; }
             }
           }
-          entry.state = made.length > before ? "done" : "nothing postable";
-          renderShortsResults(made, false);
+          const allNothing = results.every((r) => r.nothing || r.failed);
+          if (allNothing && !state.made.some((m) => m.report === report)) {
+            const first = results.find((r) => r.failed);
+            entry.state = first ? "failed" : "nothing postable";
+            if (first && !multi) throw new Error(first.failed);
+          }
+          renderShortsResults(state.made, false);
         } catch (err) {
           entry.state = "failed";
-          failures.push(`${entry.name}: ${err.message || err}`);
+          state.failures.push(`${entry.name}: ${err.message || err}`);
         } finally {
-          if (ticker) { clearInterval(ticker); ticker = null; }
           renderVideoList();
         }
       }
-      if (!made.length) throw new Error(`every video failed - ${failures[0] || "unknown error"}`);
-      renderShortsResults(made, true);
-      const where = made[0].cut.path.slice(0, made[0].cut.path.lastIndexOf("\\") + 1);
+      if (!state.made.length) throw new Error(`every video failed - ${state.failures[0] || "unknown error"}`);
+      renderShortsResults(state.made, true);
+      const where = state.made[0].cut.path.slice(0, state.made[0].cut.path.lastIndexOf("\\") + 1);
       shortsProgress(
-        `DONE\n${made.length} short${made.length === 1 ? "" : "s"} from ${queue.length} video${queue.length === 1 ? "" : "s"}${failures.length ? ` · ${failures.length} skipped` : ""}\n${where}`
+        `DONE\n${state.made.length} short${state.made.length === 1 ? "" : "s"} from ${queue.length} video${queue.length === 1 ? "" : "s"}${state.failures.length ? ` · ${state.failures.length} skipped` : ""}\n${where}`
       );
-      sysLine(`${made.length} short${made.length === 1 ? "" : "s"} ready in shorts/`);
+      sysLine(`${state.made.length} short${state.made.length === 1 ? "" : "s"} ready in shorts/`);
     } catch (err) {
       shutdown(`FAILED\n${err.message || err}`);
     } finally {
       if (ticker) clearInterval(ticker);
+      try { await D.cleanup(); } catch { /* temp only */ }
       dev.shortsBusy = false;
       renderVideoList();
       paintStudio();
