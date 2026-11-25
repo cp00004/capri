@@ -186,7 +186,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "5.5.1";
+const APP_VERSION = "5.6.0";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -3517,6 +3517,18 @@ function paintAvatar(dataUrl) {
 /* -------------------------------------------------------------- update log */
 
 const UPDATE_LOG = [
+  {
+    version: "5.6.0", date: "2026-11-25", platform: "windows",
+    title: "Real voices, one-of-a-kind stories",
+    points: [
+      "The PART 2 ending is gone from every toon and every story - each film now closes on its own title",
+      "Stories are narrated: a documentary voice-over reads every beat, placed over the scene it explains with the score ducked underneath",
+      "Every story builds its own look: each film shifts its palette, framing, set piece and score instead of reusing the same backdrop",
+      "Four new environments (tunnel, harbor, arena, server hall) and a director that never repeats an environment back to back",
+      "Every toon gets its own generated palette and its own music key and melody, and locations no longer repeat scene to scene",
+      "Story writing is tighter: specific hooks, escalating detail, no filler sentences, no sequel teasers",
+    ],
+  },
   {
     version: "5.5.1", date: "2026-11-23", platform: "windows",
     title: "Humans that act",

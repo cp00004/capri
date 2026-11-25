@@ -1,9 +1,9 @@
 {
-  "version": "5.5.1",
+  "version": "5.6.0",
   "windows": "https://github.com/cp00004/capri/releases/download/capri-v4/Capri-v4-Setup.exe",
   "apk": "https://github.com/cp00004/capri/releases/download/capri-v4/Capri-v4.apk",
   "page": "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739",
   "windowsZip": "https://github.com/cp00004/capri/releases/download/capri-v4/Capri-v4-Setup.zip",
-  "apkSha256": "aff1451bd8185f754bf03275a16f45fc3f3e2137800a9b9d0c4b26486565874e",
-  "apkSize": 7552887
+  "apkSha256": "79891be90818068a5090ba056d01706ffebc766752f11f1b6ff5918bb44dfc87",
+  "apkSize": 7556967
 }

@@ -2855,12 +2855,14 @@ async function handleTts(req, res) {
 
   const text = String(body.text ?? "").trim().slice(0, 1600);
   const asked = String(body.voice ?? "");
+  // documentary voice-over for Stories renders, not a chat reply
+  const narrator = Boolean(body.narrator);
   // She keeps one voice: the client pins the engine that answered first.
   const want = String(body.engine ?? "").trim().toLowerCase();
   const profile = profileFromRequest(req) || localProfile();
   const setting = asked || String(profile.settings?.voice || "capri");
   const preset = VOICE_BY_ID.get(setting);
-  const geminiName = preset?.name || (asked && /^[A-Za-z]{3,20}$/.test(asked) ? asked : "Leda");
+  const geminiName = preset?.name || (asked && /^[A-Za-z]{3,20}$/.test(asked) ? asked : (narrator ? "Charon" : "Leda"));
   if (!text) return json(res, 400, { error: "Empty text." });
 
   const cacheKey = `${setting}|${want}|${text}`;
@@ -2923,7 +2925,7 @@ async function handleTts(req, res) {
 
   // Default to one voice. Gemini's free tier is a handful of lines a day, so
   // leading with it made her switch voices the moment the quota ran out.
-  const wanted = want === "fish" ? "auto" : (want || (GROQ_KEYS[0] ? "orpheus" : "auto"));
+  const wanted = want === "fish" ? "auto" : (want || (narrator || !GROQ_KEYS[0] ? "auto" : "orpheus"));
   const useGemini = (wanted === "auto" || wanted === "gemini") && Boolean(GEMINI_KEY);
 
   if (useGemini) {

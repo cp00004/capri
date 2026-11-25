@@ -2794,30 +2794,37 @@
   function finishFrame(ctx, opt) {
     const { W, H, story, t, idx, pal, L, p, seconds } = opt;
     if (p > 0) {
-      // outro panel
+      // end card: this story's own title, no sequel hook
+      const closes = ["THE END", "THAT'S A WRAP", "STORY DONE", "THAT'S ALL", "THE FINISH"];
+      const close = closes[((story.seed >>> 0) || 0) % closes.length];
       ctx.save();
-      ctx.fillStyle = "rgba(16,8,26,0.42)";
+      ctx.fillStyle = "rgba(16,8,26,0.48)";
       ctx.fillRect(0, 0, W, H);
-      const bob = Math.sin((Date.now() / 1000) * 5) * 8;
+      const bob = Math.sin((Date.now() / 1000) * 4) * 6;
       const ox = L.captionX || W / 2;
       const oy = L.vertical ? H * 0.24 : H * 0.42;
       ctx.globalAlpha = p;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      setFont(ctx, W * 0.075);
       ctx.lineJoin = "round";
       ctx.strokeStyle = "rgba(24,12,32,0.9)";
-      ctx.lineWidth = W * 0.075 * 0.2;
-      ctx.strokeText("FOLLOW FOR", ox, oy - 70 + bob);
-      ctx.fillStyle = "#ffffff";
-      ctx.fillText("FOLLOW FOR", ox, oy - 70 + bob);
-      setFont(ctx, W * 0.115);
-      ctx.strokeText("PART 2!", ox, oy + 40 + bob);
-      ctx.fillStyle = "#ffe066";
-      ctx.fillText("PART 2!", ox, oy + 40 + bob);
       setFont(ctx, W * 0.045);
+      ctx.lineWidth = W * 0.009;
+      ctx.strokeText(close, ox, oy - 26 + bob);
       ctx.fillStyle = "rgba(255,255,255,0.9)";
-      ctx.fillText("new toon every day", ox, oy + 130 + bob);
+      ctx.fillText(close, ox, oy - 26 + bob);
+      const title = String(story.title || "Toon Time").toUpperCase().slice(0, 28);
+      let size = W * 0.095;
+      setFont(ctx, size);
+      const maxW = W * (L.vertical ? 0.86 : 0.6);
+      while (ctx.measureText(title).width > maxW && size > W * 0.045) {
+        size -= 3;
+        setFont(ctx, size);
+      }
+      ctx.lineWidth = size * 0.2;
+      ctx.strokeText(title, ox, oy + 70 + bob);
+      ctx.fillStyle = "#ffe066";
+      ctx.fillText(title, ox, oy + 70 + bob);
       ctx.restore();
     }
     // brand + dots
@@ -3002,15 +3009,27 @@
 
   /* ------------------------------------------------------------ music */
 
-  function makeMusic(seconds) {
+  function makeMusic(seconds, seed) {
     const rate = 44100;
     const total = Math.max(1, Math.floor(seconds * rate));
     const out = new Float32Array(total);
-    const beat = 0.5;
+    const s = ((Number(seed) || 42) >>> 0) || 42;
+    const beat = [0.5, 0.46, 0.54, 0.48][s % 4];
     const semis = (n) => 261.63 * Math.pow(2, n / 12);
-    const chords = [0, 7, 9, 5];
-    const melody = [12, 16, 19, 21, 19, 16, 14, 12];
-    const rand = rng(42);
+    const progSet = [
+      [0, 7, 9, 5], [0, 5, 9, 7], [0, 9, 5, 10], [0, 3, 7, 10], [0, 7, 5, 3],
+    ];
+    const melSet = [
+      [12, 16, 19, 21, 19, 16, 14, 12],
+      [12, 14, 16, 19, 23, 19, 16, 14],
+      [12, 19, 16, 14, 12, 16, 21, 19],
+      [12, 15, 19, 22, 19, 15, 12, 7],
+      [12, 17, 21, 24, 21, 17, 14, 12],
+    ];
+    const chords = progSet[(s >>> 2) % progSet.length];
+    const melody = melSet[(s >>> 4) % melSet.length];
+    const shift = ((s >>> 6) % 5) - 2;
+    const rand = rng(s);
 
     const add = (start, dur, freq, amp, decay, type) => {
       const from = Math.max(0, Math.floor(start * rate));
@@ -3043,10 +3062,10 @@
           out[i] += Math.sin(2 * Math.PI * f * t) * 0.42 * Math.exp(-t * 22);
         }
         // bass
-        add(at, 0.42, semis(root - 24), 0.16, 5, "soft");
+        add(at, 0.42, semis(root - 24 + shift), 0.16, 5, "soft");
         // pluck melody on 8ths
-        add(at, 0.32, semis(melody[(bar * 4 + b) % melody.length]), 0.12, 7, "pluck");
-        add(at + beat / 2, 0.28, semis(melody[(bar * 4 + b + 3) % melody.length] + 12), 0.08, 8, "pluck");
+        add(at, 0.32, semis(melody[(bar * 4 + b) % melody.length] + shift), 0.12, 7, "pluck");
+        add(at + beat / 2, 0.28, semis(melody[(bar * 4 + b + 3) % melody.length] + 12 + shift), 0.08, 8, "pluck");
         // hat
         const hFrom = Math.max(0, Math.floor((at + beat / 2) * rate));
         const hTo = Math.min(total, Math.floor((at + beat / 2 + 0.05) * rate));

@@ -801,7 +801,16 @@
       });
       stage = "SCORING";
       storyProgress("SCORING\nbuilding the soundtrack");
-      const music = window.CapriZdf.makeScore(render.seconds, dev.storyType);
+      const music = window.CapriZdf.makeScore(render.seconds, dev.storyType, script.seed);
+      stage = "VOICE OVER";
+      storyProgress("VOICE OVER\nnarrating the story");
+      let soundtrack = music?.wavBuf || null;
+      try {
+        const voiced = await window.CapriZdf.makeNarration({ scenes: script.scenes, seconds: render.seconds, music });
+        if (voiced?.wavBuf) soundtrack = voiced.wavBuf;
+      } catch (err) {
+        sysLine(`narration skipped: ${err.message || err}`);
+      }
       stage = "WRITING MP4";
       storyProgress("WRITING MP4\nconverting the recording");
       const r = await D.toonSave({
@@ -809,7 +818,7 @@
         folder: "stories",
         name: script.title || topic.slice(0, 40),
         videoBuf: render.videoBuf,
-        wavBuf: music?.wavBuf || null,
+        wavBuf: soundtrack,
         width: render.width,
         height: render.height,
         seconds: render.seconds,
@@ -1095,7 +1104,7 @@
       });
       stage = "SCORING";
       toonProgress("SCORING\nbuilding the soundtrack");
-      const music = dev.toonMusic ? window.CapriToon.makeMusic(render.seconds) : null;
+      const music = dev.toonMusic ? window.CapriToon.makeMusic(render.seconds, story.seed) : null;
       stage = "WRITING MP4";
       toonProgress("WRITING MP4\nconverting the recording");
       const r = await D.toonSave({
