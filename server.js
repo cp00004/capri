@@ -1132,19 +1132,64 @@ function cleanShortsClip(raw, ws, we, duration, platform) {
   };
 }
 
+/**
+ * A vision request that cannot run should not take the whole studio down.
+ *
+ * Frames are expensive: a single 720px still costs roughly 750 prompt tokens, so
+ * two or three of them can exceed a free relay's per-minute input budget. Failing
+ * straight back to text would throw away the picture even when one frame would
+ * have worked, so this steps down: everything, then the first two frames, then
+ * the transcript alone. Whatever happens is returned in `vision` so the caller can
+ * say exactly how much the model could see.
+ */
 async function shortsCompletion(messages, temperature) {
-  try {
-    return await collectDevCompletion({ messages, tools: undefined, temperature });
-  } catch (err) {
-    // Some vision relays allow only a handful of images; re-ask from the transcript alone.
-    if (/image|vision|media/i.test(String(err?.message || "")) && devHasImages(messages)) {
-      const textOnly = messages.map((m) =>
-        Array.isArray(m.content) ? { role: m.role, content: m.content.filter((p) => p?.type === "text") } : m
-      );
-      return collectDevCompletion({ messages: textOnly, tools: undefined, temperature });
-    }
-    throw err;
+  if (!devHasImages(messages)) {
+    return collectDevCompletion({ messages, tools: undefined, temperature });
   }
+
+  const imageCount = (list) => list.reduce((n, m) => n + (Array.isArray(m.content)
+    ? m.content.filter((p) => p?.type === "image_url").length : 0), 0);
+
+  const withImages = (keep) => messages.map((m) => {
+    if (!Array.isArray(m.content)) return m;
+    let seen = 0;
+    const parts = [];
+    for (const p of m.content) {
+      if (p?.type !== "image_url") { parts.push(p); continue; }
+      seen += 1;
+      if (seen > keep) continue;
+      parts.push(p);
+    }
+    return { role: m.role, content: parts };
+  });
+
+  const textOnly = (list) => list.map((m) =>
+    Array.isArray(m.content) ? { role: m.role, content: m.content.filter((p) => p?.type === "text") } : m
+  );
+
+  const total = imageCount(messages);
+  const plans = [];
+  if (total > 2) plans.push({ keep: 2, note: `only the first 2 of ${total} frames could be sent` });
+  plans.push({ keep: 0, note: "the pictures could not be sent" });
+
+  let firstErr = null;
+  for (const plan of plans) {
+    const list = plan.keep > 0 ? withImages(plan.keep) : textOnly(messages);
+    try {
+      const out = await collectDevCompletion({ messages: list, tools: undefined, temperature });
+      if (plan.keep === total) return out;
+      const why = String(firstErr?.message || "the relay refused the pictures").slice(0, 160);
+      return {
+        ...out,
+        vision: plan.keep > 0
+          ? `${plan.note} - ${why}. Judged from fewer frames.`
+          : `${plan.note} - ${why}. This pass read the transcript only.`,
+      };
+    } catch (err) {
+      if (!firstErr) firstErr = err;
+    }
+  }
+  throw firstErr || new Error("The model could not be reached.");
 }
 
 async function handleDevShorts(req, res) {
@@ -1472,6 +1517,9 @@ async function handleClipPropose(req, res) {
       window: w,
       moments,
       provider: out.provider,
+      // Set when the pictures were dropped and the window was judged from the
+      // transcript alone; the renderer shows this in the degraded report.
+      vision: out.vision,
       // Kept for Developer Mode transparency: when a window yields nothing it
       // is useful to know whether the model said so or the reply was unusable.
       raw: body.debug ? String(out.content || "").slice(0, 1500) : undefined,
@@ -1497,6 +1545,8 @@ async function handleClipPropose(req, res) {
   const moments = results.flatMap((r) => (r.moments || []).map((m) => ({ ...m, window: r.window, provider: r.provider })));
   const failures = results.filter((r) => r.error).map((r) => ({ window: r.window, error: r.error }));
   const providers = [...new Set(results.map((r) => r.provider).filter(Boolean))];
+  // Windows that were judged from text because their pictures could not be sent.
+  const visionGaps = [...new Set(results.map((r) => r.vision).filter(Boolean))];
 
   if (!moments.length && failures.length === results.length) {
     return devToolError(res, 502, failures[0]?.error || "Every window failed.");
@@ -1506,7 +1556,8 @@ async function handleClipPropose(req, res) {
     moments,
     failures,
     providers,
-    windows: results.map((r) => ({ window: r.window, got: (r.moments || []).length, error: r.error, skipped: r.skipped, raw: r.raw, coerced: r.coerced })),
+    visionGaps,
+    windows: results.map((r) => ({ window: r.window, got: (r.moments || []).length, error: r.error, skipped: r.skipped, raw: r.raw, coerced: r.coerced, vision: r.vision })),
     watched: { windows: windows.length, failed: failures.length },
   });
 }
@@ -1573,7 +1624,7 @@ async function handleClipReview(req, res) {
   const review = analysis.coerceReview(parsed, moment, duration, limits);
   if (!review) return devToolError(res, 502, "The review returned nothing usable.");
 
-  return json(res, 200, { review, provider: out.provider });
+  return json(res, 200, { review, provider: out.provider, vision: out.vision });
 }
 
 function actionLabel(name, args) {
