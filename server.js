@@ -1352,7 +1352,7 @@ async function handleClipPropose(req, res) {
       { role: "user", content },
     ]);
     let parsed;
-    try { parsed = parseJsonLoose(out.content); } catch { throw new Error("the model returned unreadable JSON"); }
+    try { parsed = analysis.parseModelJson(out.content); } catch { throw new Error("the model returned unreadable JSON"); }
     const list = Array.isArray(parsed?.moments) ? parsed.moments
       : Array.isArray(parsed?.clips) ? parsed.clips
         : parsed?.start != null ? [parsed] : [];
@@ -1458,7 +1458,7 @@ async function handleClipReview(req, res) {
     return devToolError(res, 502, String(err?.message || "The review could not run."));
   }
   let parsed;
-  try { parsed = parseJsonLoose(out.content); } catch { return devToolError(res, 502, "The review returned unreadable JSON."); }
+  try { parsed = analysis.parseModelJson(out.content); } catch { return devToolError(res, 502, "The review returned unreadable JSON."); }
   const review = analysis.coerceReview(parsed, moment, duration, limits);
   if (!review) return devToolError(res, 502, "The review returned nothing usable.");
 

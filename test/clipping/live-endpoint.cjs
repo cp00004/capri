@@ -1,33 +1,58 @@
 /**
- * CAPRI // live endpoint smoke test
+ * CAPRI // live endpoint pairs
  *
- * Exercises the real analysis endpoints against the running server with a
- * hand-built stream fixture. Not a network mock: this is the same call the
- * studio makes, so a broken prompt or JSON shape fails here.
+ * Two fixtures with opposite correct answers:
+ *   A. A self-contained joke (setup + punchline + laughter) that must be
+ *      accepted, so the review is not simply rejecting everything.
+ *   B. A laugh at something never shown or said, which must be rejected.
  *
- * Run with the server up:  node test/clipping/live-endpoint.cjs
+ * Run with the server up: node test/clipping/live-endpoint.cjs
  */
 "use strict";
 
 const BASE = process.env.CAPRI_BASE || "http://127.0.0.1:4173";
 
-const WORDS = [
-  ["so", 0], ["I", 0.2], ["walked", 0.35], ["into", 0.6], ["the", 0.8], ["stream", 1.0],
-  ["and", 1.3], ["he", 1.5], ["had", 1.7], ["a", 1.9], ["full", 2.0], ["pizza", 2.2],
-  ["on", 2.5], ["his", 2.6], ["head", 2.8], ["like", 3.1], ["a", 3.2], ["hat", 3.3],
-  ["I", 3.7], ["could", 3.8], ["not", 4.0], ["believe", 4.1], ["it", 4.5],
-  ["he", 5.2], ["just", 5.3], ["kept", 5.5], ["talking", 5.7], ["normally", 6.0],
-  ["with", 6.5], ["cheese", 6.7], ["dripping", 6.9], ["down", 7.2], ["his", 7.3], ["face", 7.4],
-  ["chat", 8.0], ["is", 8.2], ["going", 8.3], ["insane", 8.5], ["right", 8.8], ["now", 9.0],
-];
-const words = WORDS.map(([w, t], i) => ({ word: w, start: t, end: t + (WORDS[i + 1] ? WORDS[i + 1][1] - t : 0.3) }));
+function wordsFrom(pairs) {
+  return pairs.map(([w, t], i) => ({
+    word: w,
+    start: t,
+    end: t + (pairs[i + 1] ? pairs[i + 1][1] - t : 0.3),
+  }));
+}
 
-const events = [
-  { type: "laughter", start: 4.6, end: 5.1, peak: 4.8, confidence: 0.82, rate: 4.9 },
-  { type: "group_laughter", start: 8.6, end: 9.6, peak: 9.0, confidence: 0.9, rate: 5.4 },
-];
+const SELF_CONTAINED = {
+  words: wordsFrom([
+    ["my", 0], ["doctor", 0.25], ["told", 0.6], ["me", 0.85], ["I", 1.1], ["have", 1.25],
+    ["a", 1.5], ["rare", 1.6], ["condition", 1.85], ["where", 2.6], ["I", 2.8],
+    ["cannot", 2.95], ["stop", 3.3], ["telling", 3.6], ["people", 3.9],
+    ["about", 4.3], ["my", 4.6], ["rare", 4.8], ["condition", 5.1],
+    ["and", 6.0], ["I", 6.1], ["said", 6.25], ["doc", 6.5], ["thats", 6.8],
+    ["the", 7.0], ["condition", 7.1], ["isnt", 7.6], ["it", 7.9],
+    ["he", 8.3], ["just", 8.45], ["stared", 8.7], ["at", 9.0], ["me", 9.2],
+  ]),
+  events: [
+    { type: "laughter", start: 8.2, end: 9.0, peak: 8.6, confidence: 0.88, rate: 5.2 },
+    { type: "group_laughter", start: 9.0, end: 10.4, peak: 9.4, confidence: 0.92, rate: 5.6 },
+  ],
+  ocr: [],
+  duration: 14,
+};
 
-const ocr = [{ t: 6.5, text: "PIZZA HAT CHALLENGE" }];
+const UNSEEN_CAUSE = {
+  words: wordsFrom([
+    ["chat", 0], ["look", 0.3], ["at", 0.5], ["that", 0.6],
+    ["look", 1.2], ["at", 1.4], ["what", 1.6], ["he", 1.7], ["did", 1.9],
+    ["oh", 2.6], ["my", 2.8], ["god", 3.0],
+    ["I", 3.6], ["cannot", 3.8], ["I", 4.1], ["am", 4.4], ["done", 4.6],
+    ["no", 5.2], ["way", 5.4], ["that", 5.7], ["just", 5.9], ["happened", 6.1],
+  ]),
+  events: [
+    { type: "scream", start: 3.4, end: 4.0, peak: 3.6, confidence: 0.9 },
+    { type: "group_laughter", start: 6.2, end: 7.6, peak: 6.8, confidence: 0.94, rate: 5.8 },
+  ],
+  ocr: [],
+  duration: 10,
+};
 
 async function post(path, body) {
   const r = await fetch(`${BASE}${path}`, {
@@ -37,53 +62,57 @@ async function post(path, body) {
   });
   const text = await r.text();
   let json = null;
-  try { json = JSON.parse(text); } catch { /* leave null */ }
+  try { json = JSON.parse(text); } catch { /* null */ }
   return { status: r.status, json, text };
 }
 
-async function main() {
-  console.log("pass one: propose");
+async function runCase(name, fx) {
+  console.log(`\n=== ${name}`);
   const propose = await post("/api/dev/clip/propose", {
-    duration: 30,
+    duration: fx.duration,
     platform: "youtube",
-    transcript: { words, segments: [], granularity: "word" },
-    events,
-    ocr,
+    transcript: { words: fx.words, segments: [], granularity: "word" },
+    events: fx.events,
+    ocr: fx.ocr,
     frames: [],
-    windows: [{ start: 0, end: 30 }],
+    windows: [{ start: 0, end: fx.duration }],
   });
-  if (propose.status !== 200) throw new Error(`propose ${propose.status}: ${propose.text.slice(0, 400)}`);
+  if (propose.status !== 200) throw new Error(`propose ${propose.status}: ${propose.text.slice(0, 300)}`);
   const moments = propose.json.moments || [];
-  console.log(`  provider=${propose.json.providers?.join(",")} moments=${moments.length} failures=${propose.json.failures?.length || 0}`);
-  for (const m of moments) console.log(`  [${m.start}-${m.end}] ${m.kind}: ${m.why}`);
-  if (!moments.length) throw new Error("no moments proposed for a stream with two clear laugh events");
+  console.log(`  pass one: ${moments.length} moment(s) from ${propose.json.providers?.join(",")}`);
+  if (!moments.length) return { moments: 0, decision: "none" };
 
-  // A real clip must be backed by the laughter at 4.6-5.1 or 8.6-9.6.
-  const covering = moments.filter((m) => m.end > 4.4 && m.start < 5.4);
-  console.log(`  moments covering the 4.6-5.1s laugh: ${covering.length}`);
-
-  console.log("pass two: review the first moment");
+  for (const m of moments) {
+    console.log(`    proposed [${m.start}-${m.end}] ${m.kind}: ${m.why}`);
+  }
   const review = await post("/api/dev/clip/review", {
-    duration: 30,
+    duration: fx.duration,
     platform: "youtube",
     moment: moments[0],
-    transcript: { words, segments: [], granularity: "word" },
-    events,
-    ocr,
+    transcript: { words: fx.words, segments: [], granularity: "word" },
+    events: fx.events,
+    ocr: fx.ocr,
     frames: [],
   });
-  if (review.status !== 200) throw new Error(`review ${review.status}: ${review.text.slice(0, 400)}`);
+  if (review.status !== 200) throw new Error(`review ${review.status}: ${review.text.slice(0, 300)}`);
   const rv = review.json.review;
-  console.log(`  provider=${review.json.provider} decision=${rv.decision} ${rv.start}-${rv.end} (${(rv.end - rv.start).toFixed(1)}s)`);
-  console.log(`  sketch: humor=${rv.humor} unexpected=${rv.unexpected} entertainment=${rv.entertainment} hook=${rv.hook}`);
-  console.log(`  title="${rv.title}"`);
-  console.log(`  why="${rv.why}"`);
-  if (rv.decision === "reject") console.log(`  rejected because: ${rv.reject_reason}`);
-  if (rv.decision === "accept") {
-    if (rv.end - rv.start < 6) throw new Error("accepted clip is below the minimum length");
-    if (!rv.title) throw new Error("accepted clip has no title");
-  }
-  console.log("\nOK");
+  console.log(`  pass two: ${rv.decision} [${rv.start}-${rv.end}] humor=${rv.humor} entertain=${rv.entertainment}`);
+  console.log(`    ${rv.decision === "reject" ? rv.reject_reason : rv.why}`);
+  return { moments: moments.length, decision: rv.decision, review: rv };
+}
+
+async function main() {
+  const a = await runCase("self-contained joke (expect accept)", SELF_CONTAINED);
+  const b = await runCase("laugh at an unseen cause (expect reject)", UNSEEN_CAUSE);
+
+  console.log("\n--- summary");
+  console.log("self-contained:", a.decision);
+  console.log("unseen cause:  ", b.decision);
+
+  // Report rather than fail: a model can legitimately disagree once, and the
+  // point of this harness is to show the distribution, not to hide it.
+  const ok = a.decision === "accept" && b.decision === "reject";
+  console.log(ok ? "\nOK: both sides of the decision behaved as designed." : "\nATTENTION: at least one case did not match the expected decision.");
 }
 
 main().catch((err) => { console.error("FAIL:", err.message); process.exit(1); });

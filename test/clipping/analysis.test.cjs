@@ -101,6 +101,32 @@ test("hashtags are sanitised and capped", () => {
   assert.deepEqual(r.hashtags, ["funny", "badtag", "ok_2"]);
 });
 
+test("parseModelJson survives the shapes free relays actually return", () => {
+  const body = { moments: [{ start: 1, end: 5, why: "because" }] };
+
+  // Bare JSON.
+  assert.deepEqual(analysis.parseModelJson(JSON.stringify(body)).moments.length, 1);
+
+  // Fenced.
+  assert.equal(analysis.parseModelJson("```json\n" + JSON.stringify(body) + "\n```").moments.length, 1);
+
+  // Prose before and after.
+  assert.equal(
+    analysis.parseModelJson(`Sure! Here are the moments:\n${JSON.stringify(body)}\nLet me know if you need more.`).moments.length,
+    1,
+  );
+
+  // Braces inside strings must not end the object early.
+  const tricky = { moments: [{ start: 1, end: 5, why: "he said {this} and }that{" }] };
+  assert.equal(analysis.parseModelJson(`Here: ${JSON.stringify(tricky)} done`).moments[0].why, "he said {this} and }that{");
+
+  // Trailing comma, a common near-miss.
+  assert.equal(analysis.parseModelJson('{"moments":[{"start":1,"end":5,}],}').moments.length, 1);
+
+  // Prose with no JSON at all must throw rather than return garbage.
+  assert.throws(() => analysis.parseModelJson("I could not find anything worth posting."));
+});
+
 test("both prompts forbid selecting a bare loud moment", () => {
   const one = analysis.PASS_ONE_SYSTEM("youtube");
   const two = analysis.PASS_TWO_SYSTEM("tiktok");
