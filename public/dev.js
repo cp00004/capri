@@ -1599,7 +1599,10 @@
    * acoustic events, any shot cut, then even coverage as a floor. That way a
    * three-second visual gag gets a frame even in a two-minute window.
    */
-  function probeTimes(w, read, limit = 3) {
+  // Two frames is deliberate. A free relay charges roughly two thousand input
+  // tokens per still against a seven-thousand-per-minute budget, so asking for
+  // five is a request that can never succeed.
+  function probeTimes(w, read, limit = 2) {
     const times = [];
     const events = (read.events || [])
       .filter((e) => Number(e.end) > w.start && Number(e.start) < w.end)
@@ -1626,8 +1629,15 @@
     return out;
   }
 
-  /** Frames evenly spread through a reviewed clip, for the strict second read. */
-  function reviewTimes(start, end, count = 5) {
+  /**
+   * Frames evenly spread through a reviewed clip, for the strict second read.
+   *
+   * Two, for the same token budget reason as probeTimes. The second read only
+   * has to confirm that the picture matches the claim, and two points inside a
+   * clip is enough to catch a clip that is black, static, or showing the wrong
+   * window entirely.
+   */
+  function reviewTimes(start, end, count = 2) {
     const span = Math.max(0.5, end - start);
     const out = [];
     for (let i = 0; i < count; i += 1) {
@@ -1719,6 +1729,12 @@
     if (proposed?.failures?.length) {
       report.degraded.push(`${proposed.failures.length} window(s) failed in pass one: ${proposed.failures[0].error}`);
     }
+    // Windows the model judged without all their pictures. Not fatal, but the
+    // user should know the read was partly blind rather than assume it saw.
+    if (proposed?.visionGaps?.length) {
+      report.degraded.push(`pass one was partly blind: ${proposed.visionGaps[0]}`);
+      report.vision.partial = proposed.visionGaps.length;
+    }
     if (!moments.length) {
       if (!ctx.multi) throw new Error("She watched the whole video and found nothing worth posting.");
       return { nothing: true };
@@ -1753,6 +1769,9 @@
           }, 180_000);
           const review = data?.review;
           if (!review) return;
+          if (data?.vision) {
+            report.degraded.push(`review at ${clock(moment.start)} was partly blind: ${data.vision}`);
+          }
           report.passes.reviewed += 1;
           if (review.decision === "reject") {
             report.passes.rejected += 1;

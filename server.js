@@ -1586,7 +1586,10 @@ async function handleClipReview(req, res) {
   const transcript = body.transcript || {};
   const events = Array.isArray(body.events) ? body.events.slice(0, 4000) : [];
   const ocr = Array.isArray(body.ocr) ? body.ocr.slice(0, 200) : [];
-  const frames = (Array.isArray(body.frames) ? body.frames : []).slice(0, 10);
+  // Two frames: the review only needs to confirm that what the proposer described
+  // is actually on screen, and each still costs about two thousand input tokens
+  // against a seven-thousand-per-minute vision budget.
+  const frames = (Array.isArray(body.frames) ? body.frames : []).slice(0, 2);
   const limits = {
     minClip: Math.max(3, Number(body.minClip) || 6),
     maxClip: Math.max(10, Number(body.maxClip) || 75),
