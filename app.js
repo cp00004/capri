@@ -186,7 +186,7 @@ function pushNativeConfig() {
 
 const LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) && !IS_NATIVE;
 const INSTALLED = IS_DESKTOP_APP || IS_NATIVE;
-const APP_VERSION = "5.6.0";
+const APP_VERSION = "5.7.0";
 const UPDATE_FEED = "https://cp00004.github.io/capri/version.json";
 const STORE_URL = "https://deplexo.com/apps/9232e954-0784-4861-8319-d06d80d82739";
 const SAVED_BACKEND = normBase(localStorage.getItem(API_KEY) || localStorage.getItem(SERVER_KEY) || "");
@@ -3517,6 +3517,18 @@ function paintAvatar(dataUrl) {
 /* -------------------------------------------------------------- update log */
 
 const UPDATE_LOG = [
+  {
+    version: "5.7.0", date: "2026-11-25", platform: "windows",
+    title: "Clipping that finds the moment",
+    points: [
+      "Developer Mode clipping stops reading only the words: it now hears laughter, screams, shouts and applause, and picks the moment the room actually reacted",
+      "Loud speech is no longer a clip by itself - a pick needs a pattern (pitch, sustain, a rise above the room), so ordinary conversation and stray noise stay out",
+      "Visual interest is checked too: frames are pulled only at the timestamps the audio and transcript flagged, then read for action, faces and on-screen text",
+      "Clip edges now land on real sentence ends and skip the half-sentence tail of the line before, so a clip opens on the joke, not the word before it",
+      "Captions are word-accurate and never sit over silence, and a setup line plus its punchline become one clip instead of two",
+      "Fewer, better clips: Capri returns only what genuinely works instead of forcing six, and says which pass was blind when a vision model is unavailable",
+    ],
+  },
   {
     version: "5.6.0", date: "2026-11-25", platform: "windows",
     title: "Real voices, one-of-a-kind stories",

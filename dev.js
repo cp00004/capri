@@ -1337,110 +1337,181 @@
     dev.els.shortsProgress.textContent = text;
   }
 
-  // The whole timeline is cut into back-to-back slices, so no stretch of the
-  // video goes unheard. Five-minute slices keep every transcript inside the
-  // model's context; only longer footage gets bigger slices, never gaps.
-  function scanWindows(duration) {
-    if (duration <= 300) return [{ start: 0, end: duration }];
-    const count = Math.min(20, Math.max(2, Math.round(duration / 300)));
-    const span = duration / count;
-    const list = [];
-    for (let i = 0; i < count; i += 1) {
-      list.push({ start: i * span, end: i === count - 1 ? duration : (i + 1) * span });
-    }
-    return list;
+  // Clip length rules, mirrored from the server's scoring defaults so the UI
+  // and the ranker cannot disagree.
+  const CLIP = { min: 6, idealMin: 14, idealMax: 45, max: 75 };
+  const CM = () => window.CapriClipMath;
+
+  // Everything the read learns that is not a clip: what degraded and why. Kept
+  // on the entry so Developer Mode can tell the truth about the pass.
+  function blankReport() {
+    return {
+      audio: { ok: false, reason: "", events: 0 },
+      scenes: { ok: false, reason: "", cuts: 0 },
+      stt: { ok: false, granularity: "none", chunks: 0, words: 0, providers: [] },
+      ocr: { ok: false, reason: "", samples: 0 },
+      vision: { frames: 0, sent: 0, failed: 0 },
+      passes: { proposed: 0, reviewed: 0, accepted: 0, rejected: 0 },
+      degraded: [],
+    };
   }
 
-  async function transcribe(video, duration, windows) {
-    // 30s chunks cut the number of ffmpeg/STT round-trips by a fifth, and three
-    // workers keep a batch from reading one video at a time. STT is the slowest
-    // step, so this is where the wall-clock time actually drops.
-    const CHUNK = 30;
-    const WORKERS = 3;
-    const jobs = [];
-    for (const w of windows) {
-      for (let at = w.start; at < w.end - 1; at += CHUNK) {
-        jobs.push({ start: at, span: Math.min(CHUNK, w.end - at) });
-      }
+  /**
+   * Read the stream once: acoustic events, speech regions, shot cuts, then a
+   * word-level transcript per speech region.
+   *
+   * The order matters. Speech regions come from the loudness contour, so every
+   * transcript chunk starts and ends in a real pause - which is what makes the
+   * word timestamps usable for clip boundaries instead of approximate blocks.
+   * The audio pass and the scene pass do not depend on each other, so they run
+   * together.
+   */
+  async function readVideo(video, info, report) {
+    const [audio, chunks, scenes] = await Promise.all([
+      D.audioAnalyse({ video, sampleRate: 16000 }).catch((err) => ({ ok: false, reason: String(err?.message || err), events: [] })),
+      D.speechChunks({ video, targetSeconds: 45, maxSeconds: 90, minSeconds: 8 }).catch((err) => ({ ok: false, reason: String(err?.message || err), chunks: [] })),
+      D.scenes({ video, threshold: 0.32 }).catch((err) => ({ ok: false, reason: String(err?.message || err), times: [] })),
+    ]);
+
+    report.audio = { ok: Boolean(audio?.ok), reason: audio?.reason || "", events: (audio?.events || []).length };
+    report.scenes = { ok: scenes?.ok !== false, reason: scenes?.reason || "", cuts: (scenes?.times || []).length };
+    if (!audio?.ok) report.degraded.push(`no acoustic analysis: ${audio?.reason || "audio decode failed"}`);
+
+    const chunksOk = Boolean(chunks?.ok && (chunks.chunks || []).length);
+    if (!chunksOk) report.degraded.push(`speech regions unavailable: ${chunks?.reason || "no audio"}`);
+
+    const regions = chunksOk ? chunks.chunks : [{ start: 0, end: Math.max(1, info.duration) }];
+    const pauses = chunksOk ? (chunks.pauses || []) : [];
+
+    const { words, segments, granularity, providers, failed } = await transcribeChunks(video, regions, report);
+    report.stt = {
+      ok: words.length > 0 || segments.length > 0,
+      granularity,
+      chunks: failed ? regions.length - failed : regions.length,
+      words: words.length,
+      providers: [...new Set(providers)],
+    };
+    if (granularity === "none") {
+      // Say what actually went wrong. "I could not hear speech" is confusing when
+      // the real problem is a missing audio track or a provider rejecting every
+      // chunk, so the specific cause wins when there is one.
+      const why = !audio?.ok
+        ? (audio.reason || "the audio could not be read")
+        : chunks?.reason
+          ? chunks.reason
+          : "the speech reader returned nothing for every speech region";
+      throw new Error(`I could not hear any speech in that video - ${why}.`);
     }
+    if (granularity === "segment") {
+      report.degraded.push("word-level timing unavailable - captions and cuts are approximate");
+    }
+
+    return {
+      events: audio?.events || [],
+      curve: audio?.curve || [],
+      pauses,
+      scenes: scenes?.times || [],
+      words,
+      segments,
+      granularity,
+    };
+  }
+
+  /**
+   * Transcribe each speech region with word timing.
+   *
+   * Word timestamps come back relative to each chunk, so they are shifted onto
+   * the stream's own clock here. If a chunk only yields sentence timing, that is
+   * recorded rather than being dressed up as word-accurate.
+   */
+  async function transcribeChunks(video, regions, report) {
+    const WORKERS = 3;
+    const words = [];
     const segments = [];
-    let next = 0;
-    let done = 0;
+    const providers = [];
     let failed = 0;
-    const ask = async (job) => {
-      const wav = await D.wav({ video, start: job.start, duration: job.span });
+    let wordChunks = 0;
+    let done = 0;
+    let next = 0;
+
+    const ask = async (region) => {
+      const span = Math.max(1, region.end - region.start);
+      const wav = await D.wav({ video, start: region.start, duration: span });
       const bytes = Uint8Array.from(atob(wav.data), (c) => c.charCodeAt(0));
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 60_000);
+      const timer = setTimeout(() => ctrl.abort(), 120_000);
       try {
-        const res = await bridge().api("/api/stt", {
+        const res = await bridge().api("/api/stt/words?lang=en", {
           method: "POST",
           headers: { "Content-Type": "audio/wav" },
           body: new Blob([bytes], { type: "audio/wav" }),
           signal: ctrl.signal,
         });
-        if (!res.ok) return "";
-        const data = await res.json();
-        return String(data.text || "").trim();
+        if (!res.ok) throw new Error(`speech reader refused (${res.status})`);
+        return await res.json();
       } finally {
         clearTimeout(timer);
       }
     };
+
     const worker = async () => {
-      while (next < jobs.length) {
-        const job = jobs[next++];
-        let text = "";
+      while (next < regions.length) {
+        const region = regions[next++];
+        let data = null;
         try {
-          text = await ask(job);
-          if (!text) { await new Promise((r) => setTimeout(r, 350)); text = await ask(job); }
-        } catch { failed += 1; /* one dead chunk should not kill the read */ }
-        if (text && !/^\[?(silence|blank|music|no speech)/i.test(text)) {
-          segments.push({ start: job.start, end: job.start + job.span, text });
+          data = await ask(region);
+        } catch (err) {
+          failed += 1;
+          report.degraded.push(`speech chunk ${clock(region.start)} failed: ${err?.message || err}`);
+        }
+        if (data) {
+          providers.push(data.provider || "unknown");
+          const offset = region.start;
+          if ((data.words || []).length) {
+            wordChunks += 1;
+            for (const w of data.words) {
+              words.push({ word: String(w.word || "").trim(), start: +(w.start + offset).toFixed(3), end: +(w.end + offset).toFixed(3) });
+            }
+          } else if ((data.segments || []).length) {
+            for (const s of data.segments) {
+              segments.push({ start: +(s.start + offset).toFixed(3), end: +(s.end + offset).toFixed(3), text: String(s.text || "").trim() });
+            }
+          } else if (String(data.text || "").trim()) {
+            // Plain text with no timing at all: keep it for the model, but flag
+            // it so nothing downstream pretends to know when it was said.
+            segments.push({ start: offset, end: offset + (region.end - region.start), text: String(data.text).trim() });
+          }
         }
         done += 1;
-        shortsProgress(`READING THE VIDEO\n${done}/${jobs.length} speech chunks · ${segments.length} lines heard`);
+        shortsProgress(`READING THE VIDEO\n${done}/${regions.length} speech regions · ${words.length} words timed`);
       }
     };
-    await Promise.all(Array.from({ length: WORKERS }, () => worker()));
+
+    await Promise.all(Array.from({ length: Math.min(WORKERS, regions.length) }, () => worker()));
+    words.sort((a, b) => a.start - b.start);
     segments.sort((a, b) => a.start - b.start);
-    if (!segments.length && failed) {
-      throw new Error(`the speech reader dropped ${failed} of ${jobs.length} chunks - run that video again.`);
-    }
-    return segments;
+
+    const granularity = words.length ? "word" : segments.length ? "segment" : "none";
+    // A mixed read is word-accurate in places and approximate in others; call it
+    // segment so nothing overstates its precision.
+    const mixed = wordChunks > 0 && wordChunks < regions.length - failed;
+    return { words, segments, granularity: mixed ? "segment" : granularity, providers, failed };
   }
 
-  async function sampleFrames(video, duration, windows) {
-    // Frames are independent grabs: three ffmpeg readers at once instead of a
-    // line of them. A 10-minute video used to spend a minute just on stills.
-    const frames = [];
-    const spots = [];
-    if (windows.length === 1) {
-      const count = Math.max(6, Math.min(20, Math.ceil(duration / 25)));
-      for (let i = 0; i < count; i += 1) {
-        spots.push(Math.max(0, Math.min(duration - 0.2, duration * ((i + 0.5) / count))));
-      }
-    } else {
-      for (const w of windows) {
-        for (let i = 0; i < 3; i += 1) {
-          spots.push(Math.max(0, Math.min(duration - 0.2, w.start + ((w.end - w.start) * (i + 0.5)) / 3)));
-        }
-      }
-    }
-    let next = 0;
-    let done = 0;
-    const worker = async () => {
-      while (next < spots.length) {
-        const t = spots[next++];
-        const b64 = await D.frame({ video, at: t });
-        if (b64) frames.push({ t, dataUrl: `data:image/jpeg;base64,${b64}` });
-        done += 1;
-        shortsProgress(`READING THE VIDEO\n${done}/${spots.length} frames grabbed · ${Math.round(duration)}s of footage`);
-      }
-    };
-    await Promise.all([worker(), worker(), worker()]);
-    frames.sort((a, b) => a.t - b.t);
-    return frames;
+  /**
+   * Frames at the timestamps the analysis chose, in batches small enough that a
+   * single IPC call stays quick and a vision provider is not handed a wall of
+   * images.
+   */
+  async function framesAtTimes(video, times, width = 720) {
+    const spots = [...new Set(times.map((t) => +Number(t).toFixed(2)))]
+      .filter((t) => Number.isFinite(t) && t >= 0)
+      .sort((a, b) => a - b);
+    if (!spots.length) return { frames: [], failed: 0, reason: "no timestamps to grab" };
+    const r = await D.frames({ video, times: spots, width, quality: 4, concurrency: 3 });
+    return { frames: r?.frames || [], failed: r?.failed || 0, reason: r?.reason || "" };
   }
+
 
   function clock(t) {
     const s = Math.max(0, Math.round(Number(t) || 0));
@@ -1459,24 +1530,18 @@
     return `${h}:${m}:${s},${r}`;
   }
 
-  function buildCues(segments, start, end) {
-    const wrapped = segments.map((s) => ({ ...s })).sort((a, b) => a.start - b.start);
-    const cues = [];
-    for (const seg of wrapped) {
-      const from = Math.max(seg.start, start);
-      const to = Math.min(seg.end, end);
-      if (to - from < 0.4) continue;
-      const sentences = String(seg.text).split(/(?<=[.!?])\s+/).filter(Boolean);
-      if (!sentences.length) continue;
-      const total = sentences.reduce((n, s) => n + s.length, 0) || 1;
-      let at = from;
-      for (const sentence of sentences) {
-        const span = ((to - from) * sentence.length) / total;
-        cues.push({ start: at - start, end: Math.min(to, at + span) - start, text: sentence.trim() });
-        at += span;
-      }
-    }
-    return cues;
+  /**
+   * Captions for one clip. Word timing when the read has it, segment timing
+   * otherwise, and the caller is told which so the UI can be honest.
+   */
+  function cuesForClip(read, start, end) {
+    const built = CM().buildCues({
+      words: read.words || [],
+      segments: read.segments || [],
+      from: start,
+      to: end,
+    });
+    return { cues: CM().settleCues(built.cues), source: built.source };
   }
 
   function buildSrt(cues) {
@@ -1510,18 +1575,7 @@
       "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ];
     const lines = cues.map((c) => {
-      let text = String(c.text).replace(/[{}]/g, "").replace(/\s+/g, " ").trim();
-      if (text.length > 26) {
-        const words = text.split(" ");
-        const rows = [];
-        let row = "";
-        for (const word of words) {
-          if (row && `${row} ${word}`.length > 26) { rows.push(row); row = word; }
-          else row = row ? `${row} ${word}` : word;
-        }
-        if (row) rows.push(row);
-        text = rows.slice(0, 3).join("\\N");
-      }
+      const text = CM().wrapCue(String(c.text).replace(/[{}]/g, ""), 26, 3).join("\\N");
       return `Dialogue: 0,${assTime(c.start)},${assTime(Math.max(c.end, c.start + 0.7))},Capri,,0,0,0,,${text}`;
     });
     return [...head, ...lines].join("\n") + "\n";
@@ -1529,6 +1583,390 @@
 
   function slug(text) {
     return String(text || "short").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "short";
+  }
+
+  /** Does the clip contain speech that could carry a joke? */
+  function speechInside(read, start, end) {
+    if ((read.words || []).some((w) => w.end > start && w.start < end)) return true;
+    return (read.segments || []).some((s) =>
+      s.end > start && s.start < end && String(s.text || "").trim().length > 3);
+  }
+
+  /**
+   * Where to look inside one candidate window.
+   *
+   * Frames are chosen from the evidence, not a grid: the peaks of the strongest
+   * acoustic events, any shot cut, then even coverage as a floor. That way a
+   * three-second visual gag gets a frame even in a two-minute window.
+   */
+  // One frame is deliberate: a 720px still costs about 770 input tokens, measured
+  // against a 7000-per-minute vision budget, and a screening pass over several
+  // windows gets nothing at all if every window asks for two. Pass two, which
+  // decides what ships, is where the second frame is worth paying for.
+  function probeTimes(w, read, limit = 1) {
+    const times = [];
+    const events = (read.events || [])
+      .filter((e) => Number(e.end) > w.start && Number(e.start) < w.end)
+      .sort((a, b) => (Number(b.confidence) || 0) - (Number(a.confidence) || 0))
+      .slice(0, 2);
+    for (const e of events) {
+      const at = Number.isFinite(Number(e.peak)) ? Number(e.peak) : Number(e.start);
+      times.push(Math.min(w.end - 0.1, Math.max(w.start, at)));
+    }
+    for (const cut of read.scenes || []) {
+      if (cut > w.start + 0.3 && cut < w.end - 0.3) times.push(cut);
+    }
+    const span = Math.max(1, w.end - w.start);
+    for (let i = 1; i <= 3; i += 1) times.push(w.start + span * (i / 4));
+
+    const out = [];
+    for (const raw of times) {
+      const t = +Number(raw).toFixed(2);
+      if (!Number.isFinite(t) || t < w.start || t > w.end) continue;
+      if (out.some((o) => Math.abs(o - t) < 1.2)) continue;
+      out.push(t);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  /**
+   * Frames evenly spread through a reviewed clip, for the strict second read.
+   *
+   * One. The whole account gets 7000 vision tokens a minute and a still costs
+   * about 770, so a run that frames two screening windows and two reviews can
+   * exactly afford one picture per call. The frame still catches a clip that is
+   * black, static, or showing the wrong window; a second one only bought a 429
+   * and a transcript-only read.
+   */
+  function reviewTimes(start, end, count = 1) {
+    const span = Math.max(0.5, end - start);
+    const out = [];
+    for (let i = 0; i < count; i += 1) {
+      const t = +(start + span * ((i + 0.5) / count)).toFixed(2);
+      out.push(Math.min(Math.max(0, t), Math.max(0, end - 0.2)));
+    }
+    return [...new Set(out)];
+  }
+
+  async function apiJson(path, body, timeoutMs) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await bridge().api(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.message || data?.error || `request refused (${res.status})`);
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
+   * The read for one platform: plan, propose, review, rank, then cut.
+   *
+   * Nothing here decides what is funny. The endpoints do that, and the ranker
+   * compares every survivor together with one rubric.
+   */
+  async function runPlatform(ctx) {
+    const { entry, video, info, read, platform, tag, report, stamp, state } = ctx;
+    const feed = PLATFORMS[platform].name;
+    const label = ctx.multi ? ` · ${feed.toUpperCase()}` : "";
+    const before = state.made.length;
+
+    // 1. Which windows are even worth asking about.
+    const plan = await apiJson("/api/dev/clip/plan", {
+      duration: info.duration,
+      events: read.events,
+      segments: read.segments,
+      maxCandidates: 12,
+    }, 60_000);
+    const candidates = (plan?.candidates || []).filter((c) => c.end - c.start >= 4);
+    if (!candidates.length) {
+      if (!ctx.multi) throw new Error("She read the whole video and found nothing that happens.");
+      return { nothing: true };
+    }
+    shortsProgress(`VIDEO ${tag}${label}\n${candidates.length} moment${candidates.length === 1 ? "" : "s"} to look at · grabbing frames`);
+
+    // 2. Frames at the evidence, plus on-screen text.
+    const want = new Set();
+    for (const c of candidates) for (const t of probeTimes(c, read)) want.add(t);
+    const probeSpots = [...want].slice(0, 40);
+    const [shot, ocr] = await Promise.all([
+      framesAtTimes(video.path, probeSpots, 720).catch((err) => ({ frames: [], failed: probeSpots.length, reason: String(err?.message || err) })),
+      D.ocr({ video: video.path, times: probeSpots.slice(0, 14), width: 900 }).catch((err) => ({ ok: false, reason: String(err?.message || err), samples: [] })),
+    ]);
+    report.vision.frames += shot.frames.length;
+    report.ocr = { ok: Boolean(ocr?.ok), reason: ocr?.reason || "", samples: (ocr?.samples || []).length };
+    if (!shot.frames.length) report.degraded.push(`frame grabs failed: ${shot.reason || "no frames"}`);
+
+    // 3. Pass one: propose moments inside those windows.
+    let waited = 0;
+    ctx.tick = setInterval(() => {
+      waited += 1;
+      shortsProgress(`VIDEO ${tag}${label} · READING THE MOMENTS\n${candidates.length} windows · ${read.granularity === "word" ? "word-accurate" : "approximate"} transcript · ${shot.frames.length} frames · ${waited}s`);
+    }, 1000);
+    let proposed;
+    try {
+      proposed = await apiJson("/api/dev/clip/propose", {
+        duration: info.duration,
+        platform,
+        transcript: { words: read.words, segments: read.segments, granularity: read.granularity },
+        events: read.events,
+        ocr: ocr?.samples || [],
+        frames: shot.frames,
+        windows: candidates.map((c) => ({ start: c.start, end: c.end })),
+      }, 600_000);
+    } finally {
+      if (ctx.tick) { clearInterval(ctx.tick); ctx.tick = null; }
+    }
+
+    const moments = (proposed?.moments || []);
+    report.passes.proposed += moments.length;
+    if (proposed?.failures?.length) {
+      report.degraded.push(`${proposed.failures.length} window(s) failed in pass one: ${proposed.failures[0].error}`);
+    }
+    // Windows the model judged without all their pictures. Not fatal, but the
+    // user should know the read was partly blind rather than assume it saw.
+    if (proposed?.visionGaps?.length) {
+      report.degraded.push(`pass one was partly blind: ${proposed.visionGaps[0]}`);
+      report.vision.partial = proposed.visionGaps.length;
+    }
+    if (!moments.length) {
+      if (!ctx.multi) throw new Error("She watched the whole video and found nothing worth posting.");
+      return { nothing: true };
+    }
+
+    // 4. Pass two: review every proposal on its own evidence.
+    const reviewed = [];
+    let ri = 0;
+    const reviewWorker = async () => {
+      while (ri < moments.length) {
+        const moment = moments[ri++];
+        const index = ri;
+        shortsProgress(`VIDEO ${tag}${label} · REVIEWING ${index}/${moments.length}\n${clock(moment.start)} -> ${clock(moment.end)}`);
+        const candidate = candidates.find((c) => moment.end > c.start && moment.start < c.end) || {
+          kind: "dialogue", strength: 0.3, events: [],
+        };
+        const times = reviewTimes(Number(moment.start), Number(moment.end));
+        const shot2 = await framesAtTimes(video.path, times, 720).catch(() => ({ frames: [], failed: times.length }));
+        report.vision.frames += shot2.frames.length;
+        if (!shot2.frames.length) report.vision.failed += 1;
+        try {
+          const data = await apiJson("/api/dev/clip/review", {
+            duration: info.duration,
+            platform,
+            moment,
+            transcript: { words: read.words, segments: read.segments, granularity: read.granularity },
+            events: read.events,
+            ocr: ocr?.samples || [],
+            frames: shot2.frames,
+            minClip: CLIP.min,
+            maxClip: CLIP.max,
+          }, 180_000);
+          const review = data?.review;
+          if (!review) return;
+          if (data?.vision) {
+            report.degraded.push(`review at ${clock(moment.start)} was partly blind: ${data.vision}`);
+          }
+          report.passes.reviewed += 1;
+          if (review.decision === "reject") {
+            report.passes.rejected += 1;
+            reviewed.push({
+              id: `${platform}:${moment.start}-${moment.end}`,
+              rejected: true,
+              moment, candidate, review,
+              start: Number(moment.start), end: Number(moment.end),
+              reasons: [review.reject_reason || "rejected on review"],
+            });
+            return;
+          }
+          report.passes.accepted += 1;
+          reviewed.push({
+            id: `${platform}:${review.start}-${review.end}`,
+            moment, candidate, review,
+            start: Number(review.start), end: Number(review.end),
+            bareReaction: Boolean(candidate.bareReaction),
+            hasDialogue: speechInside(read, Number(review.start), Number(review.end)),
+            passTwo: "accepted",
+          });
+        } catch (err) {
+          report.passes.reviewed += 1;
+          report.degraded.push(`review failed at ${clock(moment.start)}: ${err?.message || err}`);
+          // A failed review is not an acceptance: the proposal is dropped rather
+          // than posted unvalidated.
+        }
+      }
+    };
+    await Promise.all([reviewWorker(), reviewWorker(), reviewWorker()]);
+
+    if (!reviewed.some((r) => !r.rejected)) {
+      if (!ctx.multi) throw new Error("Nothing survived the second read - the proposals did not hold up.");
+      return { nothing: true };
+    }
+
+    // 5. Global ranking with one rubric.
+    const ranked = await apiJson("/api/dev/clip/rank", {
+      clips: reviewed.map((r) => ({
+        id: r.id,
+        start: r.start,
+        end: r.end,
+        review: r.review,
+        candidate: {
+          kind: r.candidate.kind,
+          strength: r.candidate.strength,
+          events: (r.candidate.events || []).map((e) => ({ type: e.type, start: e.start, end: e.end, confidence: e.confidence })),
+        },
+        bareReaction: r.bareReaction,
+        hasDialogue: r.hasDialogue,
+        passTwo: r.rejected ? "rejected" : "accepted",
+      })),
+      minClip: CLIP.min,
+      maxClip: CLIP.max,
+      max: 6,
+    }, 60_000);
+    report.rank = ranked;
+
+    const byId = new Map(reviewed.map((r) => [r.id, r]));
+    const picks = (ranked?.picks || []).map((p) => ({ ...byId.get(p.id), ...p })).filter((p) => p.moment);
+    if (!picks.length) {
+      if (!ctx.multi) throw new Error("Nothing cleared the bar for posting.");
+      return { nothing: true };
+    }
+
+    // 6. Cut.
+    const cutCache = new Map();
+    const pfx = ctx.multi ? (platform === "tiktok" ? "-tt" : "-yt") : "";
+
+    // Rank compares the model's own windows, but the boundaries that actually get
+    // cut are different: snapping can move a start or end by a second or more, and
+    // two proposals that looked separate can collapse onto the same footage.
+    //
+    // Two distinct ways one joke got split across two files on the fixture: the
+    // windows overlapped after snapping, and - more subtly - they met exactly, so a
+    // setup clip ending at 22.54 and a punchline clip starting at 22.54 looked like
+    // neighbours rather than a divided bit. So refine first, then merge a clip whose
+    // start is the other's end, and drop anything that genuinely overlaps.
+    const merged = [];
+    for (const pick of picks) {
+      const bounds = CM().refine({
+        start: pick.start,
+        end: pick.end,
+        words: read.words,
+        pauses: read.pauses,
+        duration: info.duration,
+        minClip: CLIP.min,
+        maxClip: CLIP.max,
+      });
+      // Abutting windows. A gap under 1.2s is shorter than a breath - the same
+      // threshold `refine` uses to decide speech has stopped - so two clips either
+      // side of it are the continuations of one run of speech, not two different
+      // moments. Snapping widened the gap here to 0.6s, which at 0.25s looked like
+      // two separate clips and shipped a setup without its punchline.
+      const neighbour = merged.find((p) => Math.abs(p.end - bounds.start) < 1.2 || Math.abs(bounds.end - p.start) < 1.2);
+      if (neighbour) {
+        const joined = CM().refine({
+          start: Math.min(neighbour.start, bounds.start),
+          end: Math.max(neighbour.end, bounds.end),
+          words: read.words,
+          pauses: read.pauses,
+          duration: info.duration,
+          minClip: CLIP.min,
+          maxClip: CLIP.max,
+        });
+        if (joined.end - joined.start <= CLIP.max) {
+          report.degraded.push(`${clock(bounds.start)}-${clock(bounds.end)} was the other half of ${clock(neighbour.start)}-${clock(neighbour.end)}, so they were joined`);
+          neighbour.start = joined.start;
+          neighbour.end = joined.end;
+          continue;
+        }
+      }
+      const clash = merged.find((p) => Math.min(p.end, bounds.end) - Math.max(p.start, bounds.start) > 0.35);
+      if (clash) {
+        report.degraded.push(`${clock(bounds.start)}-${clock(bounds.end)} overlapped ${clock(clash.start)}-${clock(clash.end)} once snapped, so it was not cut`);
+        continue;
+      }
+      merged.push({ ...pick, start: bounds.start, end: bounds.end });
+    }
+    const planned = merged;
+
+    for (let i = 0; i < planned.length; i += 1) {
+      const pick = planned[i];
+      const start = pick.start;
+      const end = pick.end;
+      const length = end - start;
+      shortsProgress(`VIDEO ${tag}${label} · CUTTING ${i + 1}/${planned.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s · ${pick.score}/100`);
+      try {
+        const key = `${start.toFixed(2)}|${end.toFixed(2)}`;
+        let hold = cutCache.get(key);
+        let captionSource = "none";
+        if (!hold) {
+          state.seq += 1;
+          const fileBase = `${slug(pick.review?.title || pick.moment?.kind || "short")}-${stamp}-${state.seq}`;
+          const built = cuesForClip(read, start, end);
+          captionSource = built.source;
+          await D.write(`shorts/${fileBase}.srt`, buildSrt(built.cues));
+          await D.write(`shorts/${fileBase}.ass`, buildAss(built.cues));
+          const cut = await D.cut({
+            video: video.path,
+            start,
+            duration: length,
+            out: `shorts/${fileBase}.mp4`,
+            captions: `shorts/${fileBase}.ass`,
+            width: info.width,
+            height: info.height,
+          });
+          hold = { cut, fileBase, cues: built.cues.length, captionSource };
+          cutCache.set(key, hold);
+        }
+        captionSource = hold.captionSource;
+
+        const evidence = CM().eventsWithin(read.events, start, end);
+        const components = pick.components || {};
+        const review = pick.review || {};
+        const base = `${hold.fileBase}${pfx}`;
+        const meta = [
+          `VIDEO\n${entry.name}`,
+          `PLATFORM\n${feed}`,
+          `TITLE\n${review.title || ""}`,
+          `HOOK\n${review.hook_line || ""}`,
+          `CAPTION\n${review.caption || ""}`,
+          `HASHTAGS\n${(review.hashtags || []).map((h) => `#${h}`).join(" ")}`,
+          `DESCRIPTION\n${review.description || ""}`,
+          `WHY IT KEEPS VIEWERS\n${review.why || pick.moment?.why || ""}`,
+          `ENTERTAINMENT SCORE\n${pick.score ?? "?"}/100`,
+          `SCORE BREAKDOWN\nhumor ${components.humor ?? "?"} · unexpected ${components.unexpected ?? "?"} · reaction ${components.reaction ?? "?"} · entertainment ${components.entertainment ?? "?"} · context ${components.context ?? "?"} · replay ${components.replay ?? "?"} · hook ${components.hook ?? "?"}`,
+          `EVIDENCE\n${evidence.length ? evidence.map((e) => `${e.type} @ ${e.start}-${e.end}s (${Math.round(e.confidence * 100)}%)`).join(", ") : "none inside the clip"}`,
+          `VALIDATION\npass two ${pick.passTwo === "accepted" ? "accepted" : "not reviewed"} · captions ${captionSource === "word" ? "word-accurate" : captionSource === "segment" ? "approximate" : "none"}`,
+          `SOURCE\n${video.path}`,
+          `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
+          `FILE\nshorts/${hold.fileBase}.mp4`,
+        ].join("\n\n");
+        await D.write(`shorts/${base}.txt`, meta);
+        state.made.push({
+          pick: { ...review, start, end, score: pick.score },
+          cut: hold.cut,
+          base,
+          meta,
+          videoName: entry.name,
+          platform,
+          report,
+          evidence,
+          components,
+          captionSource,
+          suggested: { start: pick.start, end: pick.end, score: pick.score },
+        });
+      } catch (err) {
+        state.failures.push(`${entry.name}${ctx.multi ? ` ${feed}` : ""} ${clock(start)}-${clock(end)}: ${err.message || err}`);
+      }
+    }
+    entry.state = state.made.length > before ? "done" : "nothing postable";
+    return { made: state.made.length - before };
   }
 
   async function runShorts() {
@@ -1539,14 +1977,15 @@
       shutdown("Open a workspace folder first - the shorts and their scripts are written into it.");
       return;
     }
+    if (!CM()) {
+      shutdown("FAILED\nclip-math.js did not load - reload the app and try again.");
+      return;
+    }
     dev.shortsBusy = true;
     dev.els.shortsRun.disabled = true;
     dev.els.shortsResult.classList.add("hidden");
-    let ticker = null;
-    const made = [];
-    const failures = [];
+    const state = { made: [], failures: [], seq: 0 };
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    let seq = 0;
     try {
       for (let vi = 0; vi < queue.length; vi += 1) {
         const entry = queue[vi];
@@ -1555,141 +1994,75 @@
         const tag = `${vi + 1}/${queue.length} · ${entry.name}`;
         entry.state = "working";
         renderVideoList();
+        const report = blankReport();
+        entry.clipReport = report;
         try {
-          shortsProgress(`VIDEO ${tag}\nreading · ${clock(info.duration)}`);
-          const windows = scanWindows(info.duration);
-          // Reading the audio and grabbing stills do not depend on each other,
-          // so they run together. A re-run of the same file reuses the read
-          // instead of paying for the same transcript twice.
-          let segments;
-          let frames;
-          if (entry.read && entry.read.duration === info.duration) {
-            ({ segments, frames } = entry.read);
+          shortsProgress(`VIDEO ${tag}\nreading the audio · ${clock(info.duration)}`);
+          // One read per file, reused on a re-run at the same length.
+          let read = entry.read;
+          if (!read || read.duration !== info.duration) {
+            read = await readVideo(video.path, info, report);
+            entry.read = { ...read, duration: info.duration };
           } else {
-            [segments, frames] = await Promise.all([
-              transcribe(video.path, info.duration, windows),
-              sampleFrames(video.path, info.duration, windows),
-            ]);
-            entry.read = { duration: info.duration, segments, frames };
+            // The cached read is still valid; copy its shape into the report so
+            // Developer Mode shows what actually ran.
+            report.audio = { ok: (read.events || []).length > 0 || !report.degraded.length, reason: "", events: (read.events || []).length };
+            report.scenes = { ok: true, reason: "", cuts: (read.scenes || []).length };
+            report.stt = {
+              ok: true, granularity: read.granularity,
+              chunks: 0, words: (read.words || []).length, providers: [],
+            };
           }
-          if (!segments.length) throw new Error("I could not hear any speech in that video.");
-          // BOTH runs the same footage through each feed's own read: YouTube
-          // keeps its retention/loop wording, TikTok its first-second hook. The
-          // vertical encode is shared when both pick the same window.
+          report.stt.granularity = read.granularity;
+          report.duration = info.duration;
+
           const targets = dev.platform === "both" ? ["youtube", "tiktok"] : [dev.platform];
-          const cutCache = new Map();
-          const before = made.length;
+          const multi = targets.length > 1;
+          const ctx = { entry, video, info, read, tag, report, stamp, state, multi, tick: null };
+          const results = [];
           for (const platform of targets) {
-            const feed = PLATFORMS[platform].name;
-            let waited = 0;
-            ticker = setInterval(() => {
-              waited += 1;
-              shortsProgress(
-                `VIDEO ${tag}${targets.length > 1 ? ` · ${feed.toUpperCase()}` : ""} · WATCHING THE WHOLE VIDEO\n${windows.length} slice${windows.length === 1 ? "" : "s"} across ${clock(info.duration)} · ${segments.length} lines read · scoring every moment · ${waited}s`
-              );
-            }, 1000);
-            const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 480_000);
-            let data;
+            ctx.platform = platform;
             try {
-              const res = await bridge().api("/api/dev/shorts", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  duration: info.duration,
-                  platform,
-                  segments,
-                  frames,
-                  windows,
-                }),
-                signal: ctrl.signal,
-              });
-              data = await res.json().catch(() => null);
-              if (!res.ok) throw new Error(data?.message || `analysis refused (${res.status})`);
+              results.push(await runPlatform(ctx));
+            } catch (err) {
+              state.failures.push(`${entry.name}${multi ? ` ${PLATFORMS[platform].name}` : ""}: ${err.message || err}`);
+              results.push({ failed: String(err.message || err) });
             } finally {
-              clearTimeout(timer);
-              if (ticker) { clearInterval(ticker); ticker = null; }
-            }
-            const list = Array.isArray(data?.shorts) && data.shorts.length ? data.shorts : data?.pick ? [data.pick] : [];
-            if (!list.length) {
-              if (targets.length === 1) throw new Error("She watched the whole video and found nothing worth posting.");
-              failures.push(`${entry.name} · ${feed}: nothing worth posting`);
-              continue;
-            }
-            for (let i = 0; i < list.length; i += 1) {
-              const pick = list[i];
-              const start = Math.max(0, Number(pick.start) || 0);
-              const end = Math.min(info.duration, Number(pick.end) || 0);
-              if (end - start < 8) continue;
-              const length = end - start;
-              const key = `${start.toFixed(2)}|${end.toFixed(2)}`;
-              const pfx = targets.length > 1 ? (platform === "tiktok" ? "-tt" : "-yt") : "";
-              shortsProgress(
-                `VIDEO ${tag}${targets.length > 1 ? ` · ${feed.toUpperCase()}` : ""} · CUTTING ${i + 1}/${list.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s${pick.score ? ` · score ${pick.score}` : ""}`
-              );
-              try {
-                let hold = cutCache.get(key);
-                if (!hold) {
-                  seq += 1;
-                  const fileBase = `${slug(pick.title)}-${stamp}-${seq}`;
-                  const cues = buildCues(segments, start, end);
-                  await D.write(`shorts/${fileBase}.srt`, buildSrt(cues));
-                  await D.write(`shorts/${fileBase}.ass`, buildAss(cues));
-                  const cut = await D.cut({
-                    video: video.path,
-                    start,
-                    duration: length,
-                    out: `shorts/${fileBase}.mp4`,
-                    captions: `shorts/${fileBase}.ass`,
-                    width: info.width,
-                    height: info.height,
-                  });
-                  hold = { cut, fileBase };
-                  cutCache.set(key, hold);
-                }
-                const base = `${hold.fileBase}${pfx}`;
-                const meta = [
-                  `VIDEO\n${entry.name}`,
-                  `PLATFORM\n${feed}`,
-                  `TITLE\n${pick.title || ""}`,
-                  `HOOK\n${pick.hook || ""}`,
-                  `CAPTION\n${pick.caption || ""}`,
-                  `HASHTAGS\n${(pick.hashtags || []).map((h) => `#${h}`).join(" ")}`,
-                  `DESCRIPTION\n${pick.description || ""}`,
-                  `WHY IT KEEPS VIEWERS\n${pick.why || ""}`,
-                  `RETENTION SCORE\n${pick.score || "?"}/100`,
-                  `SOURCE\n${video.path}`,
-                  `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
-                  `FILE\nshorts/${hold.fileBase}.mp4`,
-                ].join("\n\n");
-                await D.write(`shorts/${base}.txt`, meta);
-                made.push({ pick, cut: hold.cut, base, meta, videoName: entry.name, platform });
-              } catch (err) {
-                failures.push(`${entry.name}${targets.length > 1 ? ` ${feed}` : ""} ${clock(start)}-${clock(end)}: ${err.message || err}`);
-              }
+              if (ctx.tick) { clearInterval(ctx.tick); ctx.tick = null; }
             }
           }
-          entry.state = made.length > before ? "done" : "nothing postable";
-          renderShortsResults(made, false);
+          const allNothing = results.every((r) => r.nothing || r.failed);
+          if (allNothing && !state.made.some((m) => m.report === report)) {
+            const first = results.find((r) => r.failed);
+            entry.state = first ? "failed" : "nothing postable";
+            if (first && !multi) throw new Error(first.failed);
+          }
+          renderShortsResults(state.made, false);
         } catch (err) {
           entry.state = "failed";
-          failures.push(`${entry.name}: ${err.message || err}`);
+          state.failures.push(`${entry.name}: ${err.message || err}`);
         } finally {
-          if (ticker) { clearInterval(ticker); ticker = null; }
           renderVideoList();
         }
       }
-      if (!made.length) throw new Error(`every video failed - ${failures[0] || "unknown error"}`);
-      renderShortsResults(made, true);
-      const where = made[0].cut.path.slice(0, made[0].cut.path.lastIndexOf("\\") + 1);
+      if (!state.made.length) {
+        // Nothing was produced, so the reason is the whole result: name the
+        // actual cause instead of a generic failure.
+        const reports = dev.videos.filter((v) => v.clipReport).map((v) => v.clipReport);
+        renderShortsResults([], false, reports);
+        throw new Error(`every video failed - ${state.failures[0] || "unknown error"}`);
+      }
+      renderShortsResults(state.made, true);
+      const where = state.made[0].cut.path.slice(0, state.made[0].cut.path.lastIndexOf("\\") + 1);
       shortsProgress(
-        `DONE\n${made.length} short${made.length === 1 ? "" : "s"} from ${queue.length} video${queue.length === 1 ? "" : "s"}${failures.length ? ` · ${failures.length} skipped` : ""}\n${where}`
+        `DONE\n${state.made.length} short${state.made.length === 1 ? "" : "s"} from ${queue.length} video${queue.length === 1 ? "" : "s"}${state.failures.length ? ` · ${state.failures.length} skipped` : ""}\n${where}`
       );
-      sysLine(`${made.length} short${made.length === 1 ? "" : "s"} ready in shorts/`);
+      sysLine(`${state.made.length} short${state.made.length === 1 ? "" : "s"} ready in shorts/`);
     } catch (err) {
       shutdown(`FAILED\n${err.message || err}`);
     } finally {
       if (ticker) clearInterval(ticker);
+      try { await D.cleanup(); } catch { /* temp only */ }
       dev.shortsBusy = false;
       renderVideoList();
       paintStudio();
@@ -1698,10 +2071,23 @@
 
   // One block per short: the finished vertical file plays right there, the
   // caption/info script sits next to it, and the copy buttons grab the post.
-  function renderShortsResults(entries, scroll = true) {
+  // With no clips it still renders the reason, because a run that produced
+  // nothing needs an explanation more than a success does.
+  function renderShortsResults(entries, scroll = true, failingReports = []) {
     const box = dev.els.shortsResult;
     box.textContent = "";
     box.classList.remove("hidden");
+    if (!entries.length) {
+      const head = document.createElement("div");
+      head.className = "yt-results-head";
+      const h = document.createElement("h4");
+      h.textContent = "nothing postable";
+      head.appendChild(h);
+      box.appendChild(head);
+      appendReport(box, failingReports.length ? failingReports : dev.videos.map((v) => v.clipReport).filter(Boolean));
+      if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     const head = document.createElement("div");
     head.className = "yt-results-head";
     const h = document.createElement("h4");
@@ -1786,10 +2172,101 @@
       pre.textContent = meta || "";
       info.appendChild(pre);
       body.appendChild(info);
+
+      // Developer Mode transparency: what the engine actually detected and how
+      // the clip was validated. This is the difference between "it scored 71"
+      // and "here is why it scored 71, and here is what it could not check".
+      const whyBox = document.createElement("details");
+      whyBox.className = "yt-short-info";
+      const whySum = document.createElement("summary");
+      whySum.textContent = "WHY THIS CLIP";
+      whyBox.appendChild(whySum);
+      const grid = document.createElement("div");
+      grid.className = "clip-evidence";
+      const scoreWord = (n) => (n >= 70 ? "strong" : n >= 50 ? "fair" : "weak");
+      const rows = [
+        ["ENTERTAINMENT", `${pick.score ?? "?"}/100 · ${scoreWord(Number(pick.score))}`, "score"],
+        ["WHY IT WAS PICKED", pick.why || entry.pick?.why || "not explained", ""],
+        ["WINDOW", `${clock(entry.suggested?.start ?? pick.start)} → ${clock(entry.suggested?.end ?? pick.end)} suggested · ${clock(pick.start)} → ${clock(pick.end)} cut`, ""],
+        ["AUDIO EVENTS", (entry.evidence || []).length
+          ? entry.evidence.map((e) => `${e.type.replace(/_/g, " ")} ${e.start}-${e.end}s (${Math.round((e.confidence || 0) * 100)}%)`).join("\n")
+          : "none detected inside this clip", ""],
+        ["FULL VALIDATION", entry.pick?.passTwo === "accepted" ? "yes — second read accepted it" : "no — accepted on the first pass only", "warn"],
+        ["CAPTIONS", entry.captionSource === "word" ? "word-accurate timing" : entry.captionSource === "segment" ? "approximate — sentence timing only" : "none", entry.captionSource === "word" ? "" : "warn"],
+      ];
+      const comp = entry.components || {};
+      const parts = ["humor", "unexpected", "reaction", "entertainment", "context", "replay", "hook"]
+        .filter((k) => Number.isFinite(Number(comp[k])))
+        .map((k) => `${k} ${comp[k]}`);
+      if (parts.length) rows.splice(1, 0, ["RUBRIC", parts.join(" · "), ""]);
+      for (const [label, value, tone] of rows) {
+        const cell = document.createElement("div");
+        cell.className = `clip-evidence-row${tone ? ` ${tone}` : ""}`;
+        const key = document.createElement("span");
+        key.className = "clip-evidence-key";
+        key.textContent = label;
+        const val = document.createElement("span");
+        val.className = "clip-evidence-val";
+        val.textContent = value;
+        cell.append(key, val);
+        grid.appendChild(cell);
+      }
+      whyBox.appendChild(grid);
+      body.appendChild(whyBox);
+
       card.appendChild(body);
       box.appendChild(card);
     }
+
+    // Per-video report: what ran, what degraded, and why anything was skipped.
+    const reports = [];
+    for (const entry of entries) if (entry.report && !reports.includes(entry.report)) reports.push(entry.report);
+    appendReport(box, reports);
     if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  /**
+   * "DEGRADED THIS RUN": everything the pipeline could not do, said plainly.
+   *
+   * Shared by the success and the nothing-postable paths, because a run with no
+   * clips needs this explanation more than a run that worked.
+   */
+  function appendReport(box, reports) {
+    for (const report of reports || []) {
+      if (!report) continue;
+      const lines = [];
+      if (report.degraded?.length) lines.push(...report.degraded);
+      if (report.audio && report.audio.ok === false && report.audio.reason) lines.push(`no acoustic analysis: ${report.audio.reason}`);
+      // A silent file already explains itself above. "speech reader unavailable:
+      // none" is not a cause, it is the absence of one - `granularity` reads
+      // "none" precisely because there was no audio to transcribe - so saying it
+      // adds a second, vaguer line about the same problem.
+      const audioDead = report.audio && report.audio.ok === false;
+      if (report.stt && report.stt.ok === false && !audioDead
+        && !report.degraded?.some((d) => /speech|hear/i.test(d))) {
+        const why = report.stt.reason
+          || (report.stt.granularity && report.stt.granularity !== "none" ? report.stt.granularity : "");
+        if (why) lines.push(`speech reader unavailable: ${why}`);
+      }
+      if (!report.ocr?.ok && report.ocr?.reason && report.ocr.reason !== "no readable on-screen text") {
+        lines.push(`on-screen text unavailable: ${report.ocr.reason}`);
+      }
+      const unique = [...new Set(lines)];
+      if (!unique.length) continue;
+      const warn = document.createElement("div");
+      warn.className = "clip-report";
+      const head = document.createElement("strong");
+      head.textContent = "DEGRADED THIS RUN";
+      warn.appendChild(head);
+      const list = document.createElement("ul");
+      for (const line of unique) {
+        const li = document.createElement("li");
+        li.textContent = line;
+        list.appendChild(li);
+      }
+      warn.appendChild(list);
+      box.appendChild(warn);
+    }
   }
 
   /* ------------------------------------------------------------ open/close */
