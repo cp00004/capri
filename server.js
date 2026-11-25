@@ -1190,7 +1190,8 @@ async function shortsCompletion(messages, temperature) {
     try {
       const out = await collectDevCompletion({ messages: list, tools: undefined, temperature });
       if (plan.keep === total && !firstErr) return out;
-      const why = String(firstErr?.message || "the relay refused the request").slice(0, 160);
+      // Strip a trailing full stop so the note does not read "...choom..".
+      const why = String(firstErr?.message || "the relay refused the request").replace(/[.\s]+$/, "").slice(0, 160);
       return {
         ...out,
         vision: plan.keep > 0
