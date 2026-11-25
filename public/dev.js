@@ -1868,14 +1868,6 @@
       planned.push({ ...pick, start: bounds.start, end: bounds.end });
     }
 
-    // Dropping overlaps must never empty the run: the first pick is the highest
-    // scored, so if anything survives it is that one.
-    if (!planned.length) planned.push({
-      ...picks[0],
-      start: CM().refine({ start: picks[0].start, end: picks[0].end, words: read.words, pauses: read.pauses, duration: info.duration, minClip: CLIP.min, maxClip: CLIP.max }).start,
-      end: CM().refine({ start: picks[0].start, end: picks[0].end, words: read.words, pauses: read.pauses, duration: info.duration, minClip: CLIP.min, maxClip: CLIP.max }).end,
-    });
-
     for (let i = 0; i < planned.length; i += 1) {
       const pick = planned[i];
       const start = pick.start;
