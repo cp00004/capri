@@ -200,8 +200,17 @@
 
     const pauseA = snapToSilence(a, pauses, 0.5, "before");
     a = pauseA !== null ? pauseA : snapStart(a, words);
+
+    // The end has to close a thought, not just a word. Snapping to the nearest
+    // pause looks right and is wrong: speakers breathe mid-sentence, so on real
+    // footage the clip ended on "it printed" and dropped "...the same page again
+    // out of pure spite", which was the punchline. So take the pause as a
+    // starting point and then run to the end of the sentence.
+    const cap = total ? Math.min(total, a + maxClip) : a + maxClip;
     const pauseB = snapToSilence(b, pauses, 0.7, "after");
     b = pauseB !== null ? Math.max(b, pauseB) : snapEnd(b, words);
+    if (b - a < minClip) b = a + minClip;
+    b = finishSentence(b, words, cap);
 
     // Word snapping can invert a very short clip; grow it, then clamp.
     if (b - a < minClip) b = a + minClip;
@@ -364,7 +373,7 @@
   }
 
   const api = {
-    snapStart, snapEnd, snapToSilence, refine,
+    snapStart, snapEnd, snapToSilence, refine, finishSentence,
     pausesFromContour, cuesFromWords, cuesFromSegments, buildCues,
     wrapCue, settleCues, eventsWithin,
   };
