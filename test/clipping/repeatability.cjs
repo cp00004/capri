@@ -28,6 +28,10 @@ async function post(route, body) {
 }
 
 const key = (p) => `${Math.round(Number(p.start))}-${Math.round(Number(p.end))}`;
+// What actually ships is the refined boundary, so stability has to be measured
+// there. Two proposals that differ by a second can refine to the same file: the
+// model picks roughly where to look, and word-and-pause snapping decides the cut.
+const math = require("./load-clip-math.cjs").loadClipMath();
 
 (async () => {
   const info = await media.probe(video);
@@ -58,6 +62,7 @@ const key = (p) => `${Math.round(Number(p.start))}-${Math.round(Number(p.end))}`
 
   const oldRuns = [];
   const newRuns = [];
+  const shippedRuns = [];
 
   for (let run = 1; run <= RUNS; run += 1) {
     const old = await post("/api/dev/shorts", {
@@ -96,10 +101,20 @@ const key = (p) => `${Math.round(Number(p.start))}-${Math.round(Number(p.end))}`
     const rank = await post("/api/dev/clip/rank", { clips: reviewed, minClip: 6, maxClip: 75, max: 6 });
     const picks = (rank.picks || []).map(key).join(",") || "(none)";
     newRuns.push(picks);
-    console.log(`run ${run}  old: ${oldRuns[run - 1].padEnd(24)} new: ${picks}`);
+    // The same picks after boundary refinement: this is the file the user gets.
+    const shipped = (rank.picks || []).map((p) => {
+      const r = math.refine({
+        start: p.start, end: p.end, words, pauses: audio.pauses || [], duration: info.duration,
+        minClip: 6, maxClip: 75,
+      });
+      return key(r);
+    }).join(",") || "(none)";
+    shippedRuns.push(shipped);
+    console.log(`run ${run}  old: ${oldRuns[run - 1].padEnd(24)} new: ${picks.padEnd(20)} shipped: ${shipped}`);
   }
 
   const agree = (list) => new Set(list).size;
   console.log(`\nold path distinct answers: ${agree(oldRuns)}/${RUNS}`);
   console.log(`new path distinct answers: ${agree(newRuns)}/${RUNS}`);
+  console.log(`new path distinct files shipped: ${agree(shippedRuns)}/${RUNS}`);
 })();
