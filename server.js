@@ -1594,10 +1594,12 @@ async function handleClipReview(req, res) {
   const transcript = body.transcript || {};
   const events = Array.isArray(body.events) ? body.events.slice(0, 4000) : [];
   const ocr = Array.isArray(body.ocr) ? body.ocr.slice(0, 200) : [];
-  // Two frames: the review only needs to confirm that what the proposer described
-  // is actually on screen, and two stills is what the measured budget allows for
-  // the pass that decides whether a clip ships.
-  const frames = (Array.isArray(body.frames) ? body.frames : []).slice(0, 2);
+  // One frame. Measured on this machine: a 720px still costs ~770 input tokens and
+  // the free relay's budget is 7000 per minute for the whole account. A run makes
+  // four framed calls - two screening, two review - so one frame each is what
+  // actually fits. Asking for more does not get a better answer, it gets a 429 and
+  // a text-only fallback, which is strictly worse than one real picture.
+  const frames = (Array.isArray(body.frames) ? body.frames : []).slice(0, 1);
   const limits = {
     minClip: Math.max(3, Number(body.minClip) || 6),
     maxClip: Math.max(10, Number(body.maxClip) || 75),

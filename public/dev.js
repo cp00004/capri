@@ -1633,12 +1633,13 @@
   /**
    * Frames evenly spread through a reviewed clip, for the strict second read.
    *
-   * Two, because this is the pass that decides what ships and it is worth the
-   * token budget: two points inside a clip catch one that is black, static, or
-   * showing the wrong window entirely. The screening pass gets one, since its job
-   * is only to find where to look.
+   * One. The whole account gets 7000 vision tokens a minute and a still costs
+   * about 770, so a run that frames two screening windows and two reviews can
+   * exactly afford one picture per call. The frame still catches a clip that is
+   * black, static, or showing the wrong window; a second one only bought a 429
+   * and a transcript-only read.
    */
-  function reviewTimes(start, end, count = 2) {
+  function reviewTimes(start, end, count = 1) {
     const span = Math.max(0.5, end - start);
     const out = [];
     for (let i = 0; i < count; i += 1) {
