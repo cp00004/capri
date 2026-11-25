@@ -1,4 +1,6 @@
 // Verify the PUBLISHED assets match the local builds, by downloading and hashing them.
+// Run from the repo root regardless of where this file lives.
+process.chdir(require("path").join(__dirname, "..", ".."));
 const fs = require("fs");
 const crypto = require("crypto");
 const path = require("path");

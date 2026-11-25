@@ -1,4 +1,6 @@
 // Sync the built web assets into the repo root, which is what GitHub Pages serves.
+// Run from the repo root regardless of where this file lives.
+process.chdir(require("path").join(__dirname, "..", ".."));
 const fs = require("fs");
 const path = require("path");
 

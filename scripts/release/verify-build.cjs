@@ -1,4 +1,6 @@
 // Verify what actually shipped inside the APK and the packaged exe.
+// Run from the repo root regardless of where this file lives.
+process.chdir(require("path").join(__dirname, "..", ".."));
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");
@@ -75,7 +77,7 @@ if (exeDir && fs.existsSync(exeDir)) {
 }
 
 // ---- android synced assets ----
-const androidPub = path.join(__dirname, "android", "app", "src", "main", "assets", "public");
+const androidPub = path.join(process.cwd(), "android", "app", "src", "main", "assets", "public");
 if (fs.existsSync(androidPub)) {
   for (const f of ["index.html", "version.json"]) {
     const p = path.join(androidPub, f);

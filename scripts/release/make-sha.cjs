@@ -1,5 +1,7 @@
 // Regenerate the checksum files that ship with the build.
 // public/Capri-v4.sha256 claims the installer's hash, so it must match what we upload.
+// Run from the repo root regardless of where this file lives.
+process.chdir(require("path").join(__dirname, "..", ".."));
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");

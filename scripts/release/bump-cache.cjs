@@ -1,4 +1,6 @@
 // Byte-safe cache-bust bump: only the ASCII "?v=5.6.0" tokens change.
+// Run from the repo root regardless of where this file lives.
+process.chdir(require("path").join(__dirname, "..", ".."));
 const fs = require("fs");
 
 const file = process.argv[2];

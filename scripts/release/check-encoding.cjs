@@ -1,4 +1,6 @@
 // Scan every source file I touched for double-encoded (mojibake) text.
+// Run from the repo root regardless of where this file lives.
+process.chdir(require("path").join(__dirname, "..", ".."));
 const { execFileSync } = require("child_process");
 const fs = require("fs");
 

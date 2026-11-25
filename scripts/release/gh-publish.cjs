@@ -1,5 +1,7 @@
 // Publish 5.7.0 to the capri-v4 release: replace the build assets, then (separately) the feed.
 // Assets go up before the feed is touched, so no client is told about a version whose files are missing.
+// Run from the repo root regardless of where this file lives.
+process.chdir(require("path").join(__dirname, "..", ".."));
 const fs = require("fs");
 const path = require("path");
 const { execFileSync } = require("child_process");

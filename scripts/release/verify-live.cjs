@@ -1,4 +1,6 @@
 // End-to-end check of the public update chain, as a real client sees it.
+// Run from the repo root regardless of where this file lives.
+process.chdir(require("path").join(__dirname, "..", ".."));
 const crypto = require("crypto");
 
 const FEED = "https://cp00004.github.io/capri/version.json";

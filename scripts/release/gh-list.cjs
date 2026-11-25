@@ -1,4 +1,6 @@
 // List the assets on the capri-v4 release so replacements can be targeted precisely.
+// Run from the repo root regardless of where this file lives.
+process.chdir(require("path").join(__dirname, "..", ".."));
 const { execFileSync } = require("child_process");
 
 function token() {

@@ -1,4 +1,6 @@
 // Point the feed at the freshly built APK so the native updater's hash check passes.
+// Run from the repo root regardless of where this file lives.
+process.chdir(require("path").join(__dirname, "..", ".."));
 const fs = require("fs");
 const crypto = require("crypto");
 
