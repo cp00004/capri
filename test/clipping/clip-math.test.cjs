@@ -66,6 +66,28 @@ test("snapEnd still finishes a word that follows a normal mid-sentence gap", () 
   assert.ok(at >= 1.0, `end ${at}s truncated the word`);
 });
 
+test("a one-word punchline is merged into the sentence it ends", () => {
+  // Real fixture timings: "spite." is a lone 0.76s word, and used to get its own
+  // card because the merge rule had an arbitrary four-character cap.
+  const line = words([
+    ["and", 26.40, 26.64], ["it", 26.84, 26.96], ["printed", 26.96, 27.22], ["the", 27.22, 27.46],
+    ["same", 27.46, 27.68], ["page", 27.68, 28.02], ["again", 28.02, 28.30], ["out", 28.30, 28.44],
+    ["of", 28.44, 28.58], ["pure", 28.58, 28.84], ["spite.", 29.00, 29.76],
+  ]);
+  const cues = math.cuesFromWords(line, 26, 30);
+  const alone = cues.filter((c) => c.text === "spite.");
+  assert.equal(alone.length, 0, `the punchline still sits on its own card: ${JSON.stringify(cues.map((c) => c.text))}`);
+  assert.ok(cues.some((c) => /spite\.$/.test(c.text)), `no cue ends on the punchline: ${JSON.stringify(cues.map((c) => c.text))}`);
+});
+
+test("a deliberate one-word line after a pause keeps its own card", () => {
+  // "Yes!" three seconds after the last word is a beat of its own, not a tail.
+  const line = words([["finished", 0, 0.6], ["Yes!", 3.6, 4.0]]);
+  const cues = math.cuesFromWords(line, 0, 5);
+  assert.equal(cues.length, 2, `the pause was ignored: ${JSON.stringify(cues.map((c) => c.text))}`);
+  assert.equal(cues[1].text, "Yes!");
+});
+
 test("snapStart leaves a boundary that already sits between words alone", () => {
   // 1.02s is a 50ms gap between "in" and "and": nothing to fix.
   const at = math.snapStart(1.02, SPEECH);
