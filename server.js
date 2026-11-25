@@ -1476,10 +1476,14 @@ async function handleClipPropose(req, res) {
 
   if (!windows.length) return devToolError(res, 400, "No candidate windows were proposed for that video.");
 
+  // Two frames, not five. A free relay's vision budget is measured in input
+  // tokens per minute, and one 720px still costs about two thousand of them
+  // against a seven-thousand ceiling - five frames per window could never be
+  // sent, so asking for them only guaranteed a failure.
   const framesFor = (w) => (Array.isArray(body.frames) ? body.frames : []).filter((f) => {
     const t = Number(f?.t);
     return Number.isFinite(t) && t >= w.start - 3 && t <= w.end + 3;
-  }).slice(0, 5);
+  }).slice(0, 2);
 
   const runWindow = async (w) => {
     const lines = analysis.transcriptBlock(transcript, w.start, w.end);
