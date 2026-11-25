@@ -1522,26 +1522,6 @@
     return `${h}:${m}:${s},${r}`;
   }
 
-  function buildCues(segments, start, end) {
-    const wrapped = segments.map((s) => ({ ...s })).sort((a, b) => a.start - b.start);
-    const cues = [];
-    for (const seg of wrapped) {
-      const from = Math.max(seg.start, start);
-      const to = Math.min(seg.end, end);
-      if (to - from < 0.4) continue;
-      const sentences = String(seg.text).split(/(?<=[.!?])\s+/).filter(Boolean);
-      if (!sentences.length) continue;
-      const total = sentences.reduce((n, s) => n + s.length, 0) || 1;
-      let at = from;
-      for (const sentence of sentences) {
-        const span = ((to - from) * sentence.length) / total;
-        cues.push({ start: at - start, end: Math.min(to, at + span) - start, text: sentence.trim() });
-        at += span;
-      }
-    }
-    return cues;
-  }
-
   /**
    * Captions for one clip. Word timing when the read has it, segment timing
    * otherwise, and the caller is told which so the UI can be honest.
