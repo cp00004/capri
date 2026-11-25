@@ -178,6 +178,22 @@
     }
     if (cur) cues.push(cur);
 
+    // A cue of one short word looks broken on screen ("me." alone on its own
+    // card). Pull it back into the previous cue when that still fits, unless the
+    // single word is the whole sentence.
+    for (let i = cues.length - 1; i > 0; i -= 1) {
+      const cue = cues[i];
+      const prev = cues[i - 1];
+      if (cue.text.split(" ").length > 1) continue;
+      if (cue.text.length > 4) continue;
+      const joined = `${prev.text} ${cue.text}`;
+      if (joined.length > maxChars + 10) continue;
+      if (joined.length > maxChars && !/[,.!?]$/.test(cue.text)) continue;
+      prev.text = joined;
+      prev.end = cue.end;
+      cues.splice(i, 1);
+    }
+
     return cues
       .map((c) => ({
         start: +(Math.max(from, c.start) - from).toFixed(2),

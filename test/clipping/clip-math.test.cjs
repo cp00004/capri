@@ -147,6 +147,16 @@ test("cues are clip-relative, so they start at zero", () => {
   assert.match(cues[0].text, /^I could not believe it$/);
 });
 
+test("a short trailing word joins its sentence instead of sitting alone", () => {
+  const tail = words([
+    ["started", 0, 0.4], ["flashing", 0.4, 0.8], ["an", 0.8, 1.0], ["angry", 1.0, 1.3],
+    ["light", 1.3, 1.6], ["at", 1.6, 1.8], ["me.", 1.8, 2.2],
+  ]);
+  const cues = math.cuesFromWords(tail, 0, 3);
+  assert.equal(cues.length, 1, `orphan cue left in: ${JSON.stringify(cues.map((c) => c.text))}`);
+  assert.match(cues[0].text, /light at me\.$/);
+});
+
 test("cues never extend past the clip end", () => {
   const cues = math.cuesFromWords(SPEECH, 0, 4.2);
   for (const c of cues) assert.ok(c.end <= 4.21, `cue runs to ${c.end}s past the 4.2s clip`);

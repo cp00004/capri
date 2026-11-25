@@ -204,7 +204,11 @@ async function main() {
     fs.writeFileSync(`${base}.srt`, buildSrt(cues));
     console.log(`    ${clock(bounds.start)}-${clock(bounds.end)} ${(bounds.end - bounds.start).toFixed(1)}s cues=${cues.length} source=${built.source}`);
     for (const c of cues) console.log(`        ${c.start.toFixed(2)}-${c.end.toFixed(2)} ${c.text}`);
-    const cut = await media.cutClip({ video, start: bounds.start, duration: bounds.end - bounds.start, out: `${base}.mp4`, captions: `${base}.ass` });
+    const cut = await media.cutClip({
+      video, start: bounds.start, duration: bounds.end - bounds.start,
+      out: `${base}.mp4`, captions: `${base}.ass`,
+      width: info.width, height: info.height,
+    });
     console.log(`    cut ${path.basename(cut.path)} ${(cut.bytes / 1024).toFixed(0)}KB vertical=${cut.vertical}`);
   }
   console.log(`\nRESULT     ${picks.length} clip(s) in ${outDir}`);
