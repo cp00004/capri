@@ -49,6 +49,47 @@
     return `rgb(${c[0]},${c[1]},${c[2]})`;
   }
 
+  function hexToHsl(hex) {
+    const [r0, g0, b0] = hexToRgb(hex).map((v) => v / 255);
+    const max = Math.max(r0, g0, b0);
+    const min = Math.min(r0, g0, b0);
+    const l = (max + min) / 2;
+    if (max === min) return [0, 0, l];
+    const d = max - min;
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    let h;
+    if (max === r0) h = ((g0 - b0) / d + (g0 < b0 ? 6 : 0)) / 6;
+    else if (max === g0) h = ((b0 - r0) / d + 2) / 6;
+    else h = ((r0 - g0) / d + 4) / 6;
+    return [h, s, l];
+  }
+
+  function hslToHex(h, s, l) {
+    h = ((h % 1) + 1) % 1;
+    s = clamp(s, 0, 1);
+    l = clamp(l, 0, 1);
+    if (s === 0) {
+      const v = Math.round(l * 255).toString(16).padStart(2, "0");
+      return `#${v}${v}${v}`;
+    }
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const hue = (t) => {
+      t = ((t % 1) + 1) % 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    return "#" + [hue(h + 1 / 3), hue(h), hue(h - 1 / 3)]
+      .map((v) => Math.round(v * 255).toString(16).padStart(2, "0")).join("");
+  }
+
+  function shiftHue(hex, deg, satMul, litMul) {
+    const [h, s, l] = hexToHsl(hex);
+    return hslToHex(h + (deg || 0) / 360, s * (satMul ?? 1), l * (litMul ?? 1));
+  }
+
   function rrect(ctx, x, y, w, h, r) {
     const k = Math.min(r, Math.abs(w) / 2, Math.abs(h) / 2);
     ctx.beginPath();
@@ -72,6 +113,22 @@
 
   function themeFor(type) {
     return THEMES[type] || THEMES.whatif;
+  }
+
+  // each film shifts its format's palette, so no two stories share a look
+  function themeForStory(script) {
+    const base = themeFor(script?.type);
+    const seed = (Number(script?.seed) >>> 0) || hash(String(script?.title || "story"));
+    const r = rng(seed + 11);
+    const hue = (r() * 2 - 1) * 26;
+    return {
+      ...base,
+      accent: shiftHue(base.accent, hue, 0.9 + r() * 0.24, 0.94 + r() * 0.12),
+      hot: shiftHue(base.hot, hue * 0.55, 0.94 + r() * 0.18, 1),
+      cool: shiftHue(base.cool, hue * 0.4, 0.88 + r() * 0.24, 0.94 + r() * 0.12),
+      bg0: shiftHue(base.bg0, hue * 0.2, 1, 0.9 + r() * 0.22),
+      bg1: shiftHue(base.bg1, hue * 0.25, 1, 0.9 + r() * 0.24),
+    };
   }
 
   /* ------------------------------------------------------------ camera */
@@ -502,6 +559,144 @@
           ctx.ellipse(x, y, W * (0.14 + rand() * 0.1), H * 0.03, 0, 0, Math.PI * 2);
           ctx.fill();
         }
+      };
+    } else if (kind === "tunnel") {
+      env.horizon = 0.6;
+      env.draw = (ctx, W, H, th, t, seed) => {
+        sky(ctx, W, H, th, H, "#0b1118");
+        const vx = W * 0.5 + Math.sin(t * 0.2) * W * 0.02;
+        const vy = H * 0.52;
+        for (let i = 0; i < 9; i += 1) {
+          const q = ((i / 9) + (t * 0.03) % 0.11) % 1;
+          const k = 0.18 + q * 1.15;
+          ctx.strokeStyle = rgba(th.cool, 0.5 * (1 - q) + 0.05);
+          ctx.lineWidth = Math.max(1, W * 0.012 * (1 - q));
+          ctx.beginPath();
+          ctx.ellipse(vx, vy, W * 0.42 * k, H * 0.34 * k, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        for (let i = 0; i < 5; i += 1) {
+          const q = ((i / 5) + (t * 0.05) % 0.2) % 1;
+          const y = vy - H * 0.3 * (0.2 + q);
+          ctx.fillStyle = rgba(th.hot, 0.45 * (1 - q) + 0.1);
+          ctx.fillRect(vx - W * 0.05, y, W * 0.1, Math.max(2, H * 0.006 * (1 - q)));
+        }
+        const glow = ctx.createRadialGradient(vx, vy, H * 0.02, vx, vy, H * 0.16);
+        glow.addColorStop(0, rgba(th.hot, 0.5));
+        glow.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(vx, vy, H * 0.16, 0, Math.PI * 2);
+        ctx.fill();
+        const road = ctx.createLinearGradient(0, vy, 0, H);
+        road.addColorStop(0, "rgba(10,14,20,0)");
+        road.addColorStop(1, "#05080c");
+        ctx.fillStyle = road;
+        ctx.fillRect(0, vy, W, H - vy);
+      };
+    } else if (kind === "harbor") {
+      env.horizon = 0.6;
+      env.draw = (ctx, W, H, th, t, seed) => {
+        sky(ctx, W, H, th, H * env.horizon, "#0e1c2c");
+        const rand = rng(seed + 23);
+        for (let i = 0; i < 4; i += 1) {
+          const bx = W * (0.06 + i * 0.26) + rand() * W * 0.02;
+          for (let k = 0; k < 3; k += 1) {
+            const ch = H * 0.06;
+            ctx.fillStyle = mix(th.bg1, k % 2 ? th.accent : th.cool, 0.14 + rand() * 0.16);
+            ctx.fillRect(bx, H * env.horizon - ch * (k + 1), W * 0.16, ch * 0.94);
+          }
+        }
+        ctx.strokeStyle = rgba(th.cool, 0.6);
+        ctx.lineWidth = W * 0.006;
+        ctx.beginPath();
+        ctx.moveTo(W * 0.88, H * env.horizon);
+        ctx.lineTo(W * 0.88, H * 0.18);
+        ctx.lineTo(W * 0.6, H * 0.18);
+        ctx.stroke();
+        const water = ctx.createLinearGradient(0, H * env.horizon, 0, H);
+        water.addColorStop(0, mix(th.bg1, th.cool, 0.4));
+        water.addColorStop(1, "#03080d");
+        ctx.fillStyle = water;
+        ctx.fillRect(0, H * env.horizon, W, H);
+        ctx.strokeStyle = rgba(th.hot, 0.18);
+        for (let i = 0; i < 6; i += 1) {
+          ctx.lineWidth = 1.5 + i * 0.3;
+          ctx.beginPath();
+          const y = H * (env.horizon + 0.05 + i * 0.06);
+          for (let x = 0; x <= W; x += W / 20) {
+            const yy = y + Math.sin((x / W) * 8 + t * (1 + i * 0.15) + i) * (2 + i);
+            if (x === 0) ctx.moveTo(x, yy); else ctx.lineTo(x, yy);
+          }
+          ctx.stroke();
+        }
+      };
+    } else if (kind === "arena") {
+      env.horizon = 0.62;
+      env.draw = (ctx, W, H, th, t, seed) => {
+        sky(ctx, W, H, th, H * env.horizon, "#0a0f1a");
+        for (let row = 0; row < 5; row += 1) {
+          ctx.fillStyle = mix(th.bg1, "#05070b", 0.35 + row * 0.1);
+          ctx.beginPath();
+          ctx.ellipse(W * 0.5, H * (env.horizon - 0.02 - row * 0.05), W * (0.8 - row * 0.12), H * 0.06, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        const rand = rng(seed + 31);
+        for (let i = 0; i < 90; i += 1) {
+          const a = rand() * Math.PI * 2;
+          const rr = 0.35 + rand() * 0.5;
+          const x = W * 0.5 + Math.cos(a) * W * rr;
+          const y = H * (env.horizon - 0.04) - Math.abs(Math.sin(a)) * H * 0.12 + rand() * H * 0.05;
+          ctx.fillStyle = `rgba(${180 + rand() * 60},${160 + rand() * 60},${140 + rand() * 60},${0.25 + rand() * 0.5})`;
+          ctx.fillRect(x, y, W * 0.006, H * 0.008);
+        }
+        for (let i = 0; i < 3; i += 1) {
+          const x = W * (0.2 + i * 0.3);
+          const g = ctx.createLinearGradient(x, H * 0.02, W * 0.5, H * 0.8);
+          g.addColorStop(0, rgba(th.hot, 0.14));
+          g.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.fillStyle = g;
+          ctx.beginPath();
+          ctx.moveTo(x - W * 0.02, H * 0.02);
+          ctx.lineTo(x + W * 0.02, H * 0.02);
+          ctx.lineTo(W * 0.62, H * 0.9);
+          ctx.lineTo(W * 0.38, H * 0.9);
+          ctx.closePath();
+          ctx.fill();
+        }
+        const floor = ctx.createLinearGradient(0, H * env.horizon, 0, H);
+        floor.addColorStop(0, "#12161e");
+        floor.addColorStop(1, "#05070a");
+        ctx.fillStyle = floor;
+        ctx.fillRect(0, H * env.horizon, W, H);
+      };
+    } else if (kind === "server") {
+      env.horizon = 0.66;
+      env.draw = (ctx, W, H, th, t, seed) => {
+        sky(ctx, W, H, th, H * env.horizon, "#071018");
+        const rand = rng(seed + 37);
+        for (let i = 0; i < 4; i += 1) {
+          const x = W * (0.06 + i * 0.24);
+          const rw = W * 0.16;
+          const rh = H * 0.46;
+          ctx.fillStyle = "#0a0f16";
+          ctx.fillRect(x, H * env.horizon - rh, rw, rh);
+          ctx.strokeStyle = rgba(th.cool, 0.35);
+          ctx.lineWidth = 1.5;
+          ctx.strokeRect(x, H * env.horizon - rh, rw, rh);
+          for (let k = 0; k < 9; k += 1) {
+            const on = Math.sin(t * 2.2 + i + k * 1.7) > -0.4;
+            const y = H * env.horizon - rh + rh * 0.07 + k * rh * 0.1;
+            ctx.fillStyle = on ? rgba(th.hot, 0.8) : rgba(th.accent, 0.22);
+            ctx.fillRect(x + rw * 0.12, y, rw * 0.08, rh * 0.028);
+            ctx.strokeStyle = rgba(th.cool, 0.25);
+            ctx.beginPath();
+            ctx.moveTo(x + rw * 0.26, y + rh * 0.012);
+            ctx.lineTo(x + rw * (0.55 + rand() * 0.3), y + rh * 0.012);
+            ctx.stroke();
+          }
+        }
+        floorPlane(ctx, W, H, th, H * env.horizon, t, "#070b10");
       };
     }
     return env;
@@ -1033,7 +1228,7 @@
   function drawFrame(ctx, opt) {
     const { W, H, script, t, seconds } = opt;
     const scenes = script?.scenes?.length ? script.scenes : [{ narration: "This is how it works.", visual: "room", symbol: "sphere", focus: "START", caption: "START" }];
-    const th = themeFor(script?.type);
+    const th = themeForStory(script);
     const dur = Math.max(1, Number(seconds) || 20);
     const sceneDur = dur / scenes.length;
     const idx = clamp(Math.floor(t / sceneDur), 0, scenes.length - 1);
@@ -1052,11 +1247,15 @@
     env.draw(ctx, W, H, th, t, seed + idx);
 
     const ground = H * (env.horizon + 0.14);
-    const objX = W * (0.5 + Math.sin(idx * 1.7 + t * 0.15) * 0.05);
-    const objY = H * 0.46;
-    const objS = Math.min(W, H) * 0.2;
+    // each shot gets its own framing from the story seed, not the same centred diagram
+    const c = rng(seed * 31 + idx * 17);
+    const r0 = c();
+    const side = r0 < 0.32 ? -1 : r0 < 0.58 ? 1 : 0;
+    const objX = W * (0.5 + side * (0.15 + c() * 0.12)) + Math.sin(idx * 1.7 + t * 0.15) * W * 0.02;
+    const objY = H * (0.42 + c() * 0.08);
+    const objS = Math.min(W, H) * (0.17 + c() * 0.06);
 
-    if (idx === 0 || idx % 3 === 0) lightCone(ctx, W, H, objX, th);
+    if (idx === 0 || (side === 0 && c() < 0.55)) lightCone(ctx, W, H, objX, th);
     contactShadow(ctx, objX, ground, objS, th);
     object3D(ctx, scene.symbol || "sphere", objX, objY - Math.sin(t * 0.8) * objS * 0.04, objS, t, th);
 
@@ -1137,39 +1336,50 @@
     grain(ctx, W, H, Math.floor(t * 30), 0.05);
     vignette(ctx, W, H, 1);
 
-    // outro
+    // end card: the story's own title, no forced sequel
     const outroLen = 1.8;
     if (t > dur - outroLen) {
       const p = easeOutCubic(clamp((t - (dur - outroLen)) / 0.4, 0, 1));
+      const closes = ["THAT'S THE STORY", "NOW YOU KNOW", "CASE CLOSED", "END OF THE LINE", "THAT'S HOW IT IS"];
+      const close = closes[((script?.seed >>> 0) || 0) % closes.length];
       ctx.save();
-      ctx.fillStyle = `rgba(2,4,8,${0.6 * p})`;
+      ctx.fillStyle = `rgba(2,4,8,${0.66 * p})`;
       ctx.fillRect(0, 0, W, H);
       ctx.globalAlpha = p;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = th.accent;
       ctx.font = `700 ${Math.max(12, W * 0.02)}px ${MONO}`;
-      ctx.fillText(th.label.split("").join(" "), W / 2, H * 0.42);
-      ctx.font = `800 ${W * (H > W ? 0.085 : 0.06)}px ${FONT}`;
+      ctx.fillText(th.label.split("").join(" "), W / 2, H * 0.4);
+      const title = String(script?.title || "This Story").toUpperCase().slice(0, 40);
+      let size = W * (H > W ? 0.085 : 0.06);
+      ctx.font = `800 ${size}px ${FONT}`;
+      while (ctx.measureText(title).width > W * 0.84 && size > W * 0.035) {
+        size -= 2;
+        ctx.font = `800 ${size}px ${FONT}`;
+      }
       ctx.fillStyle = "#ffffff";
-      ctx.fillText("PART 2", W / 2, H * 0.49);
+      ctx.fillText(title, W / 2, H * 0.49);
       ctx.font = `600 ${W * (H > W ? 0.036 : 0.028)}px ${FONT}`;
       ctx.fillStyle = "rgba(255,255,255,0.8)";
-      ctx.fillText("FOLLOW FOR THE REST", W / 2, H * 0.55);
+      ctx.fillText(close, W / 2, H * 0.56);
       ctx.restore();
     }
   }
 
   /* ------------------------------------------------------------ score */
 
-  function makeScore(seconds, type) {
+  function makeScore(seconds, type, seed) {
     const rate = 44100;
     const dur = Math.max(2, Number(seconds) || 20);
     const total = Math.floor(dur * rate);
     const out = new Float32Array(total);
     const th = themeFor(type);
-    const rand = rng(hash(th.label));
-    const low = type === "truestory" ? 65.4 : type === "how" ? 73.4 : 55;
+    const s = (Number(seed) || 0) >>> 0;
+    const rand = rng(hash(th.label) + s);
+    const baseNote = type === "truestory" ? 65.4 : type === "how" ? 73.4 : 55;
+    const low = baseNote * (1 + (((s >>> 3) % 7) - 3) * 0.012);
+    const step = 1.05 + (((s >>> 6) % 4) - 1) * 0.045;
     for (let i = 0; i < total; i += 1) {
       const t = i / rate;
       const swell = 0.5 + 0.5 * Math.sin(t * 0.35);
@@ -1186,9 +1396,9 @@
         out[i] += pat(t);
       }
     };
-    for (let at = 0.9; at < dur - 0.5; at += 1.05) {
+    for (let at = 0.9; at < dur - 0.5; at += step) {
       add(at, (t) => Math.sin(2 * Math.PI * (70 * Math.exp(-t * 20) + 38) * t) * 0.34 * Math.exp(-t * 16));
-      add(at + 0.52, (t) => (rand() * 2 - 1) * 0.035 * Math.exp(-t * 90));
+      add(at + step * 0.5, (t) => (rand() * 2 - 1) * 0.035 * Math.exp(-t * 90));
     }
     add(0.05, (t) => Math.sin(2 * Math.PI * 220 * t) * 0.1 * Math.exp(-t * 1.6));
     add(0.05, (t) => Math.sin(2 * Math.PI * 330.5 * t) * 0.06 * Math.exp(-t * 1.8));
@@ -1223,6 +1433,154 @@
       view.setInt16(44 + i * 2, clamp(out[i], -1, 1) * 32767, true);
     }
     return { wavBuf: data, seconds: dur };
+  }
+
+  /* ------------------------------------------------------------ voice-over */
+
+  function wavToFloat(wav) {
+    const bytes = wav instanceof Uint8Array ? wav : new Uint8Array(wav);
+    if (bytes.length < 44) throw new Error("empty wav");
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let at = 12;
+    let channels = 1;
+    let bits = 16;
+    let rate = 44100;
+    let dataAt = 0;
+    let dataLen = 0;
+    while (at + 8 <= bytes.length) {
+      const id = String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]);
+      const len = view.getUint32(at + 4, true);
+      if (id === "fmt ") {
+        channels = view.getUint16(at + 10, true) || 1;
+        rate = view.getUint32(at + 12, true) || 44100;
+        bits = view.getUint16(at + 22, true) || 16;
+      } else if (id === "data") {
+        dataAt = at + 8;
+        dataLen = Math.min(len, bytes.length - dataAt);
+        break;
+      }
+      at += 8 + len + (len % 2);
+    }
+    if (!dataAt) throw new Error("no wav data");
+    const frame = (channels * bits) / 8;
+    const n = Math.floor(dataLen / frame);
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i += 1) {
+      let v = 0;
+      for (let ch = 0; ch < channels; ch += 1) {
+        const p = dataAt + i * frame + ch * (bits / 8);
+        v += bits === 16 ? view.getInt16(p, true) / 32768 : (view.getUint8(p) - 128) / 128;
+      }
+      out[i] = v / channels;
+    }
+    return { samples: out, rate };
+  }
+
+  function writeWav(out, rate) {
+    const total = out.length;
+    const data = new Uint8Array(44 + total * 2);
+    const view = new DataView(data.buffer);
+    const str = (at, s) => { for (let i = 0; i < s.length; i += 1) view.setUint8(at + i, s.charCodeAt(i)); };
+    str(0, "RIFF");
+    view.setUint32(4, 36 + total * 2, true);
+    str(8, "WAVEfmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, rate, true);
+    view.setUint32(28, rate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    str(36, "data");
+    view.setUint32(40, total * 2, true);
+    for (let i = 0; i < total; i += 1) {
+      view.setInt16(44 + i * 2, clamp(out[i], -1, 1) * 32767, true);
+    }
+    return data;
+  }
+
+  // voices the narration through /api/tts, then lies each line over the scene
+  // it explains and ducks the score underneath
+  async function makeNarration(opt) {
+    const { scenes, seconds, music } = opt || {};
+    const list = Array.isArray(scenes) ? scenes : [];
+    const lines = list.map((s) => String(s?.narration || "").replace(/\s+/g, " ").trim()).filter(Boolean);
+    if (!lines.length) return null;
+    const dur = Math.max(2, Number(seconds) || 20);
+    const sceneDur = dur / Math.max(1, list.length);
+
+    const groups = [];
+    let cur = null;
+    for (let i = 0; i < lines.length; i += 1) {
+      const piece = lines[i];
+      if (!cur) cur = { text: "", at: i, n: 0 };
+      if (cur.n && (cur.text.length + piece.length > 860 || cur.n >= 3)) {
+        groups.push(cur);
+        cur = { text: "", at: i, n: 0 };
+      }
+      cur.text = cur.text ? `${cur.text} ${piece}` : piece;
+      cur.n += 1;
+    }
+    if (cur?.text) groups.push(cur);
+
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) throw new Error("No audio decoder on this build.");
+    const audioCtx = new AC();
+    const decoded = [];
+    try {
+      for (const g of groups) {
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: g.text, narrator: true, voice: "Charon" }),
+        });
+        const type = String(res.headers.get("content-type") || "");
+        if (!res.ok || /json|text/i.test(type)) {
+          let msg = `voice ${res.status}`;
+          try { msg = (await res.json())?.message || msg; } catch { /* keep status */ }
+          throw new Error(msg);
+        }
+        decoded.push({ buf: await audioCtx.decodeAudioData(await res.arrayBuffer()), at: g.at });
+      }
+    } finally {
+      audioCtx.close().catch(() => {});
+    }
+
+    const rate = 44100;
+    const total = Math.floor(dur * rate);
+    const out = new Float32Array(total);
+    let backing = null;
+    if (music?.wavBuf) {
+      try { backing = wavToFloat(music.wavBuf); } catch { /* score is optional */ }
+    }
+    for (let i = 0; i < total; i += 1) {
+      if (!backing) break;
+      const src = Math.min(backing.samples.length - 1, Math.floor((i / rate) * backing.rate));
+      out[i] = (backing.samples[src] || 0) * 0.28;
+    }
+
+    let cursor = 0.45;
+    for (const d of decoded) {
+      const start = Math.max(cursor, 0.45 + d.at * sceneDur + 0.1);
+      const step2 = d.buf.sampleRate / rate;
+      const len = Math.floor(d.buf.length / step2);
+      const from = Math.floor(start * rate);
+      const src = d.buf.getChannelData(0);
+      for (let k = 0; k < len; k += 1) {
+        const i = from + k;
+        if (i < 0 || i >= total) continue;
+        const v = (src[Math.min(src.length - 1, Math.floor(k * step2))] || 0) * 0.92;
+        out[i] = Math.tanh(out[i] + v);
+      }
+      cursor = start + len / rate + 0.22;
+    }
+
+    for (let i = 0; i < total; i += 1) {
+      const t = i / rate;
+      const fade = Math.min(1, t / 0.25) * Math.min(1, (dur - t) / 0.4);
+      out[i] = clamp(out[i], -1, 1) * Math.max(0, fade);
+    }
+    return { wavBuf: writeWav(out, rate), seconds: dur };
   }
 
   /* ------------------------------------------------------------ render */
@@ -1304,5 +1662,5 @@
     };
   }
 
-  window.CapriZdf = { drawFrame, renderStory, makeScore };
+  window.CapriZdf = { drawFrame, renderStory, makeScore, makeNarration };
 })();

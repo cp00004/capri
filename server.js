@@ -3165,6 +3165,187 @@ async function handleStt(req, res) {
   json(res, 502, { error: "stt_failed", message: failure || "No transcription engine answered." });
 }
 
+/* ---------------------------------------------------- word-level transcript */
+
+/**
+ * Whisper with real word timestamps.
+ *
+ * `/api/stt` above answers "what was said" for the voice loop. The clipper needs
+ * "what was said, when, word by word", which is a different response shape and
+ * a different guarantee. This endpoint never invents word timing: if the
+ * provider only supports segments, it says so in `granularity` and returns
+ * segments, and the caller is expected to behave accordingly.
+ */
+const WORD_STT_TIMEOUT = 120_000;
+
+function normalizeWords(raw, offset = 0) {
+  const out = [];
+  for (const w of Array.isArray(raw) ? raw : []) {
+    const start = Number(w?.start);
+    const end = Number(w?.end);
+    const word = String(w?.word ?? w?.text ?? "").trim();
+    if (!word || !Number.isFinite(start) || !Number.isFinite(end) || end < start) continue;
+    out.push({ word, start: +(start + offset).toFixed(3), end: +(end + offset).toFixed(3) });
+  }
+  return out;
+}
+
+function normalizeSegments(raw, offset = 0) {
+  const out = [];
+  for (const s of Array.isArray(raw) ? raw : []) {
+    const start = Number(s?.start);
+    const end = Number(s?.end);
+    const text = String(s?.text ?? "").trim();
+    if (!text || !Number.isFinite(start) || !Number.isFinite(end) || end < start) continue;
+    out.push({ text, start: +(start + offset).toFixed(3), end: +(end + offset).toFixed(3) });
+  }
+  return out;
+}
+
+/**
+ * A single transcription pass that asks for the richest response the provider
+ * supports and reports honestly what came back.
+ */
+async function transcribeVerbose({ buffer, type, language = "", hint = "", provider = "auto" }) {
+  const attempts = [];
+  const languageCode = /^[a-z]{2}$/.test(String(language || "")) ? String(language) : "";
+
+  const groqOrder = GROQ_KEYS.length
+    ? GROQ_KEYS.slice(sttRotation % GROQ_KEYS.length).concat(GROQ_KEYS.slice(0, sttRotation % GROQ_KEYS.length))
+    : [];
+  sttRotation += 1;
+
+  if (provider === "auto" || provider === "groq") {
+    for (const key of groqOrder) {
+      try {
+        const form = new FormData();
+        form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
+        form.append("model", STT_MODEL);
+        form.append("response_format", "verbose_json");
+        form.append("timestamp_granularities[]", "word");
+        form.append("timestamp_granularities[]", "segment");
+        form.append("temperature", "0");
+        if (hint) form.append("prompt", hint);
+        if (languageCode) form.append("language", languageCode);
+        const upstream = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}` },
+          body: form,
+          signal: AbortSignal.timeout(WORD_STT_TIMEOUT),
+        });
+        if (!upstream.ok) { attempts.push({ provider: "groq", status: upstream.status }); continue; }
+        const data = await upstream.json().catch(() => null);
+        if (!data) { attempts.push({ provider: "groq", status: "unreadable" }); continue; }
+        const words = normalizeWords(data.words);
+        const segments = normalizeSegments(data.segments);
+        return {
+          ok: true,
+          provider: "groq",
+          model: STT_MODEL,
+          text: String(data.text || "").trim(),
+          words,
+          segments,
+          granularity: words.length ? "word" : segments.length ? "segment" : "none",
+          language: data.language || languageCode || "",
+          attempts,
+        };
+      } catch (err) {
+        attempts.push({ provider: "groq", status: String(err?.message || err).slice(0, 120) });
+      }
+    }
+  }
+
+  // Gemini understands audio but does not return word timing. It is still worth
+  // asking when every Whisper bucket is squeezed: a transcript with no timing
+  // beats no transcript, as long as the caller is told that is what it got.
+  if (provider === "auto" || provider === "gemini") {
+    const text = await geminiStt(buffer, type, hint, Date.now() + 40_000, languageCode).catch(() => null);
+    if (text) {
+      return {
+        ok: true,
+        provider: "gemini",
+        model: GEMINI_MODEL,
+        text: String(text).trim(),
+        words: [],
+        segments: [],
+        granularity: "none",
+        language: languageCode,
+        attempts,
+      };
+    }
+    attempts.push({ provider: "gemini", status: "no answer" });
+  }
+
+  // Voxtral returns segment timing on some plans and plain text on others.
+  if (provider === "auto" || provider === "mistral") {
+    for (const key of MISTRAL_KEYS) {
+      try {
+        const form = new FormData();
+        form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
+        form.append("model", process.env.CAPRI_STT_MISTRAL_MODEL || "voxtral-mini-latest");
+        form.append("response_format", "verbose_json");
+        form.append("timestamp_granularities[]", "segment");
+        if (hint) form.append("prompt", hint);
+        if (languageCode) form.append("language", languageCode);
+        const upstream = await fetch(`${MISTRAL_BASE}/audio/transcriptions`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${key}` },
+          body: form,
+          signal: AbortSignal.timeout(WORD_STT_TIMEOUT),
+        });
+        if (!upstream.ok) { attempts.push({ provider: "mistral", status: upstream.status }); continue; }
+        const data = await upstream.json().catch(() => null);
+        if (!data) continue;
+        const segments = normalizeSegments(data.segments);
+        const words = normalizeWords(data.words);
+        return {
+          ok: true,
+          provider: "mistral",
+          model: process.env.CAPRI_STT_MISTRAL_MODEL || "voxtral-mini-latest",
+          text: String(data.text || "").trim(),
+          words,
+          segments,
+          granularity: words.length ? "word" : segments.length ? "segment" : "none",
+          language: languageCode,
+          attempts,
+        };
+      } catch (err) {
+        attempts.push({ provider: "mistral", status: String(err?.message || err).slice(0, 120) });
+      }
+    }
+  }
+
+  return { ok: false, reason: "No speech engine answered.", attempts };
+}
+
+async function handleSttWord(req, res) {
+  const type = String(req.headers["content-type"] || "audio/wav").split(";")[0].trim();
+  const query = new URL(req.url, "http://capri.local").searchParams;
+  const chunks = [];
+  let size = 0;
+  try {
+    for await (const chunk of req) {
+      size += chunk.length;
+      if (size > 30_000_000) return json(res, 413, { error: "audio_too_large" });
+      chunks.push(chunk);
+    }
+  } catch (err) {
+    return json(res, 400, { error: err.message });
+  }
+  const buffer = Buffer.concat(chunks);
+  if (!buffer.length) return json(res, 400, { error: "empty_audio" });
+
+  const result = await transcribeVerbose({
+    buffer,
+    type,
+    language: query.get("lang") || "",
+    hint: String(query.get("prompt") || "").slice(0, 240),
+    provider: String(query.get("provider") || "auto"),
+  });
+  if (!result.ok) return json(res, 502, { error: "stt_failed", message: result.reason, attempts: result.attempts });
+  return json(res, 200, result);
+}
+
 // ---------------------------------------------------------------- pairing + access
 async function handlePair(req, res) {
   const ip = req.socket.remoteAddress || "?";
@@ -3677,6 +3858,12 @@ const handler = async (req, res) => {
     }
     if (req.method === "POST" && pathname === "/api/tts") return handleTts(req, res);
     if (req.method === "POST" && pathname === "/api/stt") return handleStt(req, res);
+    // Word-level transcript for the clipping engine. Separate from /api/stt so
+    // the voice loop's contract is untouched.
+    if (req.method === "POST" && pathname === "/api/stt/words") {
+      if (who.scope !== "local") return json(res, 403, { error: "forbidden" });
+      return handleSttWord(req, res);
+    }
     if (req.method === "POST" && pathname === "/api/banter") return handleBanter(req, res);
     if (req.method === "POST" && pathname === "/api/access/request") return handleAccessRequest(req, res, who);
 

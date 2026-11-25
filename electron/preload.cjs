@@ -95,4 +95,10 @@ contextBridge.exposeInMainWorld("capriDev", {
   reveal: (p) => ipcRenderer.invoke("capri-dev-reveal", String(p || "")),
   open: (p) => ipcRenderer.invoke("capri-dev-open", String(p || "")),
   ffmpeg: () => ipcRenderer.invoke("capri-dev-ffmpeg"),
+  // Clipping engine (2.0). Audio events, shots, targeted frames, OCR.
+  audioAnalyse: (args) => ipcRenderer.invoke("capri-dev-audio-analyse", args || {}),
+  scenes: (args) => ipcRenderer.invoke("capri-dev-scenes", args || {}),
+  frames: (args) => ipcRenderer.invoke("capri-dev-frames", args || {}),
+  ocr: (args) => ipcRenderer.invoke("capri-dev-ocr", args || {}),
+  cleanup: () => ipcRenderer.invoke("capri-dev-cleanup"),
 });
