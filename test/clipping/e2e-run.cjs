@@ -84,11 +84,17 @@ async function main() {
   ]);
   console.log(`    audio   events=${audio.events.length}  ${(audio.ms / 1000).toFixed(1)}s`);
   for (const e of audio.events) console.log(`            ${e.type.padEnd(13)} ${e.start.toFixed(2)}-${e.end.toFixed(2)} conf=${e.confidence}`);
-  console.log(`    chunks  ${chunks.chunks.length}  pauses=${chunks.pauses.length}  floor=${chunks.silenceFloorDb}dB`);
+  console.log(`    chunks  ${chunks.chunks.length}  pauses=${chunks.pauses.length}  floor=${chunks.silenceFloorDb}dB${chunks.reason ? `  (${chunks.reason})` : ""}`);
   console.log(`    scenes  ${scenes.times.length} cuts`);
   if (!audio.events.length) report.degraded.push("no acoustic events found");
 
   console.log("\n[2] transcribe");
+  if (!chunks.chunks.length) {
+    console.log(`    the file has no usable audio: ${chunks.reason || "no speech regions"}`);
+    console.log(`\nRESULT     the studio would stop here and say: "I could not hear any speech in that video."`);
+    console.log(`degraded:  ${[`no audio: ${chunks.reason || "none"}`, ...report.degraded].join(" | ")}`);
+    return;
+  }
   const words = [];
   const segments = [];
   const tmpWav = path.join(os.tmpdir(), `e2e-${Date.now()}.wav`);
