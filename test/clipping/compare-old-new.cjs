@@ -104,7 +104,10 @@ const clock = (s) => `${String(Math.floor(s / 60)).padStart(2, "0")}:${(s % 60).
       events: audio.events, ocr: ocr.samples, frames: shot.frames, minClip: 6, maxClip: 75,
     });
     const review = rv.json?.review;
-    if (!review) continue;
+    if (!review) {
+      console.log(`  review failed: ${rv.status} ${String(rv.text || rv.json?.error || "").slice(0, 200)}`);
+      continue;
+    }
     console.log(`  review: ${review.decision} "${review.title || review.reject_reason || ""}"`);
     reviewed.push({
       id: `${m.start}-${m.end}`, start: review.decision === "accept" ? review.start : m.start,

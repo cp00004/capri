@@ -55,12 +55,16 @@
     const list = sortedWords(words);
     if (!list.length) return +at.toFixed(2);
     let speaking = null;
+    let next = null;
     for (const w of list) {
-      if (w.start > at + 0.6) break;
+      if (w.start > at + 0.6) { next = w; break; }
       if (w.end > at) speaking = w;
     }
     if (!speaking) return +at.toFixed(2);
-    return +Math.min(at + 1.4, speaking.end + pad).toFixed(2);
+    // The padding must not run into the next word: ending 0.25s after "unplugged"
+    // lands inside "it," and clips its first syllable. Stop at the next onset.
+    const room = next ? Math.max(0, next.start - 0.02) : Infinity;
+    return +Math.min(at + 1.4, speaking.end + pad, Math.max(speaking.end, room)).toFixed(2);
   }
 
   /**

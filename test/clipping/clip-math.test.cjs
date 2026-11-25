@@ -38,6 +38,16 @@ test("snapStart does not cut into a word that is already being spoken", () => {
   assert.ok(at >= 1.3, `cut jumped too far back to ${at}s`);
 });
 
+test("snapEnd padding never runs into the word that follows", () => {
+  const line = words([
+    ["unplugged", 0, 0.5], ["it,", 0.5, 0.94], ["plugged", 0.94, 1.36],
+  ]);
+  // 0.4 is mid-"unplugged". Padding to 0.5+ would land inside "it,".
+  const at = math.snapEnd(0.4, line);
+  assert.ok(at <= 0.5, `end ${at}s cuts into "it,"`);
+  assert.ok(at >= 0.5 - 0.06, `end ${at}s stopped short of the word's own end`);
+});
+
 test("snapStart leaves a boundary that already sits between words alone", () => {
   // 1.02s is a 50ms gap between "in" and "and": nothing to fix.
   const at = math.snapStart(1.02, SPEECH);
