@@ -1392,7 +1392,15 @@
       providers: [...new Set(providers)],
     };
     if (granularity === "none") {
-      throw new Error("I could not hear any speech in that video.");
+      // Say what actually went wrong. "I could not hear speech" is confusing when
+      // the real problem is a missing audio track or a provider rejecting every
+      // chunk, so the specific cause wins when there is one.
+      const why = !audio?.ok
+        ? (audio.reason || "the audio could not be read")
+        : chunks?.reason
+          ? chunks.reason
+          : "the speech reader returned nothing for every speech region";
+      throw new Error(`I could not hear any speech in that video - ${why}.`);
     }
     if (granularity === "segment") {
       report.degraded.push("word-level timing unavailable - captions and cuts are approximate");
@@ -1973,7 +1981,13 @@
           renderVideoList();
         }
       }
-      if (!state.made.length) throw new Error(`every video failed - ${state.failures[0] || "unknown error"}`);
+      if (!state.made.length) {
+        // Nothing was produced, so the reason is the whole result: name the
+        // actual cause instead of a generic failure.
+        const reports = dev.videos.filter((v) => v.clipReport).map((v) => v.clipReport);
+        renderShortsResults([], false, reports);
+        throw new Error(`every video failed - ${state.failures[0] || "unknown error"}`);
+      }
       renderShortsResults(state.made, true);
       const where = state.made[0].cut.path.slice(0, state.made[0].cut.path.lastIndexOf("\\") + 1);
       shortsProgress(
