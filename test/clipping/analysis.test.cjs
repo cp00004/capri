@@ -127,6 +127,34 @@ test("parseModelJson survives the shapes free relays actually return", () => {
   assert.throws(() => analysis.parseModelJson("I could not find anything worth posting."));
 });
 
+test("scores on a 0-10 scale are rescaled, not read as 3/100", () => {
+  const r = analysis.coerceReview(
+    { decision: "accept", start: 0, end: 12, humor: 7, unexpected: 6, entertainment: 8, hook: 9 },
+    { start: 0, end: 12 }, 300, { minClip: 6, maxClip: 75 },
+  );
+  assert.equal(r.humor, 70);
+  assert.equal(r.entertainment, 80);
+  assert.equal(r.hook, 90);
+});
+
+test("scores already on 0-100 are left alone", () => {
+  const r = analysis.coerceReview(
+    { decision: "accept", start: 0, end: 12, humor: 72, unexpected: 61, entertainment: 80, hook: 88 },
+    { start: 0, end: 12 }, 300, { minClip: 6, maxClip: 75 },
+  );
+  assert.equal(r.humor, 72);
+  assert.equal(r.hook, 88);
+});
+
+test("scores on a 0-1 scale are rescaled", () => {
+  const r = analysis.coerceReview(
+    { decision: "accept", start: 0, end: 12, humor: 0.8, unexpected: 0.5, entertainment: 0.9, hook: 0.7 },
+    { start: 0, end: 12 }, 300, { minClip: 6, maxClip: 75 },
+  );
+  assert.equal(r.humor, 80);
+  assert.equal(r.entertainment, 90);
+});
+
 test("both prompts forbid selecting a bare loud moment", () => {
   const one = analysis.PASS_ONE_SYSTEM("youtube");
   const two = analysis.PASS_TWO_SYSTEM("tiktok");
