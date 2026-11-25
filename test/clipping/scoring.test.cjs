@@ -109,3 +109,26 @@ test("overlapping picks from different windows are de-duplicated by score", () =
   assert.equal(out.picks.length, 1, "overlapping picks should collapse to one");
   assert.equal(out.picks[0].components.humor, 95, "the stronger of the two should survive");
 });
+
+// Real case: a tight clip that ends on the punchline and a loose one that runs
+// past it into the outro scored exactly the same, and the mixer of the two used
+// to be chosen, because equal scores fell back to list order. Same quality should
+// mean the shorter file ships.
+test("equal scores prefer the tighter clip, not the longer one", () => {
+  const cand = { kind: "dialogue", strength: 0.53, events: [] };
+  const build = (start, end, humor, hook) => ({
+    start, end, candidate: cand,
+    components: scoreComponents({ start, end }, cand, {
+      humor, unexpected: 50, entertainment: humor, hasDialogue: true, hookQuality: hook,
+    }),
+  });
+  // Chosen so both land on the same weighted total, as measured on the fixture.
+  const tight = build(14.5, 27.0, 68, 0.75);
+  const loose = build(14.5, 35.5, 60, 0.42);
+  assert.equal(weightedScore(tight.components), weightedScore(loose.components),
+    `test premise broken: ${weightedScore(tight.components)} vs ${weightedScore(loose.components)}`);
+  for (const order of [[tight, loose], [loose, tight]]) {
+    const out = rankClips(order, { minScore: 0 });
+    assert.equal(out.picks[0].end, 27.0, "the tight clip should win a score tie");
+  }
+});
