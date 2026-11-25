@@ -1357,7 +1357,15 @@ async function handleClipPropose(req, res) {
       : Array.isArray(parsed?.clips) ? parsed.clips
         : parsed?.start != null ? [parsed] : [];
     const moments = list.map((m) => analysis.coerceMoment(m, w, duration)).filter(Boolean).slice(0, 3);
-    return { window: w, moments, provider: out.provider };
+    return {
+      window: w,
+      moments,
+      provider: out.provider,
+      // Kept for Developer Mode transparency: when a window yields nothing it
+      // is useful to know whether the model said so or the reply was unusable.
+      raw: body.debug ? String(out.content || "").slice(0, 1500) : undefined,
+      coerced: body.debug ? list.length - moments.length : undefined,
+    };
   };
 
   const results = [];
@@ -1387,7 +1395,7 @@ async function handleClipPropose(req, res) {
     moments,
     failures,
     providers,
-    degraded: analysis.scoring ? false : false,
+    windows: results.map((r) => ({ window: r.window, got: (r.moments || []).length, error: r.error, skipped: r.skipped, raw: r.raw, coerced: r.coerced })),
     watched: { windows: windows.length, failed: failures.length },
   });
 }
