@@ -1484,14 +1484,14 @@ async function handleClipPropose(req, res) {
 
   if (!windows.length) return devToolError(res, 400, "No candidate windows were proposed for that video.");
 
-  // Two frames, not five. A free relay's vision budget is measured in input
-  // tokens per minute, and one 720px still costs about two thousand of them
-  // against a seven-thousand ceiling - five frames per window could never be
-  // sent, so asking for them only guaranteed a failure.
+  // One frame, not five. Measured on this machine: a 720px still costs ~770 input
+  // tokens and the free relay's whole budget is 7000 per minute, so a screening
+  // pass cannot afford more than one frame per window. The decisive read in pass
+  // two gets two. Sending five only guaranteed a rate limit on every window.
   const framesFor = (w) => (Array.isArray(body.frames) ? body.frames : []).filter((f) => {
     const t = Number(f?.t);
     return Number.isFinite(t) && t >= w.start - 3 && t <= w.end + 3;
-  }).slice(0, 2);
+  }).slice(0, 1);
 
   const runWindow = async (w) => {
     const lines = analysis.transcriptBlock(transcript, w.start, w.end);
@@ -1595,8 +1595,8 @@ async function handleClipReview(req, res) {
   const events = Array.isArray(body.events) ? body.events.slice(0, 4000) : [];
   const ocr = Array.isArray(body.ocr) ? body.ocr.slice(0, 200) : [];
   // Two frames: the review only needs to confirm that what the proposer described
-  // is actually on screen, and each still costs about two thousand input tokens
-  // against a seven-thousand-per-minute vision budget.
+  // is actually on screen, and two stills is what the measured budget allows for
+  // the pass that decides whether a clip ships.
   const frames = (Array.isArray(body.frames) ? body.frames : []).slice(0, 2);
   const limits = {
     minClip: Math.max(3, Number(body.minClip) || 6),

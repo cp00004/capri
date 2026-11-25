@@ -1599,10 +1599,11 @@
    * acoustic events, any shot cut, then even coverage as a floor. That way a
    * three-second visual gag gets a frame even in a two-minute window.
    */
-  // Two frames is deliberate. A free relay charges roughly two thousand input
-  // tokens per still against a seven-thousand-per-minute budget, so asking for
-  // five is a request that can never succeed.
-  function probeTimes(w, read, limit = 2) {
+  // One frame is deliberate: a 720px still costs about 770 input tokens, measured
+  // against a 7000-per-minute vision budget, and a screening pass over several
+  // windows gets nothing at all if every window asks for two. Pass two, which
+  // decides what ships, is where the second frame is worth paying for.
+  function probeTimes(w, read, limit = 1) {
     const times = [];
     const events = (read.events || [])
       .filter((e) => Number(e.end) > w.start && Number(e.start) < w.end)
@@ -1632,10 +1633,10 @@
   /**
    * Frames evenly spread through a reviewed clip, for the strict second read.
    *
-   * Two, for the same token budget reason as probeTimes. The second read only
-   * has to confirm that the picture matches the claim, and two points inside a
-   * clip is enough to catch a clip that is black, static, or showing the wrong
-   * window entirely.
+   * Two, because this is the pass that decides what ships and it is worth the
+   * token budget: two points inside a clip catch one that is black, static, or
+   * showing the wrong window entirely. The screening pass gets one, since its job
+   * is only to find where to look.
    */
   function reviewTimes(start, end, count = 2) {
     const span = Math.max(0.5, end - start);
