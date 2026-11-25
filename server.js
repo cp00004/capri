@@ -1168,8 +1168,13 @@ async function shortsCompletion(messages, temperature) {
   );
 
   const total = imageCount(messages);
-  const plans = [];
-  if (total > 2) plans.push({ keep: 2, note: `only the first 2 of ${total} frames could be sent` });
+  // Always try with everything first, then step down one image at a time. A free
+  // relay's per-minute budget is the real limit, so dropping from five frames to
+  // two often still fails; one frame is usually what actually gets through.
+  const plans = [{ keep: total, note: "" }];
+  for (const keep of [2, 1]) {
+    if (total > keep) plans.push({ keep, note: `only the first ${keep} of ${total} frames could be sent` });
+  }
   plans.push({ keep: 0, note: "the pictures could not be sent" });
 
   let firstErr = null;
@@ -1177,8 +1182,8 @@ async function shortsCompletion(messages, temperature) {
     const list = plan.keep > 0 ? withImages(plan.keep) : textOnly(messages);
     try {
       const out = await collectDevCompletion({ messages: list, tools: undefined, temperature });
-      if (plan.keep === total) return out;
-      const why = String(firstErr?.message || "the relay refused the pictures").slice(0, 160);
+      if (plan.keep === total && !firstErr) return out;
+      const why = String(firstErr?.message || "the relay refused the request").slice(0, 160);
       return {
         ...out,
         vision: plan.keep > 0
