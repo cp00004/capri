@@ -100,5 +100,6 @@ contextBridge.exposeInMainWorld("capriDev", {
   scenes: (args) => ipcRenderer.invoke("capri-dev-scenes", args || {}),
   frames: (args) => ipcRenderer.invoke("capri-dev-frames", args || {}),
   ocr: (args) => ipcRenderer.invoke("capri-dev-ocr", args || {}),
+  speechChunks: (args) => ipcRenderer.invoke("capri-dev-speech-chunks", args || {}),
   cleanup: () => ipcRenderer.invoke("capri-dev-cleanup"),
 });

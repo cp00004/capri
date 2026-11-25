@@ -1298,6 +1298,62 @@ Return ONLY JSON:
 /* ---------------------------------------------------------- clipping 2.0 */
 
 /**
+ * Which stretches of a stream are worth analysing at all.
+ *
+ * This is deliberately cheap and deterministic: it reads the acoustic events
+ * and the transcript and proposes windows, so the expensive model calls only
+ * happen where something actually happened. It never decides what is funny.
+ */
+async function handleClipPlan(req, res) {
+  let body;
+  try { body = await readBody(req, 8_000_000); } catch (err) { return devToolError(res, 400, err.message); }
+  const duration = Math.max(1, Number(body.duration) || 0);
+  const events = Array.isArray(body.events) ? body.events : [];
+  const segments = Array.isArray(body.segments) ? body.segments : [];
+  const candidates = analysis.scoring.buildCandidates({
+    events,
+    segments,
+    duration,
+    maxCandidates: Math.max(4, Math.min(40, Number(body.maxCandidates) || 24)),
+  });
+  return json(res, 200, {
+    candidates,
+    considered: { events: events.length, segments: segments.length },
+    duration,
+  });
+}
+
+/**
+ * Rank every surviving clip with one rubric.
+ *
+ * Clips arrive from different model calls, and a model's own 0-100 impression
+ * is not comparable across calls. This applies the same weights and the same
+ * evidence test to all of them together.
+ */
+async function handleClipRank(req, res) {
+  let body;
+  try { body = await readBody(req, 8_000_000); } catch (err) { return devToolError(res, 400, err.message); }
+  const clips = (Array.isArray(body.clips) ? body.clips : []).filter((c) =>
+    Number.isFinite(Number(c?.start)) && Number.isFinite(Number(c?.end)) && Number(c.end) > Number(c.start));
+  if (!clips.length) return json(res, 200, { picks: [], rejected: [], belowBar: [], considered: 0, rubric: analysis.scoring.RUBRIC });
+
+  const ranking = analysis.scoring.rankClips(clips, {
+    minScore: Number.isFinite(Number(body.minScore)) ? Number(body.minScore) : undefined,
+    max: Math.max(1, Math.min(12, Number(body.max) || 6)),
+    minClip: Math.max(2, Number(body.minClip) || analysis.scoring.DEFAULTS.minClip),
+  });
+
+  return json(res, 200, {
+    picks: ranking.picks,
+    rejected: ranking.rejected.map((r) => ({ start: r.clip.start, end: r.clip.end, score: r.score, reasons: r.reasons })),
+    belowBar: ranking.belowBar.map((c) => ({ start: c.start, end: c.end, score: c.score })),
+    considered: ranking.considered,
+    rubric: analysis.scoring.RUBRIC,
+    defaults: analysis.scoring.DEFAULTS,
+  });
+}
+
+/**
  * Pass one: propose moments inside each candidate window.
  *
  * One request per window, three in flight, each carrying its own evidence.
