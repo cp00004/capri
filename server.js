@@ -80,7 +80,10 @@ const GROQ_MODEL_CHAIN = [...new Set([
 const GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english";
 const STT_MODEL = process.env.CAPRI_STT_MODEL || "whisper-large-v3-turbo";
 let sttRotation = 0;
-const GROQ_BASE = "https://api.groq.com/openai/v1";
+// A test needs to reproduce a capped relay on the *chat* path too, not only the
+// speech one. These point a run at a stub when set; unset, they are the real
+// origins and nothing changes.
+const GROQ_BASE = String(process.env.CAPRI_GROQ_BASE || "").trim() || "https://api.groq.com/openai/v1";
 // A broken relay is hard to reproduce on demand. When this is set, the word
 // transcriber sends Groq requests to that origin instead, so the retry path can
 // be exercised against a controlled 502. Never set in a normal run.
@@ -88,11 +91,11 @@ const STT_GROQ_BASE_OVERRIDE = String(process.env.CAPRI_STT_GROQ_BASE || "").tri
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const OPENROUTER_MODEL = process.env.CAPRI_OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
-const FREETHEAI_BASE = "https://api.freetheai.org/v1";
+const FREETHEAI_BASE = String(process.env.CAPRI_FREETHEAI_BASE || "").trim() || "https://api.freetheai.org/v1";
 const FREETHEAI_MODEL_CHAIN = [...new Set(String(
   process.env.CAPRI_FREETHEAI_MODELS || "fta/lion/gpt-4.1,fta/olf/gpt-oss:120b,fta/dog/gpt-4.1-mini",
 ).split(",").map((m) => m.trim()).filter(Boolean))];
-const MISTRAL_BASE = "https://api.mistral.ai/v1";
+const MISTRAL_BASE = String(process.env.CAPRI_MISTRAL_BASE || "").trim() || "https://api.mistral.ai/v1";
 // Same idea as STT_GROQ_BASE_OVERRIDE: lets a test point the last links of the
 // speech chain at a stub so "every engine is down" can be reproduced.
 const STT_MISTRAL_BASE_OVERRIDE = String(process.env.CAPRI_STT_MISTRAL_BASE || "").trim();
