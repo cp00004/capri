@@ -149,7 +149,7 @@ async function evaluate(send, expression) {
       continueHint: src.includes("the speech left unread is saved, so CONTINUE finishes it"),
     };
   })()`);
-  check("the generic \\"unknown error\\" fallback is gone", msg.unknown === false);
+  check('the generic "unknown error" fallback is gone', msg.unknown === false);
   check("the failure names an incomplete transcript", msg.honest === true);
   check("it points at CONTINUE as the fix", msg.continueHint === true);
 
