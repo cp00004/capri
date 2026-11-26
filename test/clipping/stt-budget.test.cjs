@@ -93,6 +93,32 @@ test("pacing spreads audio at the published rate instead of bursting", () => {
   assert.strictEqual(paceDelay(30, 0), 0);
 });
 
+test("consecutive chunks cannot all claim the same audio-seconds", () => {
+  // This is the arithmetic that let three workers fire at once: each read the
+  // same "remaining" figure, each concluded its chunk fit, and together they
+  // spent the window at three times the expected rate. Reserving on send fixes
+  // it, so the second chunk must now see less room than the first.
+  const budget = readBudget({
+    "x-ratelimit-limit-audio-seconds": "7200",
+    "x-ratelimit-remaining-audio-seconds": "80",
+    "x-ratelimit-reset-audio-seconds": "10m",
+  });
+  const now = budget.seenAt;
+
+  const first = waitForRoom(budget, 30, now);
+  budget.remainingSeconds = Math.max(0, budget.remainingSeconds - 30);
+
+  const second = waitForRoom(budget, 30, now);
+  budget.remainingSeconds = Math.max(0, budget.remainingSeconds - 30);
+
+  const third = waitForRoom(budget, 30, now);
+
+  assert.strictEqual(first, 0, "80 left fits a 30s chunk");
+  // 50 left still fits, but 20 does not: the third is paced rather than colliding.
+  assert.strictEqual(second, 0);
+  assert.ok(third > 0, "the third must be paced instead of colliding with the wall");
+  assert.ok(third > first && third > second);
+});
 test("a 3.4 hour stream is honestly reported as more than one window", () => {
   const plan = planRead({ totalAudioSeconds: 12_239, limitSeconds: 7200 });
   assert.strictEqual(plan.fitsOneWindow, false);
