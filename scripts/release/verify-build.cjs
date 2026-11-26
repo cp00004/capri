@@ -86,10 +86,25 @@ if (fs.existsSync(exeDir)) {
     ok("packaged dev.js no longer says regions were not read again", !/were not read again/.test(dev));
     ok("packaged dev.js carries the full region count out of a read", /perChunk,\s*\n\s*regions: regions\.length,/.test(dev));
     ok("packaged dev.js has no generic \"unknown error\" fallback", !/\|\| "unknown error"/.test(dev));
+    // The studio used to lock itself for the whole session after any run: the
+    // `finally` referenced a `ticker` never declared in runShorts, threw, and
+    // skipped the release. The × and PICK VIDEOS then did nothing.
+    ok("packaged dev.js releases the studio lock", /dev\.shortsBusy = false;/.test(dev));
+    ok("packaged dev.js has no undeclared ticker in runShorts", !/if \(ticker\) clearInterval\(ticker\);/.test(dev));
+    ok("packaged dev.js removes a video without the lock", /function removeVideo[\s\S]{0,600}?dev\.videos\.splice\(/.test(dev));
+    ok("packaged dev.js has the exit action", /function exitToApp\(/.test(dev) && /devExit"\)\.addEventListener\("click", exitToApp\)/.test(dev));
+    ok("packaged app.js can hand the screen back", /window\.capriAppResume\s*=/.test(fs.readFileSync(path.join(appRoot, "public", "app.js"), "utf8")));
   }
   const htmlPath = path.join(appRoot, "public", "index.html");
   if (fs.existsSync(htmlPath)) {
     ok("packaged index.html has the CONTINUE button", /id="shortsContinue"/.test(fs.readFileSync(htmlPath, "utf8")));
+    // `.ghost` is the app's decorative glitch layer and is display:none !important.
+    // A dev button reusing it renders 0x0 and cannot be clicked at all - which is
+    // why CLOSE DEV MODE was invisible.
+    const html = fs.readFileSync(htmlPath, "utf8");
+    ok("packaged index.html keeps the exit button", /id="devExit"/.test(html));
+    ok("packaged dev buttons avoid the decorative ghost class",
+      !/<button[^>]*class="[^"]*dev-(btn|mini)[^"]*ghost/.test(html));
   }
   const cachePath = path.join(appRoot, "public", "stt-cache.js");
   if (fs.existsSync(cachePath)) {

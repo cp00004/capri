@@ -26,6 +26,8 @@
     info: null,
     videos: [],
     shortsBusy: false,
+    // Only ever set by the real-app check; see `forTest` on window.CapriDev.
+    pickOverride: null,
     platform: "youtube",
     contentMode: "shorts",
     storyType: "whatif",
@@ -605,9 +607,15 @@
   }
 
   async function pickVideos() {
-    if (dev.shortsBusy) return;
+    // PICK VIDEOS must always work. It used to bail out while `shortsBusy` was
+    // true, and because a bug left that flag stuck on after a finished run, the
+    // button silently did nothing forever. The picker does not touch a run that
+    // is already going: it only appends to the queue.
     try {
-      const files = await D.pickVideos();
+      // The native dialog is one of only two things an automated check cannot
+      // click, so a check may stand in for it. Everything after this line - the
+      // de-duplication, the probe, the rows - is the real code path.
+      const files = dev.pickOverride ? await dev.pickOverride() : await D.pickVideos();
       if (!files.length) return;
       const added = [];
       for (const f of files) {
@@ -655,13 +663,20 @@
 
   function removeVideo(entry) {
     const at = dev.videos.indexOf(entry);
-    if (at < 0 || dev.shortsBusy) return;
+    if (at < 0) return;
+    // Removing a row is a UI action, so it must never be able to dead-end. A run
+    // in flight does not own this list any more: it took its own copy of the
+    // queue when it started. Blocking the X while `shortsBusy` was true is what
+    // left a finished run unable to clear its video - and a stuck flag made that
+    // permanent. The run notices on its next paint that the entry is gone.
     dev.videos.splice(at, 1);
+    entry.removed = true;
     if (dev.video?.path === entry.path) {
       const next = dev.videos[Math.min(at, dev.videos.length - 1)];
       selectVideo(next || null);
     } else {
       renderVideoList();
+      paintStudio();
     }
     if (!dev.videos.length) {
       dev.els.shortsProgress.classList.add("hidden");
@@ -679,7 +694,7 @@
       const row = document.createElement("div");
       row.className = `dev-file${dev.video?.path === v.path ? " active" : ""}`;
       row.title = v.path;
-      row.addEventListener("click", () => { if (!dev.shortsBusy) selectVideo(v); });
+      row.addEventListener("click", () => { selectVideo(v); });
       const label = document.createElement("span");
       label.textContent = v.name;
       row.appendChild(label);
@@ -2324,6 +2339,10 @@
     try {
       for (let vi = 0; vi < queue.length; vi += 1) {
         const entry = queue[vi];
+        // The row can be removed while the batch runs. The run took its own copy
+        // of the queue, so it finishes this video rather than half-processing it,
+        // but it must not paint a row that is no longer in the list.
+        if (entry.removed) continue;
         const video = { path: entry.path, name: entry.name };
         const info = entry.info;
         const tag = `${vi + 1}/${queue.length} · ${entry.name}`;
@@ -2434,11 +2453,17 @@
     } catch (err) {
       shutdown(`FAILED\n${err.message || err}`);
     } finally {
-      if (ticker) clearInterval(ticker);
-      try { await D.cleanup(); } catch { /* temp only */ }
+      // `dev.shortsBusy` is the lock every other control reads: the X button,
+      // PICK VIDEOS, selecting a row, and the run button itself. If it is ever
+      // left true the studio is bricked until a restart, so releasing it must
+      // not depend on anything that can throw. It used to sit after a `ticker`
+      // reference that was never declared in this function, which threw a
+      // ReferenceError every time and skipped the release - exactly the
+      // "cannot remove the video, cannot pick another one" report.
       dev.shortsBusy = false;
-      renderVideoList();
-      paintStudio();
+      try { await D.cleanup(); } catch { /* temp only */ }
+      try { renderVideoList(); } catch { /* list rebuilt on the next paint */ }
+      try { paintStudio(); } catch { /* repaint is cosmetic */ }
     }
   }
 
@@ -2724,6 +2749,104 @@
     try { window.capriNative?.log?.("dev: closed"); } catch { /* browser */ }
   }
 
+  /**
+   * Leave Developer Mode and wipe what it remembered.
+   *
+   * Closing used to only hide the screen, so the next visit still had the old
+   * videos, the old clips, the old chat and the old progress line sitting there -
+   * and a run that had been interrupted could still be holding the studio lock.
+   * "Back to normal Capri" has to mean a clean desk: every piece of studio state
+   * is reset and the normal app is told to come back.
+   *
+   * The workspace folder on disk is not touched. Developer Mode writes into a
+   * folder the user chose; leaving must not delete their files.
+   */
+  function resetStudio() {
+    // A run in flight keeps its own reference to the queue, so it finishes and
+    // releases the lock on its own. Clearing the lock here is still right: after
+    // leaving, the studio must never come back locked.
+    dev.videos = [];
+    dev.video = null;
+    dev.info = null;
+    dev.shortsBusy = false;
+    dev.clipReport = null;
+    dev.messages = [];
+    dev.attachments = [];
+    dev.alwaysAllow = new Set();
+    dev.busy = false;
+    dev.file = "";
+    dev.dirty = false;
+    dev.storyScript = null;
+    dev.storyBusy = false;
+    dev.toonPhotos = [];
+    dev.toonBusy = false;
+    dev.toonStory = null;
+    dev.platform = "youtube";
+    dev.contentMode = "shorts";
+    dev.storyType = "whatif";
+    dev.storyAspect = "vertical";
+    dev.storySeconds = 20;
+    dev.toonStyle = "cocomelon";
+    dev.toonAspect = "vertical";
+    dev.toonSeconds = 15;
+    dev.toonMusic = true;
+    dev.mainView = "chat";
+
+    // Anything on screen belonging to the studio goes with the state.
+    try {
+      if (dev.els) {
+        for (const id of ["shortsProgress", "shortsResult", "shortsFiles", "toonFiles",
+          "storyProgress", "storyResult", "toonProgress", "toonResult"]) {
+          const el = dev.els[id];
+          if (!el) continue;
+          el.classList.add("hidden");
+          el.textContent = "";
+        }
+        if (dev.els.shortsContinue) {
+          dev.els.shortsContinue.classList.add("hidden");
+          dev.els.shortsContinue.textContent = "";
+        }
+        if (dev.els.ytPreview) {
+          dev.els.ytPreview.removeAttribute("src");
+          dev.els.ytPreview.load?.();
+        }
+        if (dev.els.ytContext) dev.els.ytContext.classList.add("hidden");
+        if (dev.els.log) dev.els.log.textContent = "";
+        if (dev.els.editor) dev.els.editor.value = "";
+        if (dev.els.terminal) dev.els.terminal.textContent = "";
+        if (dev.els.toonPrompt) dev.els.toonPrompt.value = "";
+        if (dev.els.toonMusic) {
+          dev.els.toonMusic.setAttribute("aria-pressed", "true");
+          dev.els.toonMusic.textContent = "MUSIC: ON";
+        }
+      }
+      // The file tree is the user's folder, not studio state: re-read it on the
+      // next visit instead of showing a tree for a folder that may have changed.
+      dev.tree.clear();
+      dev.expanded.clear();
+      renderVideoList();
+      paintStudio();
+    } catch { /* a fresh visit repaints everything anyway */ }
+  }
+
+  /**
+   * The button's action: leave, wipe the studio, hand the screen back.
+   *
+   * `close()` on its own only hides the screen, which is right for the small
+   * header X (come back to what you were doing). The big CLOSE DEV MODE button is
+   * "I am done here", so it resets as well - and it tells the normal app to
+   * reappear, because on its own the dev screen is a full-screen overlay and
+   * hiding it would leave the chat behind it looking untouched but stale.
+   */
+  function exitToApp() {
+    resetStudio();
+    close();
+    // `capriAppResume` is the normal app's own hook. Optional-chained because the
+    // dev screen must still close cleanly outside the packaged app.
+    try { window.capriAppResume?.(); } catch { /* normal app repaints on its own */ }
+    try { window.capriNative?.log?.("dev: exited to app"); } catch { /* browser */ }
+  }
+
   // The studio's own state is private by design. This exposes only what an
   // automated check (or a user with the console open) needs to see the resume
   // decision without reaching into the internals: whether the button is on
@@ -2731,6 +2854,17 @@
   window.CapriDev = {
     open,
     close,
+    exit: exitToApp,
+    reset: resetStudio,
+    snapshot: () => ({
+      open: dev.open,
+      busy: Boolean(dev.shortsBusy),
+      videos: dev.videos.map((v) => ({ name: v.name, state: v.state, resumable: Boolean(v.resumable) })),
+      selected: dev.video?.path || "",
+      messages: dev.messages.length,
+      platform: dev.platform,
+      contentMode: dev.contentMode,
+    }),
     isOpen: () => dev.open,
     continueState: () => ({
       visible: Boolean(dev.els?.shortsContinue && !dev.els.shortsContinue.classList.contains("hidden")),
@@ -2748,12 +2882,46 @@
     // the part most likely to drift, and pinning it needs the real function
     // rather than a copy of it.
     renderReport: appendReport,
+    /**
+     * Seams for the real-app check only (`scripts/release/studio-unlock-app-check.cjs`).
+     *
+     * Everything here calls the shipped functions - it replaces inputs, never
+     * behaviour. Two inputs are impossible to reach from outside the renderer:
+     * the native file dialog (a check cannot click it) and a queue that is
+     * already probed (a probe needs a real file on disk). Nothing in the app
+     * reads this object, so it stays inert in normal use.
+     */
+    forTest: {
+      /** Stand in for the native dialog; the rest of pickVideos runs for real. */
+      pickWith: (fn) => { dev.pickOverride = fn; },
+      /** Put videos in the studio as if they had just been probed. Memory only. */
+      seed: (videos, root) => {
+        if (root !== undefined) dev.root = root;
+        dev.videos = (videos || []).map((v) => ({
+          path: v.path,
+          name: v.name,
+          info: v.info || { duration: 42, width: 1080, height: 1920, fps: 30, hasAudio: true },
+          state: "ready",
+        }));
+        dev.video = null;
+        dev.info = null;
+        renderVideoList();
+        paintStudio();
+      },
+      /** Hold or release the studio lock, to prove a control ignores it. */
+      setBusy: (on) => { dev.shortsBusy = Boolean(on); paintStudio(); },
+      /** Run the real batch and hand back its promise. */
+      runShorts: (resume) => runShorts(Boolean(resume)),
+    },
   };
 
   function wire() {
     initRefs();
     $("devClose").addEventListener("click", close);
-    $("devExit").addEventListener("click", close);
+    // The big button means "I am done": leave and leave nothing behind. The
+    // header X stays a plain close so a mistaken click does not lose a studio
+    // that is mid-setup.
+    $("devExit").addEventListener("click", exitToApp);
     $("devOpenFolder").addEventListener("click", chooseFolder);
     $("devAddImages").addEventListener("click", addImages);
     $("devRefresh").addEventListener("click", () => reloadTree().catch(() => {}));
