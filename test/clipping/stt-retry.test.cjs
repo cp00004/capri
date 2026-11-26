@@ -136,6 +136,39 @@ test("a budget wait longer than the pass deadline is not a lost chunk", async ()
   assert.strictEqual(calls, 2);
   assert.ok(clock > 60_000, `the test must actually pause past the deadline, paused ${clock}ms`);
 });
+test("one request never outlives the caller's patience", async () => {
+  // The client aborts a request at 900s. Six independent 900s waits would be
+  // cut off mid-pause, which turns a queued chunk back into a lost one.
+  let clock = 0;
+  let calls = 0;
+  const waits = [];
+  const result = await runWithRetry(
+    [{
+      label: "groq",
+      run: async () => {
+        calls += 1;
+        const err = httpError(429, "Rate limit reached for audio-seconds per hour");
+        err.budget = { resetMs: 600_000, limitSeconds: 7200, remainingSeconds: 0 };
+        throw err;
+      },
+    }],
+    {
+      sleep: async (ms) => { waits.push(ms); clock += ms; },
+      now: () => clock,
+      maxRetries: 2,
+      budgetWaits: 99,
+      budgetWaitMs: 900_000,
+      budgetTotalMs: 600_000,
+    }
+  );
+
+  const total = waits.reduce((n, w) => n + w, 0);
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.deferred, true, "still queued, not refused");
+  assert.ok(total <= 600_000, `paused ${total}ms, must stay inside the caller's window`);
+  assert.ok(waits.every((w) => w > 0), "every wait must be positive");
+  assert.ok(calls < 6, `must stop once the window is used up, made ${calls} calls`);
+});
 test("window waits are bounded so one chunk cannot stall forever", async () => {
   let calls = 0;
   const result = await runWithRetry(
