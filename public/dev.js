@@ -2744,6 +2744,10 @@
     // The resume rule itself, so an automated check can exercise every branch
     // without a real 3-hour video and without poking the DOM.
     offer: resumeOffer,
+    // The report renderer, for the same reason: what a run says about itself is
+    // the part most likely to drift, and pinning it needs the real function
+    // rather than a copy of it.
+    renderReport: appendReport,
   };
 
   function wire() {
