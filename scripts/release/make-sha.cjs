@@ -33,4 +33,5 @@ const feed = JSON.parse(fs.readFileSync("public/version.json", "utf8").replace(/
 console.log(`\nfeed version currently: ${feed.version}`);
 console.log(`feed apkSha256 currently: ${feed.apkSha256}`);
 console.log(`feed apkSize currently: ${feed.apkSize}`);
-console.log(`\nneeds -> version 5.7.0, apkSha256 ${apkHash}, apkSize ${fs.statSync(apk).size}`);
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8").replace(/^\uFEFF/, ""));
+console.log(`\nneeds -> version ${pkg.version}, apkSha256 ${apkHash}, apkSize ${fs.statSync(apk).size}`);
