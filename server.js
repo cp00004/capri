@@ -3544,6 +3544,18 @@ async function handleStt(req, res) {
  * provider only supports segments, it says so in `granularity` and returns
  * segments, and the caller is expected to behave accordingly.
  */
+/**
+ * Everything inside one HTTP request must finish in this long.
+ *
+ * Node's HTTP client abandons a response after 300s (measured: 306s, code
+ * UND_ERR_HEADERS_TIMEOUT). Proactive pacing and queued retries both spend time
+ * from that same allowance, so they cannot each have a generous budget of their
+ * own: 120s of pacing plus 240s of queueing would be 360s and the request would
+ * be killed on the wire, losing the chunk after all. This leaves a margin for
+ * the provider call itself.
+ */
+const REQUEST_DEADLINE_MS = 240_000;
+
 const WORD_STT_TIMEOUT = 120_000;
 
 /**
