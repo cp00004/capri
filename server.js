@@ -4623,6 +4623,14 @@ const handler = async (req, res) => {
 
 const httpServer = http.createServer(handler);
 
+// Node kills any request still running after 300s. A speech chunk queued behind
+// the hourly audio budget legitimately waits minutes for the window to refill,
+// and being cut off there loses the chunk after all - the exact bug the queue
+// exists to prevent. Outlive the client's own 900s request timeout instead, so
+// the server always gets to answer with either audio or an honest "queued".
+httpServer.requestTimeout = 960_000;
+httpServer.headersTimeout = 60_000;
+
 // A desktop companion should stay on the line. Log the weirdness, keep the lights on.
 process.on("uncaughtException", (err) => {
   console.error(`  ! uncaught: ${String(err?.stack || err).slice(0, 1200)}`);
@@ -4659,6 +4667,10 @@ httpServer.listen(PORT, () => {
 if (HTTPS_ON) {
   const httpsServer = https.createServer({ cert: fs.readFileSync(CERT_FILE), key: fs.readFileSync(KEY_FILE) }, handler);
   httpsServer.on("tlsClientError", () => {});
+  // Same patience as the http listener: a queued speech chunk must not be cut
+  // off by the listener's own timeout.
+  httpsServer.requestTimeout = 960_000;
+  httpsServer.headersTimeout = 60_000;
   // Phone mic is a bonus: a taken port must not take the whole server down.
   httpsServer.on("error", (err) => {
     console.error(`  ! https port ${HTTPS_PORT} unusable: ${err.code || err.message}`);
