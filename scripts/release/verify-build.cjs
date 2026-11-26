@@ -80,6 +80,11 @@ if (fs.existsSync(exeDir)) {
     ok("packaged dev.js offers CONTINUE for a stopped run", /function resumeOffer\(/.test(dev));
     ok("packaged dev.js paints the CONTINUE button", /shortsContinue\.classList\.toggle/.test(dev));
     ok("packaged dev.js resumes instead of restarting", /runShorts\(resume = false\)/.test(dev));
+    // A finished resumed transcript must say it finished. The reported run put
+    // "172 of 236 were not read again" over a transcript that was actually whole.
+    ok("packaged dev.js says a resume finished", /FINISHED FROM AN EARLIER RUN/.test(dev));
+    ok("packaged dev.js no longer says regions were not read again", !/were not read again/.test(dev));
+    ok("packaged dev.js carries the full region count out of a read", /perChunk,\s*\n\s*regions: regions\.length,/.test(dev));
     ok("packaged dev.js has no generic \"unknown error\" fallback", !/\|\| "unknown error"/.test(dev));
   }
   const htmlPath = path.join(appRoot, "public", "index.html");

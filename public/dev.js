@@ -1792,9 +1792,9 @@
     };
     if (cached) {
       // A note, not a degradation: reusing a saved region is the feature working.
-      // It has to say whether the read finished. "172 of 236 were not read again"
-      // reads like a hole in the transcript, when in fact this run read the last
-      // 64 and the transcript is now complete.
+      // It has to say whether the read finished. "172 of 236 kept, so 172 were
+      // skipped" reads like a hole in the transcript, when in fact this run read
+      // the last 64 and the transcript is now complete.
       const finished = lost.length === 0 && deferred.length === 0;
       const fresh = regions.length - cached;
       let line = `${cached} of ${regions.length} speech regions were kept from an earlier run and reused`;
