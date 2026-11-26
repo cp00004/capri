@@ -1026,7 +1026,6 @@ async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 
   for (;;) {
     sweeps += 1;
     let retryable = 0;
-    let onlyRetryable = true;
     for (let i = 0; i < Math.min(candidates.length, 6); i += 1) {
       const provider = candidates[i];
       let upstream;
@@ -1038,11 +1037,11 @@ async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 
         const status = Number(err.status);
         // 5xx and 429 both clear on their own: the relay is busy, not wrong.
         if (status === 429) { coolDown(provider, Number(err.retryAfter) || 20); retryable += 1; }
-        else if (status === 401 || status === 403) { coolDown(provider, 300); onlyRetryable = false; }
-        else if (status === 402) { coolDown(provider, 1800); onlyRetryable = false; }
-        else if (status === 404) { coolDown(provider, 600); onlyRetryable = false; }
+        else if (status === 401 || status === 403) coolDown(provider, 300);
+        else if (status === 402) coolDown(provider, 1800);
+        else if (status === 404) coolDown(provider, 600);
         else if (status >= 500) { coolDown(provider, 15); retryable += 1; }
-        else { coolDown(provider, 15); onlyRetryable = false; }
+        else coolDown(provider, 15);
         continue;
       }
       const reader = upstream.body.getReader();
