@@ -77,6 +77,27 @@ const stub = http.createServer((req, res) => {
         console.log(`  groq  #${calls.groq} -> 413 chunk too large`);
         return upstream(res, 413, { error: { message: "audio file is too large for this model" } });
       }
+      if (MODE === "triple" || MODE === "triple-recover") {
+        // The reported shape: Groq 429 on audio-seconds, Gemini 503 overloaded,
+        // Mistral 402 out of credit. "triple" keeps refusing, "triple-recover"
+        // lets the window refill so a queue wait can rescue the chunk.
+        if (MODE === "triple" || calls.groq <= 2) {
+          console.log(`  groq  #${calls.groq} -> 429 audio-seconds budget`);
+          return upstream(
+            res,
+            429,
+            { error: { message: "Rate limit reached for audio-seconds per hour. Please try again in 7m26.5s." } },
+            budgetHeaders(0)
+          );
+        }
+        console.log(`  groq  #${calls.groq} -> 200 words`);
+        return upstream(res, 200, {
+          text: "the window refilled",
+          language: "english",
+          words: [{ word: "refilled", start: 0, end: 0.6 }],
+          segments: [{ text: "refilled", start: 0, end: 0.6 }],
+        }, budgetHeaders(6300));
+      }
       if (MODE === "budget" || MODE === "budgetfail") {
         // Refused on the first ask, and again on the retry: both must be
         // deferred rather than counted as a lost chunk. "budgetfail" never
@@ -126,6 +147,12 @@ const stub = http.createServer((req, res) => {
     }
 
     calls.mistral += 1;
+    // The reported triple failure has Mistral out of credit, which is the sticky
+    // leg that used to make the whole chain look permanently refused.
+    if (MODE === "triple" || MODE === "triple-recover") {
+      console.log(`  mistral #${calls.mistral} -> 402 no credit`);
+      return upstream(res, 402, { error: { message: "insufficient_quota: no credit remaining" } });
+    }
     console.log(`  mistral #${calls.mistral} -> 504`);
     return upstream(res, 504, { error: { message: "deadline exceeded" } });
   });
