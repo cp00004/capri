@@ -165,3 +165,29 @@ test("the rail keeps the exit button reachable", () => {
   assert.match(css, /\.dev-rail \.dev-pane\s*\{[^}]*overflow:\s*auto/,
     "the panels inside the rail must scroll instead of pushing the button away");
 });
+
+test("the dev buttons never use the decorative .ghost class", () => {
+  const html = fs.readFileSync(path.resolve(__dirname, "../../public/index.html"), "utf8");
+  const css = fs.readFileSync(path.resolve(__dirname, "../../public/styles.css"), "utf8");
+
+  // `.ghost` is the app's glitch portrait layer, and it is hidden outright:
+  //   .hex-scan, .arcs, .tear, .ghost { display: none !important; }
+  // The dev panels borrowed the name for "secondary button", which made the
+  // CLOSE DEV MODE button, the header X, the name-form cancel and DENY all
+  // invisible. They measured 0x0, so they could not be clicked at all.
+  assert.match(css, /\.hex-scan,\s*\.arcs,\s*\.tear,\s*\.ghost\s*\{\s*display:\s*none\s*!important/,
+    "the decorative .ghost layer is expected to stay hidden - that is why the name is off-limits");
+
+  const devButtons = html.match(/<button[^>]*class="[^"]*dev-(btn|mini)[^"]*"[^>]*>/g) || [];
+  assert.ok(devButtons.length > 0, "the dev screen should have buttons");
+  for (const tag of devButtons) {
+    assert.doesNotMatch(tag, /\bghost\b/,
+      `a dev button must not use the decorative .ghost class: ${tag}`);
+  }
+
+  // The most important one: leaving must be clickable.
+  const exitTag = devButtons.find((t) => t.includes('id="devExit"'));
+  assert.ok(exitTag, "the exit button should exist");
+  assert.match(exitTag, /class="[^"]*dev-btn[^"]*"/, "the exit button must keep its button styling");
+  assert.match(css, /\.dev-btn\.quiet\s*\{/, "the quiet button style must still exist");
+});

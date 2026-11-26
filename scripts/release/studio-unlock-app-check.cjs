@@ -89,6 +89,10 @@ const ok = (label, cond, extra = "") => {
 
     await evaluate(send, `window.CapriDev.open(); true`);
     await new Promise((r) => setTimeout(r, 400));
+    // The studio lives behind the CONTENT tab. Open it the way a user does, so
+    // every measurement below is of a real, visible control.
+    await evaluate(send, `document.querySelector('[data-dev-tab="content"]').click(); true`);
+    await new Promise((r) => setTimeout(r, 300));
 
     // ---- a real run releases the lock ------------------------------------
     // No fake run: the actual batch is driven on a path that cannot be read, so
@@ -252,6 +256,7 @@ const ok = (label, cond, extra = "") => {
     // ---- reopening is clean ----------------------------------------------
     const reopened = await evaluate(send, `(() => {
       window.CapriDev.open();
+      document.querySelector('[data-dev-tab="content"]').click();
       const snap = window.CapriDev.snapshot();
       return {
         open: snap.open,
