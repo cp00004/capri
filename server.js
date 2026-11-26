@@ -3840,6 +3840,9 @@ async function transcribePiece({ buffer, type, language, hint, provider, chunk, 
     split: false,
     temporary: Boolean(result.temporary),
     splittable: Boolean(result.splittable),
+    // Carry the queue flag all the way out; dropping it here made a spent budget
+    // look like a permanent refusal by the time it reached the HTTP response.
+    deferred: Boolean(result.deferred),
   };
   if (depth >= 2 || !result.splittable) return failed;
 
@@ -3849,6 +3852,7 @@ async function transcribePiece({ buffer, type, language, hint, provider, chunk, 
   console.warn(`  ! stt ${chunk.at}: splitting into 2 smaller pieces and retrying`);
   const parts = [];
   const notes = [];
+  let anyDeferred = false;
   for (const [i, half] of halves.entries()) {
     const sub = await transcribePiece({
       buffer: half,
@@ -3866,10 +3870,13 @@ async function transcribePiece({ buffer, type, language, hint, provider, chunk, 
       for (const part of sub.parts) parts.push({ ...part, at: +(shift + part.at).toFixed(3) });
     } else {
       notes.push(sub.reason);
+      // If a half was only queued behind the budget, the piece as a whole is
+      // queued too: reporting it as refused would lose it in the caller's eyes.
+      if (sub.deferred) anyDeferred = true;
     }
   }
   if (!parts.length) {
-    return { ...failed, split: true, reason: notes[0] || result.reason };
+    return { ...failed, deferred: anyDeferred, split: true, reason: notes[0] || result.reason };
   }
   return { ok: true, parts, split: true };
 }
