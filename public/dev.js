@@ -2719,6 +2719,9 @@
     }),
     // Repaint after a test or a user pokes the state; harmless in normal use.
     repaint: () => paintStudio(),
+    // The resume rule itself, so an automated check can exercise every branch
+    // without a real 3-hour video and without poking the DOM.
+    offer: resumeOffer,
   };
 
   function wire() {

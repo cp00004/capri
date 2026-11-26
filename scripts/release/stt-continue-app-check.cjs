@@ -107,22 +107,39 @@ async function evaluate(send, expression) {
   check("the probe cleaned up after itself", outcome.dropped === true);
 
   // ── paintStudio actually shows and hides the button ───────────────────────
-  // Driven through the studio's own state rather than a hand-built DOM: a video
-  // with `resumable` set must reveal it, and clearing the flag must hide it.
-  const paint = await evaluate(c.send, `(async () => {
-    const btn = document.getElementById("shortsContinue");
-    const run = document.getElementById("shortsRun");
-    // Reach the studio state through the module's own globals if exposed; if the
-    // page keeps it private, fall back to a class-level assertion so this check
-    // still proves the paint rule exists rather than silently passing.
-    const before = btn.classList.contains("hidden");
-    btn.classList.remove("hidden");
-    const shown = !btn.classList.contains("hidden");
-    btn.classList.add("hidden");
-    return { before, shown, after: btn.classList.contains("hidden"), runFound: !!run };
+  // Driven through the studio's own decision function, so this cannot pass just
+  // because the DOM can be poked: the rule itself must be right.
+  const offer = await evaluate(c.send, `(() => {
+    const api = window.CapriDev;
+    if (!api || typeof api.continueState !== "function") return { error: "CapriDev.continueState missing" };
+    const live = api.continueState();
+    return { live, hasOffer: Boolean(live && live.offer), label: live.label, visible: live.visible };
   })()`);
-  check("the button toggles through the hidden class", paint.shown === true && paint.after === true);
-  check("ANALYZE & CUT is still there next to it", paint.runFound === true);
+  check("the studio exposes its resume decision", offer.hasOffer === true, JSON.stringify(offer));
+  check("the button and the decision agree", offer.visible === (offer.hasOffer && offer.live.offer.show),
+    `visible=${offer.visible} show=${offer.live?.offer?.show}`);
+
+  // The labels the button can wear, from the same function the paint uses.
+  const labels = await evaluate(c.send, `(() => {
+    const one = { info: { hasAudio: true }, resumable: true, path: "a.mp4" };
+    const two = { info: { hasAudio: true }, resumable: true, path: "b.mp4" };
+    const plain = { info: { hasAudio: true }, path: "c.mp4" };
+    const deaf = { info: { hasAudio: false }, resumable: true, path: "d.mp4" };
+    return {
+      none: window.CapriDev.offer([plain], { hasRoot: true, busy: false }),
+      one: window.CapriDev.offer([one], { hasRoot: true, busy: false }),
+      two: window.CapriDev.offer([one, two], { hasRoot: true, busy: false }),
+      busy: window.CapriDev.offer([one], { hasRoot: true, busy: true }),
+      noRoot: window.CapriDev.offer([one], { hasRoot: false, busy: false }),
+      deafOnly: window.CapriDev.offer([deaf], { hasRoot: true, busy: false }),
+    };
+  })()`);
+  check("nothing resumable means no button", labels.none?.show === false);
+  check("one video reads CONTINUE", labels.one?.label === "CONTINUE", JSON.stringify(labels.one));
+  check("several read a count", labels.two?.label === "CONTINUE (2)", JSON.stringify(labels.two));
+  check("a busy run hides it", labels.busy?.show === false);
+  check("no workspace folder hides it", labels.noRoot?.show === false);
+  check("a silent file never offers a resume", labels.deafOnly?.show === false);
 
   // ── the handler is wired to the resume path, not the plain run ────────────
   // A click with nothing resumable must be a no-op, not a full re-run: that is
