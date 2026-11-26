@@ -1353,6 +1353,9 @@
       vision: { frames: 0, sent: 0, failed: 0 },
       passes: { proposed: 0, reviewed: 0, accepted: 0, rejected: 0 },
       degraded: [],
+      // Neutral remarks. A re-run reusing saved work belongs here, not in
+      // `degraded`, or a clean resume would be shown under "DEGRADED THIS RUN".
+      notes: [],
     };
   }
 
@@ -1708,7 +1711,8 @@
       budget: deferredCount ? { pauses: deferredCount, rescued: deferredRescued } : null,
     };
     if (cached) {
-      report.degraded.push(
+      // A note, not a degradation: reusing a saved region is the feature working.
+      report.notes.push(
         `${cached} of ${regions.length} speech regions were kept from an earlier run, so they were not read again`
       );
     }
@@ -2268,7 +2272,7 @@
               providers: report.stt.providers,
               cached: served.length,
             };
-            report.degraded.push(
+            report.notes.push(
               `whole transcript kept from an earlier run of this video - ${served.length} speech regions were not read again`
             );
           }
