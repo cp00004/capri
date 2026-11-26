@@ -164,3 +164,38 @@ test("a split answer survives the round trip intact", () => {
   assert.strictEqual(hit.payload.parts[1].at, 12.5, "the part offset places it on the clock");
   assert.strictEqual(SC.find(doc, { start: 100, end: 140 }).provider, "groq+gemini");
 });
+
+test("a transcript that stopped short can be told apart from a finished one", () => {
+  const ident = SC.identity(VIDEO, INFO);
+  const doc = SC.empty(ident);
+  // A saved doc with no recorded total is assumed finished: calling an old cache
+  // unfinished on a guess would nag the user about a video that is complete.
+  assert.strictEqual(SC.partial(doc), false);
+  SC.markTotal(doc, 236);
+  assert.strictEqual(SC.partial(doc), true, "0 of 236 read is unfinished");
+  for (let i = 0; i < 172; i += 1) SC.add(doc, { start: i * 40, end: i * 40 + 38 }, payload("groq", "w"));
+  assert.strictEqual(SC.partial(doc), true, "172 of 236 read is unfinished");
+  for (let i = 172; i < 236; i += 1) SC.add(doc, { start: i * 40, end: i * 40 + 38 }, payload("groq", "w"));
+  assert.strictEqual(SC.partial(doc), false, "236 of 236 read is finished");
+});
+
+test("CONTINUE is offered for a real partial run and not for a clean one", () => {
+  // The button decision, in the same terms the studio uses: a doc that belongs to
+  // this file and holds fewer regions than the video has.
+  const ident = SC.identity(VIDEO, INFO);
+  const doc = SC.empty(ident);
+  SC.markTotal(doc, 236);
+  SC.add(doc, { start: 0, end: 40 }, payload("groq", "hello"));
+  assert.ok(SC.sameVideo(doc, ident) && SC.partial(doc), "a half-read transcript offers CONTINUE");
+  assert.strictEqual(SC.sameVideo(doc, SC.identity(VIDEO, { size: 42, duration: 12239.4 })), false,
+    "a cache from another file never offers CONTINUE");
+});
+
+test("marking the total never invents a count it was not given", () => {
+  const doc = SC.empty(SC.identity(VIDEO, INFO));
+  SC.markTotal(doc, 0);
+  SC.markTotal(doc, -5);
+  SC.markTotal(doc, undefined);
+  assert.strictEqual(doc.regionsTotal, undefined, "a junk total is ignored rather than stored");
+  assert.strictEqual(SC.partial(doc), false);
+});

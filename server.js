@@ -1008,7 +1008,7 @@ function devToolError(res, status, message) {
   return json(res, status, { error: "dev_failed", message });
 }
 
-async function collectDevCompletion({ messages, tools, temperature }) {
+async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 }) {
   const vision = devHasImages(messages);
   const candidates = devCandidates(vision);
   let lastErr = null;
@@ -1017,70 +1017,97 @@ async function collectDevCompletion({ messages, tools, temperature }) {
   // meaningful cause is the vision-capable provider tried first, so keep that one
   // separately and let it be the message.
   let visionErr = null;
-  for (let i = 0; i < Math.min(candidates.length, 6); i += 1) {
-    const provider = candidates[i];
-    let upstream;
-    try {
-      upstream = await chatCompletion({ provider, messages, tools, temperature });
-    } catch (err) {
-      lastErr = err;
-      if (vision && !visionErr) visionErr = err;
-      const status = Number(err.status);
-      if (status === 429) coolDown(provider, Number(err.retryAfter) || 20);
-      else if (status === 401 || status === 403) coolDown(provider, 300);
-      else if (status === 402) coolDown(provider, 1800);
-      else if (status === 404) coolDown(provider, 600);
-      else coolDown(provider, 15);
-      continue;
-    }
-    const reader = upstream.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let content = "";
-    let calls = [];
-    let done = false;
-    try {
-      while (!done) {
-        const { value, done: ended } = await readChunk(reader, 30_000);
-        if (ended) break;
-        buffer += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = buffer.indexOf("\n\n")) !== -1) {
-          const frame = buffer.slice(0, idx);
-          buffer = buffer.slice(idx + 2);
-          const line = frame.split("\n").find((l) => l.startsWith("data:"));
-          if (!line) continue;
-          const payload = line.slice(5).trim();
-          if (payload === "[DONE]") { done = true; break; }
-          let chunk;
-          try { chunk = JSON.parse(payload); } catch { continue; }
-          const delta = chunk.choices?.[0]?.delta;
-          if (!delta) continue;
-          if (delta.content) content += typeof delta.content === "string" ? delta.content : contentText(delta.content);
-          for (const tc of delta.tool_calls || []) {
-            const at = tc.index ?? calls.length;
-            if (!calls[at]) calls[at] = { id: tc.id || `call_${Date.now()}_${at}`, type: "function", function: { name: "", arguments: "" } };
-            if (tc.id) calls[at].id = tc.id;
-            if (tc.extra_content) calls[at].extra_content = tc.extra_content;
-            if (tc.thought_signature) calls[at].thought_signature = tc.thought_signature;
-            if (tc.function?.name) calls[at].function.name += tc.function.name;
-            if (tc.function?.arguments) calls[at].function.arguments += tc.function.arguments;
+  // A short cap on a free relay is a queue, not a verdict. Sweeping the list once
+  // and giving up turned a minute-long cap into "5 window(s) failed in pass one"
+  // and then into "every video failed - unknown error" on a video that was fine.
+  // The budget is deliberately small: it covers a brief cap, not a dead account.
+  const queuedUntil = Date.now() + Math.max(0, Number(queueMs) || 0);
+  let sweeps = 0;
+  for (;;) {
+    sweeps += 1;
+    let retryable = 0;
+    let onlyRetryable = true;
+    for (let i = 0; i < Math.min(candidates.length, 6); i += 1) {
+      const provider = candidates[i];
+      let upstream;
+      try {
+        upstream = await chatCompletion({ provider, messages, tools, temperature });
+      } catch (err) {
+        lastErr = err;
+        if (vision && !visionErr) visionErr = err;
+        const status = Number(err.status);
+        // 5xx and 429 both clear on their own: the relay is busy, not wrong.
+        if (status === 429) { coolDown(provider, Number(err.retryAfter) || 20); retryable += 1; }
+        else if (status === 401 || status === 403) { coolDown(provider, 300); onlyRetryable = false; }
+        else if (status === 402) { coolDown(provider, 1800); onlyRetryable = false; }
+        else if (status === 404) { coolDown(provider, 600); onlyRetryable = false; }
+        else if (status >= 500) { coolDown(provider, 15); retryable += 1; }
+        else { coolDown(provider, 15); onlyRetryable = false; }
+        continue;
+      }
+      const reader = upstream.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let content = "";
+      let calls = [];
+      let done = false;
+      try {
+        while (!done) {
+          const { value, done: ended } = await readChunk(reader, 30_000);
+          if (ended) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx;
+          while ((idx = buffer.indexOf("\n\n")) !== -1) {
+            const frame = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            const line = frame.split("\n").find((l) => l.startsWith("data:"));
+            if (!line) continue;
+            const payload = line.slice(5).trim();
+            if (payload === "[DONE]") { done = true; break; }
+            let chunk;
+            try { chunk = JSON.parse(payload); } catch { continue; }
+            const delta = chunk.choices?.[0]?.delta;
+            if (!delta) continue;
+            if (delta.content) content += typeof delta.content === "string" ? delta.content : contentText(delta.content);
+            for (const tc of delta.tool_calls || []) {
+              const at = tc.index ?? calls.length;
+              if (!calls[at]) calls[at] = { id: tc.id || `call_${Date.now()}_${at}`, type: "function", function: { name: "", arguments: "" } };
+              if (tc.id) calls[at].id = tc.id;
+              if (tc.extra_content) calls[at].extra_content = tc.extra_content;
+              if (tc.thought_signature) calls[at].thought_signature = tc.thought_signature;
+              if (tc.function?.name) calls[at].function.name += tc.function.name;
+              if (tc.function?.arguments) calls[at].function.arguments += tc.function.arguments;
+            }
           }
         }
+      } catch (err) {
+        try { await upstream.body.cancel(); } catch { /* gone */ }
+        lastErr = err;
+        coolDown(provider, 15);
+        retryable += 1;
+        continue;
       }
-    } catch (err) {
-      try { await upstream.body.cancel(); } catch { /* gone */ }
-      lastErr = err;
-      coolDown(provider, 15);
-      continue;
+      const toolCalls = calls.filter((c) => c?.function?.name);
+      if (!content.trim() && !toolCalls.length) {
+        lastErr = new Error("The relay answered with nothing.");
+        coolDown(provider, 10);
+        retryable += 1;
+        continue;
+      }
+      return { content: content.trim(), tool_calls: toolCalls, provider: provider.name };
     }
-    const toolCalls = calls.filter((c) => c?.function?.name);
-    if (!content.trim() && !toolCalls.length) {
-      lastErr = new Error("The relay answered with nothing.");
-      coolDown(provider, 10);
-      continue;
-    }
-    return { content: content.trim(), tool_calls: toolCalls, provider: provider.name };
+
+    // Every relay was tried and none had an answer. If each refusal was a cap or
+    // a momentary fault, wait for the soonest of them and go round again rather
+    // than handing the caller a failed window it will report as blind.
+    if (!onlyRetryable || retryable === 0 || Date.now() >= queuedUntil || sweeps >= 4) break;
+    const soonest = orderCandidates().slice(0, 6).reduce((soon, c) => {
+      const until = providerCooldown.get(candidateId(c)) || 0;
+      return until > Date.now() ? Math.min(soon, until) : soon;
+    }, Infinity);
+    const wait = Math.max(250, Math.min(45_000, Number.isFinite(soonest) ? soonest - Date.now() + 250 : 5_000));
+    if (Date.now() + wait > queuedUntil) break;
+    await new Promise((r) => setTimeout(r, wait));
   }
   throw (vision ? (visionErr || lastErr) : lastErr) || new Error(cappedMessage());
 }
@@ -1159,9 +1186,9 @@ function cleanShortsClip(raw, ws, we, duration, platform) {
  * the transcript alone. Whatever happens is returned in `vision` so the caller can
  * say exactly how much the model could see.
  */
-async function shortsCompletion(messages, temperature) {
+async function shortsCompletion(messages, temperature, queueMs = 0) {
   if (!devHasImages(messages)) {
-    return collectDevCompletion({ messages, tools: undefined, temperature });
+    return collectDevCompletion({ messages, tools: undefined, temperature, queueMs });
   }
 
   const imageCount = (list) => list.reduce((n, m) => n + (Array.isArray(m.content)
@@ -1198,7 +1225,7 @@ async function shortsCompletion(messages, temperature) {
   for (const plan of plans) {
     const list = plan.keep > 0 ? withImages(plan.keep) : textOnly(messages);
     try {
-      const out = await collectDevCompletion({ messages: list, tools: undefined, temperature });
+      const out = await collectDevCompletion({ messages: list, tools: undefined, temperature, queueMs });
       if (plan.keep === total && !firstErr) return out;
       // Strip a trailing full stop so the note does not read "...choom..".
       const why = String(firstErr?.message || "the relay refused the request").replace(/[.\s]+$/, "").slice(0, 160);
@@ -1213,6 +1240,28 @@ async function shortsCompletion(messages, temperature) {
     }
   }
   throw firstErr || new Error("The model could not be reached.");
+}
+
+/**
+ * Ask for a JSON answer and retry when the reply cannot be parsed.
+ *
+ * A model that answers 200 with prose or a truncated object is a bad answer, not
+ * a bad window: retrying once usually fixes it, and the alternative was writing
+ * off the whole window. That is what produced "5 window(s) failed in pass one:
+ * the model returned unreadable JSON" on a run whose transcript was fine.
+ */
+async function jsonCompletion(messages, temperature, { queueMs = 0, attempts = 3 } = {}) {
+  let lastErr = null;
+  for (let i = 1; i <= attempts; i += 1) {
+    const out = await shortsCompletion(messages, temperature, queueMs);
+    try {
+      return { parsed: analysis.parseModelJson(out.content), out };
+    } catch (err) {
+      lastErr = new Error("the model returned unreadable JSON");
+      if (i < attempts) await new Promise((r) => setTimeout(r, 400 * i));
+    }
+  }
+  throw lastErr;
 }
 
 async function handleDevShorts(req, res) {
@@ -1530,12 +1579,14 @@ async function handleClipPropose(req, res) {
       content.push(devImagePart(f.dataUrl));
     }
 
-    const out = await shortsCompletion([
+    // A short cap on a free relay is a queue, not a verdict, so each window may
+    // wait a little for room. The budget is per window and small by design: four
+    // windows run at once, and a long wait here would outlast the HTTP caller.
+    const out = await jsonCompletion([
       { role: "system", content: analysis.PASS_ONE_SYSTEM(platform) },
       { role: "user", content },
-    ], 0.3);
-    let parsed;
-    try { parsed = analysis.parseModelJson(out.content); } catch { throw new Error("the model returned unreadable JSON"); }
+    ], 0.3, { queueMs: 45_000 });
+    const parsed = out.parsed;
     const list = Array.isArray(parsed?.moments) ? parsed.moments
       : Array.isArray(parsed?.clips) ? parsed.clips
         : parsed?.start != null ? [parsed] : [];
@@ -1643,16 +1694,17 @@ async function handleClipReview(req, res) {
   }
 
   let out;
+  let parsed;
   try {
-    out = await shortsCompletion([
+    const answered = await jsonCompletion([
       { role: "system", content: analysis.PASS_TWO_SYSTEM(platform) },
       { role: "user", content },
-    ], 0.2);
+    ], 0.2, { queueMs: 30_000 });
+    out = answered.out;
+    parsed = answered.parsed;
   } catch (err) {
     return devToolError(res, 502, String(err?.message || "The review could not run."));
   }
-  let parsed;
-  try { parsed = analysis.parseModelJson(out.content); } catch { return devToolError(res, 502, "The review returned unreadable JSON."); }
   const review = analysis.coerceReview(parsed, moment, duration, limits);
   if (!review) return devToolError(res, 502, "The review returned nothing usable.");
 

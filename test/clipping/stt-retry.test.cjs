@@ -50,6 +50,41 @@ test("a rate limit waits for the window but a daily quota does not", () => {
   );
 });
 
+test("Groq's real audio-seconds refusal is a wait, not a dead daily quota", () => {
+  // Captured live. The trap: this *hourly* refusal also says "requests per day
+  // (RPD)", because that is how Groq names the org-level bucket. Reading that as
+  // a daily cap classified the 429 as sticky, the server answered 502, and 64
+  // speech regions of a live 3.4-hour run were recorded as permanently lost.
+  const live =
+    "Rate limit reached for audio-seconds per hour (ASH) in organization org_01 on requests per day (RPD): " +
+    "Limit 14400, Used 14400, Requested 1. Please try again in 7m26.5s.";
+  assert.strictEqual(classify(httpError(429, live)).kind, "budget");
+  // The same shape without the ASH phrase, as some keys report it.
+  assert.strictEqual(
+    classify(httpError(429, "Rate limit reached for audio-seconds in organization org_01 on requests per day (RPD): Limit 7200, Used 7200. Please try again in 2m.")).kind,
+    "budget"
+  );
+  // The headers alone are enough, even with a body that reads like a daily cap.
+  assert.strictEqual(
+    classify(Object.assign(httpError(429, "Limit 14400 on requests per day (RPD)"), {
+      budget: { limitSeconds: 7200, remainingSeconds: 0, resetMs: 446_500, seenAt: 0 },
+    })).kind,
+    "budget"
+  );
+  // A real daily or monthly cap is still a dead end; waiting cannot outlast it.
+  for (const body of [
+    "Rate limit reached for tokens per day (TPD): Limit 500000, Used 500000. Please try again in 3h.",
+    "Rate limit reached for audio-seconds per day: Limit 7200.",
+    "Rate limit reached for requests per month.",
+    "insufficient_quota",
+  ]) {
+    assert.strictEqual(classify(httpError(429, body)).kind, "sticky", `"${body}" should be sticky`);
+  }
+  // Unknown 429 wording assumes a refilling window: a bounded wait is the
+  // cheaper mistake, since the alternative throws the audio away.
+  assert.strictEqual(classify(httpError(429, "too many requests")).kind, "budget");
+});
+
 test("a rate limited chunk waits for the window instead of being lost", async () => {
   // The bug behind "69 of 236 never read": a 429 spent the retry budget and the
   // chunk was written off even though the bucket was about to refill.

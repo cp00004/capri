@@ -66,6 +66,7 @@
       permDeny: $("devPermDeny"),
       shortsFiles: $("shortsFiles"),
       shortsRun: $("shortsRun"),
+      shortsContinue: $("shortsContinue"),
       shortsProgress: $("shortsProgress"),
       shortsResult: $("shortsResult"),
       nameForm: $("devNameForm"),
@@ -618,6 +619,20 @@
         try {
           entry.info = await D.probe(f.path);
           entry.state = entry.info.hasAudio ? "ready" : "no audio - skipped";
+          // A video whose saved transcript stopped short can be finished without
+          // re-reading what is already on disk. Checked here so CONTINUE is
+          // offered for a file from a previous session too, not only one that
+          // stopped during this visit.
+          if (entry.info.hasAudio) {
+            const SC = window.CapriSttCache;
+            if (SC && typeof D?.sttCacheLoad === "function") {
+              const ident = SC.identity(f.path, entry.info);
+              if (ident.ok) {
+                const doc = await D.sttCacheLoad(ident.id).catch(() => null);
+                entry.resumable = Boolean(doc && SC.sameVideo(doc, ident) && SC.partial(doc));
+              }
+            }
+          }
         } catch (err) {
           entry.state = "unreadable";
           sysLine(`could not read ${f.name}: ${err.message || err}`);
@@ -1330,6 +1345,17 @@
     }
     const ready = dev.videos.some((v) => v.info?.hasAudio);
     dev.els.shortsRun.disabled = !(ready && dev.root) || dev.shortsBusy;
+    // CONTINUE only exists when a run actually stopped short. It resumes the
+    // same video from the transcript saved on disk, so the seconds already read
+    // are not paid for twice.
+    const resumeList = dev.videos.filter((v) => v.info?.hasAudio && v.resumable);
+    const canResume = Boolean(dev.root) && resumeList.length > 0 && !dev.shortsBusy;
+    dev.els.shortsContinue.classList.toggle("hidden", !canResume);
+    if (canResume) {
+      dev.els.shortsContinue.disabled = false;
+      dev.els.shortsContinue.textContent = resumeList.length === 1 ? "CONTINUE" : `CONTINUE (${resumeList.length})`;
+      dev.els.shortsContinue.title = "Finish the speech regions this video still has unread. Everything already read is kept.";
+    }
   }
 
   function shutdown(text) {
@@ -1437,6 +1463,16 @@
         : chunks?.reason
           ? chunks.reason
           : "the speech reader returned nothing for every speech region";
+      // Every region queued behind the budget is not a broken video, it is a
+      // video waiting its turn. Saying "could not read the speech" there would
+      // read as a fault and hide the one action that helps.
+      if ((deferred || []).length && !(lost || []).length) {
+        throw new Error(
+          `The speech budget ran out before any of this ${regions.length > 1 ? `${regions.length} speech regions` : "region"} could be read.`
+          + " That is the account's hourly audio limit, not a problem with the video."
+          + " Press CONTINUE when the window refills and it picks up from here."
+        );
+      }
       // Name the engines that refused. Without this the user sees only Capri's
       // own 502 and cannot tell a dead key from a provider outage.
       const engines = [...new Set((lost || []).map((l) => l.why).filter(Boolean))].slice(0, 2);
@@ -1479,6 +1515,9 @@
   async function transcribeChunks(video, regions, report, cache) {
     const SC = window.CapriSttCache;
     const WORKERS = 3;
+    // Remember the video's full shape on disk so a later session can tell this
+    // transcript stopped short and offer to finish it.
+    if (cache && SC) SC.markTotal(cache.doc, regions.length);
     const words = [];
     const segments = [];
     const providers = [];
@@ -2233,9 +2272,10 @@
     return { made: state.made.length - before };
   }
 
-  async function runShorts() {
+  async function runShorts(resume = false) {
     if (dev.shortsBusy) return;
-    const queue = dev.videos.filter((v) => v.info?.hasAudio && v.state !== "working");
+    const queue = dev.videos.filter((v) => v.info?.hasAudio && v.state !== "working"
+      && (!resume || v.resumable));
     if (!queue.length) return;
     if (!dev.root) {
       shutdown("Open a workspace folder first - the shorts and their scripts are written into it.");
@@ -2297,6 +2337,10 @@
           }
           report.stt.granularity = read.granularity;
           report.duration = info.duration;
+          // A read that stopped short of the full transcript can be finished
+          // later from the saved regions. Recorded here so the studio can offer
+          // CONTINUE, and cleared the moment a read is complete.
+          entry.resumable = Boolean(read.incomplete);
 
           const targets = dev.platform === "both" ? ["youtube", "tiktok"] : [dev.platform];
           const multi = targets.length > 1;
@@ -2322,6 +2366,10 @@
           renderShortsResults(state.made, false);
         } catch (err) {
           entry.state = "failed";
+          // A read that failed partway is exactly the case CONTINUE exists for:
+          // what it did read is already on disk, so the next press finishes it
+          // instead of starting the video again.
+          if (report.transcript && report.transcript.complete === false) entry.resumable = true;
           state.failures.push(`${entry.name}: ${err.message || err}`);
         } finally {
           renderVideoList();
@@ -2329,10 +2377,17 @@
       }
       if (!state.made.length) {
         // Nothing was produced, so the reason is the whole result: name the
-        // actual cause instead of a generic failure.
+        // actual cause instead of a generic failure. "unknown error" used to
+        // hide a transcript that was still queued behind the speech budget.
         const reports = dev.videos.filter((v) => v.clipReport).map((v) => v.clipReport);
         renderShortsResults([], false, reports);
-        throw new Error(`every video failed - ${state.failures[0] || "unknown error"}`);
+        const real = state.failures[0]
+          || (reports.some((r) => r?.transcript && r.transcript.complete === false)
+            ? "the transcript is still incomplete - the speech left unread is saved, so CONTINUE finishes it"
+            : reports.length
+              ? "nothing worth posting came out of the read"
+              : "no video could be analysed");
+        throw new Error(`every video failed - ${real}`);
       }
       renderShortsResults(state.made, true);
       const where = state.made[0].cut.path.slice(0, state.made[0].cut.path.lastIndexOf("\\") + 1);
@@ -2557,13 +2612,13 @@
         const canResume = kept > 0 || t.regions > (lostCount + queued);
         if (queued) {
           lines.unshift(
-            "TO FINISH THIS TRANSCRIPT: run it again after the speech window refills."
+            "TO FINISH THIS TRANSCRIPT: press CONTINUE once the speech window refills."
             + " The pause is the account's hourly audio limit, not a problem with the video."
-            + (canResume ? " The regions already read are saved, so the next run continues from there instead of starting over." : "")
+            + (canResume ? " The regions already read are saved, so it continues from there instead of starting over." : "")
           );
         } else if (canResume) {
           lines.unshift(
-            "TO FINISH THIS TRANSCRIPT: run it again. The regions already read are saved, so the next run continues from there instead of starting over."
+            "TO FINISH THIS TRANSCRIPT: press CONTINUE. The regions already read are saved, so it continues from there instead of starting over."
           );
         }
       }
@@ -2686,7 +2741,8 @@
     dev.els.permAlways.addEventListener("click", () => dev.promptResolve?.("always"));
     dev.els.permDeny.addEventListener("click", () => dev.promptResolve?.("deny"));
     $("shortsPick").addEventListener("click", pickVideos);
-    $("shortsRun").addEventListener("click", runShorts);
+    $("shortsRun").addEventListener("click", () => runShorts(false));
+    dev.els.shortsContinue.addEventListener("click", () => runShorts(true));
     document.querySelectorAll("[data-platform]").forEach((b) => {
       b.addEventListener("click", () => setPlatform(b.getAttribute("data-platform")));
     });

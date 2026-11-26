@@ -1306,8 +1306,10 @@ body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 
 /* youtube studio: the whole right side belongs to one video at a time */
 #devYoutubeView { flex: 1; min-height: 0; }
 .yt-scroll { flex: 1; min-height: 0; overflow: auto; padding: 18px 22px 40px; display: flex; flex-direction: column; gap: 16px; }
-.yt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--line); padding-bottom: 14px; }
-.yt-head-text { min-width: 0; }
+.yt-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; border-bottom: 1px solid var(--line); padding-bottom: 14px; flex-wrap: wrap; }
+.yt-head-text { min-width: 0; flex: 1 1 auto; }
+.yt-head-actions { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.yt-head-actions .dev-btn { white-space: nowrap; }
 .yt-head .dev-kicker { margin: 0 0 6px; }
 .yt-head h3 { margin: 0 0 6px; font-family: var(--font); font-size: 22px; letter-spacing: 0.4px; color: var(--white); word-break: break-word; }
 .yt-meta { margin: 0; font-family: var(--mono); font-size: 11.5px; line-height: 1.7; color: var(--ink-dim); max-width: 72ch; }

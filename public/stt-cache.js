@@ -148,7 +148,31 @@
     return Object.keys(doc.regions).filter((k) => doc.regions[k]?.payload).length;
   }
 
-  const api = { VERSION, TOLERANCE, hash, identity, empty, sameVideo, key, find, add, size };
+  /**
+   * Record how many speech regions the whole video has.
+   *
+   * Without this the doc knows only what has been read, so a saved transcript
+   * cannot say whether it is finished. With it, a later session can tell "this
+   * video still owes 64 regions" and offer to finish them, instead of the user
+   * having to remember that a run stopped short.
+   */
+  function markTotal(doc, total) {
+    const n = Math.max(0, Math.round(num(total)));
+    if (!doc || !n) return;
+    doc.regionsTotal = n;
+  }
+
+  /**
+   * True when this doc is a transcript that stopped short: it knows the video's
+   * region count and holds fewer than that. An unknown total counts as complete,
+   * because an old doc must not be called unfinished on a guess.
+   */
+  function partial(doc) {
+    if (!doc || !doc.regionsTotal) return false;
+    return size(doc) < num(doc.regionsTotal);
+  }
+
+  const api = { VERSION, TOLERANCE, hash, identity, empty, sameVideo, key, find, add, size, markTotal, partial };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (root) root.CapriSttCache = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

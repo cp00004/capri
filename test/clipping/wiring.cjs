@@ -60,6 +60,22 @@ const sttCacheAt = html.indexOf("stt-cache.js");
 console.log(`stt-cache loaded before dev.js: ${sttCacheAt > -1 && devAt > -1 && sttCacheAt < devAt}`);
 const sttCacheMissing = sttCacheAt > -1 ? [] : ["stt-cache.js"];
 
+// CONTINUE is the user-facing half of resuming a stopped run: the button has to
+// exist in the markup, be looked up, be painted by paintStudio, and be wired to
+// the resume path - a half-wired button is worse than none.
+const continueChecks = {
+  "markup has #shortsContinue": /id="shortsContinue"/.test(html),
+  "paintStudio shows and hides it": /shortsContinue\.classList\.toggle\("hidden"/.test(dev),
+  "click runs the resume path": /shortsContinue\.addEventListener\("click",\s*\(\)\s*=>\s*runShorts\(true\)\)/.test(dev),
+  "runShorts accepts a resume flag": /async function runShorts\(resume = false\)/.test(dev),
+  "resume filters to resumable videos": /!resume \|\| v\.resumable/.test(dev),
+  "a stopped read marks the entry resumable": /entry\.resumable = Boolean\(read\.incomplete\)/.test(dev),
+};
+for (const [name, ok] of Object.entries(continueChecks)) {
+  if (!ok) console.log(`  CONTINUE broken: ${name}`);
+}
+const continueMissing = Object.entries(continueChecks).filter(([, ok]) => !ok).map(([name]) => name);
+
 // IPC contract: every channel the preload invokes must be handled in the main
 // process, or the renderer's call rejects at runtime with no hint why.
 const main = fs.readFileSync(path.join(root, "electron/main.cjs"), "utf8");
@@ -69,4 +85,4 @@ const unhandled = invoked.filter((ch) => !main.includes(`"${ch}"`) && !devTools.
 console.log(`ipc channels: ${invoked.length - unhandled.length}/${invoked.length} handled`);
 if (unhandled.length) console.log(`  MISSING: ${unhandled.join(", ")}`);
 
-process.exit(missing.length || bridgeMissing.length || cmMissing.length || sttCacheMissing.length || unhandled.length ? 1 : 0);
+process.exit(missing.length || bridgeMissing.length || cmMissing.length || sttCacheMissing.length || continueMissing.length || unhandled.length ? 1 : 0);

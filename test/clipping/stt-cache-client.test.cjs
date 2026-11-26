@@ -305,3 +305,45 @@ test("a run with nothing new to save still leaves a usable document", async () =
   assert.strictEqual(SC.size(doc), REGIONS.length, "the in-memory transcript is untouched");
   assert.ok(again.saved.length >= 1, "the final flush still writes, so the file is not abandoned mid-life");
 });
+
+test("a stopped run leaves a doc that says so, and CONTINUE can see it", async () => {
+  const SC = makeCache();
+  const ident = SC.identity("video.mp4", { size: 1, duration: 160 });
+  const doc = SC.empty(ident);
+
+  // Run one stops on the budget: two regions read, two still queued.
+  const one = await runRead({ SC, doc, regions: REGIONS, budget: 80, answer: (i) => words(`a${i}`) });
+  assert.strictEqual(one.result.deferred.length + one.result.lost.length, 2, "the run really stopped short");
+  // The read is incomplete, which is what makes the entry resumable and puts the
+  // button on screen instead of leaving the user to guess that a re-run helps.
+  const incomplete = one.result.deferred.length > 0 || one.result.lost.length > 0;
+  assert.strictEqual(incomplete, true);
+  // And the doc on disk can prove it after a restart, without the in-memory read.
+  assert.strictEqual(SC.partial(doc), true, "2 of 4 regions is unfinished");
+  assert.strictEqual(doc.regionsTotal, 4, "the full region count is recorded for later sessions");
+
+  // Run two finishes it; the doc must stop advertising itself as resumable.
+  const two = await runRead({ SC, doc, regions: REGIONS, answer: (i) => words(`b${i}`) });
+  assert.strictEqual(two.result.cached, 2);
+  assert.strictEqual(two.result.deferred.length, 0);
+  assert.strictEqual(SC.partial(doc), false, "a finished transcript must not offer CONTINUE");
+});
+
+test("two resumes in a row never re-read a region the earlier one saved", async () => {
+  const SC = makeCache();
+  const doc = SC.empty(SC.identity("video.mp4", { size: 1, duration: 160 }));
+  const read = [];   // regions that were actually answered, i.e. paid for
+  const answer = (word) => (i, n) => { if (n === 1) read.push(i); return words(`${word}${i}`); };
+
+  // Three runs: the window holds one region, then two, then it is done. The
+  // refusals in between are queue answers, not reads.
+  const r1 = await runRead({ SC, doc, regions: REGIONS, budget: 40, answer: answer("a") });
+  const r2 = await runRead({ SC, doc, regions: REGIONS, budget: 80, answer: answer("b") });
+  const r3 = await runRead({ SC, doc, regions: REGIONS, answer: answer("c") });
+
+  assert.strictEqual(read.length, REGIONS.length,
+    `every region should be read exactly once across the three runs, got [${read}]`);
+  assert.deepStrictEqual([...new Set(read)].sort((a, b) => a - b), [0, 1, 2, 3]);
+  assert.deepStrictEqual([...r3.result.words].map((w) => w.word), ["a0", "b1", "b2", "c3"]);
+  assert.strictEqual(SC.partial(doc), false);
+});
