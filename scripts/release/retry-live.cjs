@@ -30,7 +30,7 @@ const SERVER_PORT = 4188;
 const STUB_PORT = 4189;
 
 if (!WAV || !fs.existsSync(WAV)) {
-  console.error("usage: node retry-live.cjs <chunk.wav> [recover|allfail|sticky|toobig|budget]");
+  console.error("usage: node retry-live.cjs <chunk.wav> [recover|allfail|sticky|toobig|budget|budgetfail]");
   process.exit(2);
 }
 
@@ -77,10 +77,11 @@ const stub = http.createServer((req, res) => {
         console.log(`  groq  #${calls.groq} -> 413 chunk too large`);
         return upstream(res, 413, { error: { message: "audio file is too large for this model" } });
       }
-      if (MODE === "budget") {
+      if (MODE === "budget" || MODE === "budgetfail") {
         // Refused on the first ask, and again on the retry: both must be
-        // deferred rather than counted as a lost chunk.
-        if (calls.groq <= 2) {
+        // deferred rather than counted as a lost chunk. "budgetfail" never
+        // relents, to check the request still answers inside the wire limit.
+        if (MODE === "budgetfail" || calls.groq <= 2) {
           console.log(`  groq  #${calls.groq} -> 429 audio-seconds budget`);
           return upstream(
             res,
@@ -187,6 +188,9 @@ stub.listen(STUB_PORT, "127.0.0.1", async () => {
       method: "POST",
       headers: { "Content-Type": "audio/wav" },
       body: buf,
+      // The real client aborts a chunk request at 900s, so this harness must
+      // not hang indefinitely when a response never arrives.
+      signal: AbortSignal.timeout(960_000),
     });
     status = res.status;
     body = await res.json().catch(() => ({}));
