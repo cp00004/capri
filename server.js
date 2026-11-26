@@ -1097,10 +1097,15 @@ async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 
       return { content: content.trim(), tool_calls: toolCalls, provider: provider.name };
     }
 
-    // Every relay was tried and none had an answer. If each refusal was a cap or
-    // a momentary fault, wait for the soonest of them and go round again rather
-    // than handing the caller a failed window it will report as blind.
-    if (!onlyRetryable || retryable === 0 || Date.now() >= queuedUntil || sweeps >= 4) break;
+    // Every relay was tried and none had an answer. If any of them was capped or
+    // had a momentary fault, wait for the soonest and go round again rather than
+    // handing the caller a failed window it will report as blind.
+    //
+    // A single dead relay must not cancel that wait. FreeTheAI answering 402 says
+    // nothing about Groq's window, and requiring a clean sweep of failures here is
+    // the same mistake that turned queued speech regions into 64 permanent holes.
+    // A dead account simply keeps failing the next sweep, which is bounded.
+    if (retryable === 0 || Date.now() >= queuedUntil || sweeps >= 4) break;
     const soonest = orderCandidates().slice(0, 6).reduce((soon, c) => {
       const until = providerCooldown.get(candidateId(c)) || 0;
       return until > Date.now() ? Math.min(soon, until) : soon;
