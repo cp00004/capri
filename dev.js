@@ -1511,6 +1511,11 @@
       words,
       segments,
       granularity,
+      // Carried out so a re-run in the same session can report what this read
+      // covered and who served it. Without them that path knew only the words,
+      // and reported a full transcript as zero speech regions.
+      perChunk,
+      regions: regions.length,
       // A partial read must not be reused as if it were finished, or a re-run
       // would report a transcript with holes in it as complete.
       incomplete: (lost || []).length > 0 || (deferred || []).length > 0,
@@ -1787,9 +1792,18 @@
     };
     if (cached) {
       // A note, not a degradation: reusing a saved region is the feature working.
-      (report.notes ||= []).push(
-        `${cached} of ${regions.length} speech regions were kept from an earlier run, so they were not read again`
-      );
+      // It has to say whether the read finished. "172 of 236 kept, so 172 were
+      // skipped" reads like a hole in the transcript, when in fact this run read
+      // the last 64 and the transcript is now complete.
+      const finished = lost.length === 0 && deferred.length === 0;
+      const fresh = regions.length - cached;
+      let line = `${cached} of ${regions.length} speech regions were kept from an earlier run and reused`;
+      if (finished) {
+        line += fresh
+          ? ` - the ${fresh} still missing were read now, so the transcript is complete`
+          : " - that is the whole transcript, so nothing was left to read";
+      }
+      (report.notes ||= []).push(line);
     }
     if (saveFailed) {
       report.degraded.push(
@@ -2332,24 +2346,29 @@
             // Developer Mode shows what actually ran. The region count is real,
             // not zero: every one of them was read, just not on this run.
             const served = read.perChunk || [];
+            // A read that finished names its own region count. Fall back to the
+            // served chunks only for a read saved before that was recorded.
+            const total = Number(read.regions) || served.length;
             report.audio = { ok: (read.events || []).length > 0 || !report.degraded.length, reason: "", events: (read.events || []).length };
             report.scenes = { ok: true, reason: "", cuts: (read.scenes || []).length };
             report.stt = {
               ok: true, granularity: read.granularity,
-              chunks: served.length, words: (read.words || []).length,
+              chunks: total, words: (read.words || []).length,
               providers: [...new Set(served.map((c) => c.provider).filter(Boolean))],
             };
             report.transcript = {
               complete: true,
-              regions: served.length,
+              regions: total,
               lost: [],
               deferred: [],
               chunks: served,
               providers: report.stt.providers,
-              cached: served.length,
+              cached: total,
             };
             report.notes.push(
-              `whole transcript kept from an earlier run of this video - ${served.length} speech regions were not read again`
+              total
+                ? `the whole transcript was already read in this session - all ${total} speech regions were reused, so no audio was sent again`
+                : "the whole transcript was already read in this session, so no audio was sent again"
             );
           }
           report.stt.granularity = read.granularity;
@@ -2663,7 +2682,10 @@
       const note = document.createElement("div");
       note.className = "clip-report";
       const head = document.createElement("strong");
-      head.textContent = "RESUMED FROM AN EARLIER RUN";
+      // "RESUMED" reads like work still outstanding. When every report finished
+      // its transcript, the honest heading is that it was finished, not resumed.
+      const unfinished = (reports || []).some((r) => r?.transcript && r.transcript.complete === false);
+      head.textContent = unfinished ? "RESUMED FROM AN EARLIER RUN" : "FINISHED FROM AN EARLIER RUN";
       note.appendChild(head);
       const list = document.createElement("ul");
       for (const line of notes) {
@@ -2722,6 +2744,10 @@
     // The resume rule itself, so an automated check can exercise every branch
     // without a real 3-hour video and without poking the DOM.
     offer: resumeOffer,
+    // The report renderer, for the same reason: what a run says about itself is
+    // the part most likely to drift, and pinning it needs the real function
+    // rather than a copy of it.
+    renderReport: appendReport,
   };
 
   function wire() {
