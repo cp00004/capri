@@ -26,6 +26,8 @@
     info: null,
     videos: [],
     shortsBusy: false,
+    // Only ever set by the real-app check; see `forTest` on window.CapriDev.
+    pickOverride: null,
     platform: "youtube",
     contentMode: "shorts",
     storyType: "whatif",
@@ -2880,6 +2882,37 @@
     // the part most likely to drift, and pinning it needs the real function
     // rather than a copy of it.
     renderReport: appendReport,
+    /**
+     * Seams for the real-app check only (`scripts/release/studio-unlock-app-check.cjs`).
+     *
+     * Everything here calls the shipped functions - it replaces inputs, never
+     * behaviour. Two inputs are impossible to reach from outside the renderer:
+     * the native file dialog (a check cannot click it) and a queue that is
+     * already probed (a probe needs a real file on disk). Nothing in the app
+     * reads this object, so it stays inert in normal use.
+     */
+    forTest: {
+      /** Stand in for the native dialog; the rest of pickVideos runs for real. */
+      pickWith: (fn) => { dev.pickOverride = fn; },
+      /** Put videos in the studio as if they had just been probed. Memory only. */
+      seed: (videos, root) => {
+        if (root !== undefined) dev.root = root;
+        dev.videos = (videos || []).map((v) => ({
+          path: v.path,
+          name: v.name,
+          info: v.info || { duration: 42, width: 1080, height: 1920, fps: 30, hasAudio: true },
+          state: "ready",
+        }));
+        dev.video = null;
+        dev.info = null;
+        renderVideoList();
+        paintStudio();
+      },
+      /** Hold or release the studio lock, to prove a control ignores it. */
+      setBusy: (on) => { dev.shortsBusy = Boolean(on); paintStudio(); },
+      /** Run the real batch and hand back its promise. */
+      runShorts: (resume) => runShorts(Boolean(resume)),
+    },
   };
 
   function wire() {
