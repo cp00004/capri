@@ -1368,11 +1368,11 @@
     // are not paid for twice.
     const offer = resumeOffer(dev.videos, { hasRoot: Boolean(dev.root), busy: dev.shortsBusy });
     dev.els.shortsContinue.classList.toggle("hidden", !offer.show);
-    if (offer.show) {
-      dev.els.shortsContinue.disabled = false;
-      dev.els.shortsContinue.textContent = offer.label;
-      dev.els.shortsContinue.title = offer.title;
-    }
+    dev.els.shortsContinue.disabled = !offer.show;
+    // Always write the label, so a hidden button never keeps a stale count that a
+    // screen reader or a later paint could pick up.
+    dev.els.shortsContinue.textContent = offer.label;
+    dev.els.shortsContinue.title = offer.title;
   }
 
   function shutdown(text) {
