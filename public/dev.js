@@ -1406,7 +1406,14 @@
         : chunks?.reason
           ? chunks.reason
           : "the speech reader returned nothing for every speech region";
-      throw new Error(`I could not hear any speech in that video - ${why}.`);
+      // Name the engines that refused. Without this the user sees only Capri's
+      // own 502 and cannot tell a dead key from a provider outage.
+      const engines = [...new Set((lost || []).map((l) => l.why).filter(Boolean))].slice(0, 2);
+      const detail = engines.length ? ` What every engine said: ${engines.join("; ")}` : "";
+      throw new Error(
+        `I could not read the speech in that video - ${why}.${detail}`
+        + " Nothing was transcribed, so this run is not a partial result - it did not finish."
+      );
     }
     if (granularity === "segment") {
       report.degraded.push("word-level timing unavailable - captions and cuts are approximate");

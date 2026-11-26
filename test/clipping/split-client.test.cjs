@@ -74,3 +74,19 @@ test("retries never touch the voice-loop endpoint", () => {
   assert.ok(!voice.includes("STT_GROQ_BASE_OVERRIDE"), "the voice loop must not use test overrides");
   assert.ok(!voice.includes("runWithRetry"), "the voice loop keeps its own behaviour");
 });
+
+test("a total failure names the engines and says the run did not finish", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const src = fs.readFileSync(path.resolve(__dirname, "../../public/dev.js"), "utf8");
+
+  // The old message was "I could not hear any speech", which blamed the video
+  // for what was really a provider refusing every chunk.
+  assert.ok(
+    !/I could not hear any speech/.test(src),
+    "a provider failure must not be reported as silence"
+  );
+  assert.match(src, /What every engine said/, "the engines that refused must be named");
+  assert.match(src, /did not finish/, "an unread transcript must not look like a finished run");
+  assert.match(src, /not a partial result/, "it must be clear nothing was transcribed");
+});
