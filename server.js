@@ -3583,9 +3583,12 @@ async function paceSpeech(buffer) {
     if (!budget) return;
     const wait = sttBudget.waitForRoom(budget, need, Date.now());
     if (wait > 0) {
-      // Stay inside the client's own patience: it aborts at 900s, so the pause
-      // plus a 120s provider call must fit well under that.
-      const capped = Math.min(wait, 600_000);
+      // Pacing is a short proactive wait to avoid a refusal. The long, patient
+      // waits belong to the retry layer, which bounds them and reports the chunk
+      // as queued. Capping pacing low enough that pacing + a queued retry + a
+      // provider call all fit inside the client's 900s request timeout keeps the
+      // request from being aborted mid-pause.
+      const capped = Math.min(wait, 120_000);
       console.log(`  · stt pacing: ${Math.round(need)}s of audio needs ${Math.round(capped / 1000)}s of budget window`);
       await new Promise((r) => setTimeout(r, capped));
     }
@@ -3649,9 +3652,12 @@ async function transcribeVerbose({ buffer, type, language = "", hint = "", provi
   sttRotation += 1;
 
   /** One Groq key, one call. Throws a classified error on failure. */
-  const tryGroqKey = async (key) => {
-    // Spend the window deliberately rather than colliding with it.
-    await paceSpeech(buffer);
+  const tryGroqKey = async (key, attempt = 1) => {
+    // Spend the window deliberately rather than colliding with it. Only the
+    // first attempt paces: once a refusal has happened the retry layer is already
+    // queueing on the published budget, and pacing again on each retry would add
+    // minutes the caller's request timeout does not have.
+    if (attempt === 1) await paceSpeech(buffer);
     const form = new FormData();
     form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
     form.append("model", STT_MODEL);
@@ -3767,7 +3773,7 @@ async function transcribeVerbose({ buffer, type, language = "", hint = "", provi
   const chain = [];
   if (provider === "auto" || provider === "groq") {
     groqOrder.forEach((key, i) => {
-      chain.push({ label: GROQ_KEYS.length > 1 ? `groq#${i + 1}` : "groq", run: () => tryGroqKey(key) });
+      chain.push({ label: GROQ_KEYS.length > 1 ? `groq#${i + 1}` : "groq", run: ({ try: n } = {}) => tryGroqKey(key, n || 1) });
     });
   }
   // Gemini understands audio but returns no word timing. Still worth asking: a
