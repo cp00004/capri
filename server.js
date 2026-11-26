@@ -39,6 +39,7 @@ import { listMemory, searchMemory, forgetMemory, memoryStats, exportMemory } fro
 import { createPublisher } from "./lib/publish.js";
 import analysis from "./lib/clipping/analysis.cjs";
 import sttRetry from "./lib/clipping/stt-retry.cjs";
+import sttBudget from "./lib/clipping/stt-budget.cjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -3545,6 +3546,62 @@ async function handleStt(req, res) {
  */
 const WORD_STT_TIMEOUT = 120_000;
 
+/**
+ * The account's speech budget, as last reported by a provider.
+ *
+ * Groq publishes 7,200 audio-seconds per rolling hour. A long stream cannot fit
+ * one window, so the reader has to know the ceiling before it runs into it: this
+ * holds the freshest figures and hands out a pacing delay between chunks.
+ */
+const speechBudget = { groq: null };
+
+function recordBudget(budget) {
+  if (!budget) return;
+  speechBudget.groq = budget;
+}
+
+/** Seconds of audio in a WAV buffer, for budget accounting. */
+function wavSecondsOf(buffer) {
+  return wavSeconds(buffer) || 0;
+}
+
+/**
+ * Wait here when the last answer said the window is nearly empty, so the next
+ * chunk is sent when it will be accepted instead of being refused and retried.
+ *
+ * Pacing is serialised and reserves each chunk's audio when it is sent. Without
+ * that, three workers read the same "remaining" figure, all decide their chunk
+ * fits, and fire together - which spends the window twice as fast as any one of
+ * them expected and is how a run ends up refused partway through.
+ */
+let paceChain = Promise.resolve();
+
+async function paceSpeech(buffer) {
+  const need = wavSecondsOf(buffer);
+  const run = paceChain.then(async () => {
+    const budget = speechBudget.groq;
+    if (!budget) return;
+    const wait = sttBudget.waitForRoom(budget, need, Date.now());
+    if (wait > 0) {
+      // Stay inside the client's own patience: it aborts at 900s, so the pause
+      // plus a 120s provider call must fit well under that.
+      const capped = Math.min(wait, 600_000);
+      console.log(`  · stt pacing: ${Math.round(need)}s of audio needs ${Math.round(capped / 1000)}s of budget window`);
+      await new Promise((r) => setTimeout(r, capped));
+    }
+    // Reserve now, not on the answer: the next worker in line must see this
+    // audio as already spoken for. The real figure replaces this on the next
+    // response via recordBudget.
+    if (speechBudget.groq) {
+      speechBudget.groq.remainingSeconds = Math.max(0, speechBudget.groq.remainingSeconds - need);
+      speechBudget.groq.seenAt = Date.now();
+    }
+  });
+  // Keep the chain alive even if one pause throws.
+  paceChain = run.catch(() => {});
+  return run;
+}
+
 function normalizeWords(raw, offset = 0) {
   const out = [];
   for (const w of Array.isArray(raw) ? raw : []) {
@@ -3593,6 +3650,8 @@ async function transcribeVerbose({ buffer, type, language = "", hint = "", provi
 
   /** One Groq key, one call. Throws a classified error on failure. */
   const tryGroqKey = async (key) => {
+    // Spend the window deliberately rather than colliding with it.
+    await paceSpeech(buffer);
     const form = new FormData();
     form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
     form.append("model", STT_MODEL);
@@ -3611,14 +3670,24 @@ async function transcribeVerbose({ buffer, type, language = "", hint = "", provi
     });
     if (!upstream.ok) {
       const body = await upstream.text().catch(() => "");
+      // A refusal publishes the budget too - and it is the most useful moment to
+      // learn it, because the next chunk must not walk into the same wall.
+      const refusalBudget = sttBudget.readBudget(upstream.headers);
+      recordBudget(refusalBudget);
       throw Object.assign(new Error(`groq http ${upstream.status}`), {
         status: upstream.status,
         body: body.slice(0, 400),
         retryAfter: upstream.headers.get("retry-after"),
+        // Groq publishes the audio-second window on every response. Passing it on
+        // lets the reader wait for room instead of discovering the wall.
+        budget: refusalBudget,
       });
     }
     const data = await upstream.json().catch(() => null);
     if (!data) throw new Error("groq gave an unreadable answer");
+
+    // Record what the successful answer says about the remaining budget.
+    recordBudget(sttBudget.readBudget(upstream.headers));
 
     const words = normalizeWords(data.words);
     const segments = normalizeSegments(data.segments);
@@ -3722,8 +3791,21 @@ async function transcribeVerbose({ buffer, type, language = "", hint = "", provi
   attempts.push(...outcome.attempts);
   if (!outcome.ok) {
     const seen = attempts.map((a) => `${a.label}:${a.reason}${a.status ? ` ${a.status}` : ""}`);
-    console.warn(`  ! stt ${where} failed: ${seen.join(", ")}`);
-    return { ok: false, reason: outcome.reason, attempts, temporary: Boolean(outcome.temporary), splittable: Boolean(outcome.splittable) };
+    // A deferred chunk is not a lost chunk: the audio is fine and will read once
+    // the window refills. Log it as waiting, not as a failure.
+    if (outcome.deferred) {
+      console.warn(`  ~ stt ${where} deferred: ${seen.join(", ")}`);
+    } else {
+      console.warn(`  ! stt ${where} failed: ${seen.join(", ")}`);
+    }
+    return {
+      ok: false,
+      reason: outcome.reason,
+      attempts,
+      temporary: Boolean(outcome.temporary),
+      splittable: Boolean(outcome.splittable),
+      deferred: Boolean(outcome.deferred),
+    };
   }
 
   const value = outcome.value;
@@ -3896,13 +3978,23 @@ async function handleSttWord(req, res) {
   });
 
   if (!result.ok) {
-    return json(res, 502, {
-      error: "stt_failed",
+    // A deferred chunk is queued behind the account's speech budget, not refused.
+    // Say so with a retryable status and a hint, so the caller waits and resends
+    // the same audio instead of recording it as a permanent loss.
+    const status = result.deferred ? 503 : 502;
+    return json(res, status, {
+      error: result.deferred ? "stt_budget" : "stt_failed",
       message: result.reason,
       // Keep the failure visible: the caller must be able to say which chunk
       // was lost and what every engine said about it.
       split: Boolean(result.split),
       temporary: Boolean(result.temporary),
+      deferred: Boolean(result.deferred),
+      retryAfter: result.deferred ? Math.max(30, Math.round((speechBudget.groq?.resetMs || 60_000) / 1000)) : 0,
+      // What the budget looks like, so a caller can pace the rest of the read.
+      budget: speechBudget.groq
+        ? { limitSeconds: speechBudget.groq.limitSeconds, remainingSeconds: Math.round(speechBudget.groq.remainingSeconds) }
+        : null,
       attempts: result.attempts,
     });
   }

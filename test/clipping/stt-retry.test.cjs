@@ -31,8 +31,10 @@ test("auth and payment failures are not retried", () => {
   }
 });
 
-test("a rate limit retries but an exhausted daily quota does not", () => {
-  assert.strictEqual(classify(httpError(429, "rate limit reached for requests")).kind, "transient");
+test("a rate limit waits for the window but a daily quota does not", () => {
+  // A rolling window refills within the hour, so the reader should wait for it.
+  assert.strictEqual(classify(httpError(429, "rate limit reached for requests")).kind, "budget");
+  // A daily/monthly cap only clears tomorrow, so waiting is pointless.
   assert.strictEqual(
     classify(httpError(429, "You exceeded your current quota, please check your plan and billing details")).kind,
     "sticky"
@@ -41,6 +43,111 @@ test("a rate limit retries but an exhausted daily quota does not", () => {
     classify(httpError(429, '{"error":{"message":"insufficient_quota"}}')).kind,
     "sticky"
   );
+  // Groq's real wording for the audio budget must be treated as a wait.
+  assert.strictEqual(
+    classify(httpError(429, "Rate limit reached for audio-seconds per hour. Please try again in 5m.")).kind,
+    "budget"
+  );
+});
+
+test("a rate limited chunk waits for the window instead of being lost", async () => {
+  // The bug behind "69 of 236 never read": a 429 spent the retry budget and the
+  // chunk was written off even though the bucket was about to refill.
+  let calls = 0;
+  const waits = [];
+  const result = await runWithRetry(
+    [{
+      label: "groq",
+      run: async () => {
+        calls += 1;
+        // Refused five times, then the window opens.
+        if (calls <= 5) throw httpError(429, "Rate limit reached for audio-seconds per hour");
+        return { text: "finally" };
+      },
+    }],
+    {
+      sleep: async (ms) => { waits.push(ms); },
+      now: () => 0,
+      maxRetries: 2,          // deliberately small: a wait must not spend it
+      budgetWaits: 6,
+      budgetWaitMs: 900_000,
+    }
+  );
+
+  assert.strictEqual(result.ok, true, "the chunk must survive the rate limit");
+  assert.strictEqual(calls, 6);
+  assert.ok(waits.length >= 5, `expected waits between tries, got ${waits.length}`);
+  assert.ok(waits.every((w) => w > 0), "every rate-limit wait must be positive");
+});
+
+test("the reported triple failure is a queue, not a loss", async () => {
+  // Exactly the shape the user saw: groq 429 on audio-seconds, gemini 503
+  // overloaded, mistral 402 with no billing budget. Requiring every engine to
+  // fail the same way turned this into 69 permanently lost chunks, because
+  // gemini's 503 and mistral's dead account made the run look "refused" rather
+  // than "out of budget".
+  const result = await runWithRetry(
+    [
+      { label: "groq", run: async () => { throw httpError(429, "Rate limit reached for audio-seconds per hour"); } },
+      { label: "gemini", run: async () => { throw httpError(503, "The model is overloaded."); } },
+      { label: "mistral", run: async () => { throw httpError(402, "billing_no_api_budget_configured"); } },
+    ],
+    { sleep: async () => {}, now: () => 0, maxRetries: 1, budgetWaits: 2, budgetWaitMs: 900_000 }
+  );
+
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.deferred, true, "a spent budget must be deferred, not refused");
+  assert.match(result.reason, /budget/i);
+  assert.strictEqual(result.splittable, false, "splitting cannot buy back a spent budget");
+});
+
+test("a budget wait longer than the pass deadline is not a lost chunk", async () => {
+  // Groq's rolling window can ask for ~7 minutes, while the pass deadline is 4.
+  // Counting the deliberate pause as a stall reported a hard timeout and threw
+  // the audio away - the exact failure the wait exists to avoid.
+  let clock = 0;
+  let calls = 0;
+  const result = await runWithRetry(
+    [{
+      label: "groq",
+      run: async () => {
+        calls += 1;
+        if (calls === 1) {
+          // The real shape: no Retry-After, but the budget reset header.
+          const err = httpError(429, "Rate limit reached for audio-seconds per hour");
+          err.budget = { resetMs: 420_000, limitSeconds: 7200, remainingSeconds: 0 };
+          throw err;
+        }
+        return { text: "read after the window refilled" };
+      },
+    }],
+    {
+      sleep: async (ms) => { clock += ms; },
+      now: () => clock,
+      maxRetries: 1,
+      budgetWaits: 3,
+      budgetWaitMs: 900_000,
+      // A tenth of the 420s the provider is entitled to ask for.
+      deadlineMs: 60_000,
+    }
+  );
+
+  assert.strictEqual(result.ok, true, "the chunk must survive a long queue");
+  assert.strictEqual(calls, 2);
+  assert.ok(clock > 60_000, `the test must actually pause past the deadline, paused ${clock}ms`);
+});
+test("window waits are bounded so one chunk cannot stall forever", async () => {
+  let calls = 0;
+  const result = await runWithRetry(
+    [{ label: "groq", run: async () => { calls += 1; throw httpError(429, "rate limit reached"); } }],
+    { sleep: async () => {}, now: () => 0, maxRetries: 99, budgetWaits: 3, budgetWaitMs: 900_000 }
+  );
+
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(calls, 4, "1 try + 3 waits, then it stops");
+  assert.strictEqual(result.deferred, true, "must be reported as deferred, not refused");
+  assert.match(result.reason, /budget/i);
+  assert.strictEqual(result.splittable, false, "splitting cannot fix a spent budget");
 });
 
 test("a dropped connection or timeout is retryable", () => {

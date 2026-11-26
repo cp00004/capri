@@ -1383,19 +1383,20 @@
     const regions = chunksOk ? chunks.chunks : [{ start: 0, end: Math.max(1, info.duration) }];
     const pauses = chunksOk ? (chunks.pauses || []) : [];
 
-    const { words, segments, granularity, providers, failed, perChunk, lost } = await transcribeChunks(video, regions, report);
+    const { words, segments, granularity, providers, failed, perChunk, lost, deferred } = await transcribeChunks(video, regions, report);
     report.stt = {
       ok: words.length > 0 || segments.length > 0,
       granularity,
       chunks: failed ? regions.length - failed : regions.length,
       regions: regions.length,
       failed,
-      complete: (lost || []).length === 0,
+      complete: (lost || []).length === 0 && (deferred || []).length === 0,
       words: words.length,
       providers: [...new Set(providers)],
       // Which provider served which speech region, so a partial read can name
       // the provider that let the run down.
       detail: perChunk || [],
+      deferred: (deferred || []).length,
     };
     if (granularity === "none") {
       // Say what actually went wrong. "I could not hear speech" is confusing when
@@ -1448,6 +1449,10 @@
     const providers = [];
     const perChunk = [];
     const lost = [];
+    // Chunks queued behind the account's speech budget rather than lost.
+    const deferred = [];
+    let deferredCount = 0;
+    let deferredRescued = 0;
     let failed = 0;
     let wordChunks = 0;
     let done = 0;
@@ -1458,7 +1463,8 @@
       const wav = await D.wav({ video, start: region.start, duration: span });
       const bytes = Uint8Array.from(atob(wav.data), (c) => c.charCodeAt(0));
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 180_000);
+      // A deferred chunk can legitimately sit in the budget queue for a while.
+      const timer = setTimeout(() => ctrl.abort(), 900_000);
       const query = new URLSearchParams({
         lang: "en",
         at: clock(region.start),
@@ -1480,7 +1486,15 @@
           const detail = await res.json().catch(() => null);
           const said = (detail?.attempts || []).map((a) => `${a.label}${a.status ? ` ${a.status}` : ""}`).join(", ");
           const why = detail?.message || `speech reader refused (${res.status})`;
-          throw Object.assign(new Error(said ? `${why} [${said}]` : why), { status: res.status });
+          throw Object.assign(
+            new Error(said ? `${why} [${said}]` : why),
+            {
+              status: res.status,
+              // A budget refusal is a "come back later", not a lost chunk.
+              deferred: Boolean(detail?.deferred),
+              retryAfter: Number(detail?.retryAfter) || 0,
+            }
+          );
         }
         return await res.json();
       } finally {
@@ -1524,17 +1538,57 @@
         try {
           data = await ask(region, index);
         } catch (err) {
-          // One independent retry of this chunk only. The server already retried
-          // transient provider faults, so a second attempt here covers the case
-          // where the request itself never landed (window reload, dead socket).
-          retried = true;
-          await new Promise((r) => setTimeout(r, 1200));
-          try {
-            data = await ask(region, index);
-          } catch (again) {
-            failed += 1;
-            lost.push({ start: region.start, end: region.end, why: String(again?.message || again) });
-            report.degraded.push(`speech chunk ${clock(region.start)} failed after retry: ${again?.message || again}`);
+          // A budget refusal means the audio is fine and the account's window is
+          // momentarily empty. Waiting and resending the same chunk is the whole
+          // fix for "69 of 236 regions were never read": the old code treated
+          // this as a permanent loss and moved on.
+          if (err?.deferred) {
+            // Honour the server's hint, but never come back in under half a
+            // minute: a window that has just emptied cannot have refilled yet.
+            const hint = Number(err.retryAfter) > 0 ? Number(err.retryAfter) * 1000 : 60_000;
+            const wait = Math.max(30_000, Math.min(900_000, hint));
+            deferredCount += 1;
+            shortsProgress(
+              `READING THE VIDEO\npaused - the speech budget is spent, resuming in ${Math.round(wait / 1000)}s` +
+              ` (${done}/${regions.length} read so far)`
+            );
+            await new Promise((r) => setTimeout(r, wait));
+            try {
+              data = await ask(region, index);
+              deferredRescued += 1;
+            } catch (again) {
+              if (again?.deferred) {
+                // Still queued. Keep this chunk pending rather than losing it.
+                deferred.push({ start: region.start, end: region.end, why: String(again?.message || again) });
+                done += 1;
+                continue;
+              }
+              failed += 1;
+              lost.push({ start: region.start, end: region.end, why: String(again?.message || again) });
+              report.degraded.push(`speech chunk ${clock(region.start)} failed after retry: ${again?.message || again}`);
+              done += 1;
+              continue;
+            }
+          } else {
+            // One independent retry of this chunk only. The server already retried
+            // transient provider faults, so a second attempt here covers the case
+            // where the request itself never landed (window reload, dead socket).
+            retried = true;
+            await new Promise((r) => setTimeout(r, 1200));
+            try {
+              data = await ask(region, index);
+            } catch (again) {
+              if (again?.deferred) {
+                deferred.push({ start: region.start, end: region.end, why: String(again?.message || again) });
+                done += 1;
+                continue;
+              }
+              failed += 1;
+              lost.push({ start: region.start, end: region.end, why: String(again?.message || again) });
+              report.degraded.push(`speech chunk ${clock(region.start)} failed after retry: ${again?.message || again}`);
+              done += 1;
+              continue;
+            }
           }
         }
 
@@ -1572,20 +1626,37 @@
     const mixed = wordChunks > 0 && wordChunks < regions.length - failed;
 
     // Which provider served which chunk, and what never came back at all.
+    // `deferred` is kept apart from `lost`: those regions are queued behind the
+    // speech budget, not unreadable, and a warning about them must not read as a
+    // permanent hole in the transcript.
     report.transcript = {
-      complete: lost.length === 0,
+      complete: lost.length === 0 && deferred.length === 0,
       regions: regions.length,
       lost,
+      deferred,
       chunks: perChunk,
       providers: [...new Set(providers)],
+      budget: deferredCount ? { pauses: deferredCount, rescued: deferredRescued } : null,
     };
+    if (deferred.length) {
+      report.degraded.push(
+        `speech budget ran out: ${deferred.length} of ${regions.length} speech regions are still queued`
+        + " - the account allows a fixed amount of audio per hour, and this video needs more than that."
+        + " Re-running once the window refills will read only the missing regions."
+      );
+    }
+    if (deferredCount && deferredRescued) {
+      report.degraded.push(
+        `the speech budget paused the read ${deferredCount} time(s); ${deferredRescued} chunk(s) were read after waiting`
+      );
+    }
     if (lost.length) {
       report.degraded.push(
         `transcript is incomplete: ${lost.length} of ${regions.length} speech regions could not be read, so any moment inside them is missing`
       );
     }
 
-    return { words, segments, granularity: mixed ? "segment" : granularity, providers, failed, perChunk, lost };
+    return { words, segments, granularity: mixed ? "segment" : granularity, providers, failed, perChunk, lost, deferred };
   }
 
 
@@ -2348,10 +2419,23 @@
         const t = report.transcript;
         const served = (t.chunks || []).filter((c) => c.provider).map((c) => c.provider);
         const mixed = [...new Set(served)].length > 1;
+        const lostCount = t.lost?.length || 0;
+        const queued = t.deferred?.length || 0;
+        // A region waiting on the budget was not refused, so say "still queued"
+        // rather than "never read" - and say what to do about it.
+        const parts = [];
+        if (lostCount) parts.push(`${lostCount} of ${t.regions} speech regions were never read`);
+        if (queued) parts.push(`${queued} of ${t.regions} are still queued behind the hourly speech budget`);
         lines.unshift(
-          `INCOMPLETE TRANSCRIPT: ${t.lost?.length || 0} of ${t.regions} speech regions were never read`
+          `INCOMPLETE TRANSCRIPT: ${parts.join(" and ")}`
           + (mixed ? ` (providers that did answer: ${[...new Set(served)].join(", ")})` : "")
         );
+        if (queued) {
+          lines.unshift(
+            "TO FINISH THIS TRANSCRIPT: run it again after the speech window refills."
+            + " Regions already read are kept, so only the queued ones are fetched."
+          );
+        }
       }
       const unique = [...new Set(lines)];
       if (!unique.length) continue;

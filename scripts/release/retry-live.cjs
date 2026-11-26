@@ -12,6 +12,9 @@
  *   mode "recover"  - Groq 502s twice then answers (the reported bug)
  *   mode "allfail"  - every provider is down
  *   mode "sticky"   - Groq answers 402 (no credit): must not be retried
+ *   mode "budget"   - Groq 429s on audio-seconds with its real headers, twice,
+ *                     then answers. Must come back as 503 stt_budget/deferred,
+ *                     never as a 502 permanent loss.
  */
 "use strict";
 
@@ -27,15 +30,24 @@ const SERVER_PORT = 4188;
 const STUB_PORT = 4189;
 
 if (!WAV || !fs.existsSync(WAV)) {
-  console.error("usage: node retry-live.cjs <chunk.wav> [recover|allfail|sticky]");
+  console.error("usage: node retry-live.cjs <chunk.wav> [recover|allfail|sticky|toobig|budget]");
   process.exit(2);
 }
 
 const calls = { groq: 0, gemini: 0, mistral: 0 };
 
-function upstream(res, status, body) {
-  res.writeHead(status, { "Content-Type": "application/json" });
+function upstream(res, status, body, headers = {}) {
+  res.writeHead(status, { "Content-Type": "application/json", ...headers });
   res.end(JSON.stringify(body));
+}
+
+/** The headers Groq really sends on the audio bucket, captured live. */
+function budgetHeaders(remaining) {
+  return {
+    "x-ratelimit-limit-audio-seconds": "7200",
+    "x-ratelimit-remaining-audio-seconds": String(remaining),
+    "x-ratelimit-reset-audio-seconds": "7m26.5s",
+  };
 }
 
 const stub = http.createServer((req, res) => {
@@ -64,6 +76,35 @@ const stub = http.createServer((req, res) => {
       if (MODE === "toobig" && parts.reduce((n, c) => n + c.length, 0) > 600_000) {
         console.log(`  groq  #${calls.groq} -> 413 chunk too large`);
         return upstream(res, 413, { error: { message: "audio file is too large for this model" } });
+      }
+      if (MODE === "budget") {
+        // Refused on the first ask, and again on the retry: both must be
+        // deferred rather than counted as a lost chunk.
+        if (calls.groq <= 2) {
+          console.log(`  groq  #${calls.groq} -> 429 audio-seconds budget`);
+          return upstream(
+            res,
+            429,
+            { error: { message: "Rate limit reached for audio-seconds per hour. Please try again in 7m26.5s." } },
+            budgetHeaders(0)
+          );
+        }
+        console.log(`  groq  #${calls.groq} -> 200 words`);
+        return upstream(
+          res,
+          200,
+          {
+            text: "the window refilled",
+            language: "english",
+            words: [
+              { word: "the", start: 0.0, end: 0.3 },
+              { word: "window", start: 0.3, end: 0.9 },
+              { word: "refilled", start: 0.9, end: 1.6 },
+            ],
+            segments: [{ text: "the window refilled", start: 0.0, end: 1.6 }],
+          },
+          budgetHeaders(6300)
+        );
       }
       if (MODE === "allfail" || (MODE === "recover" && calls.groq <= 2)) {
         console.log(`  groq  #${calls.groq} -> 502`);
