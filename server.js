@@ -1,5 +1,5 @@
 /* ============================================================
-   CAPRI // Project Capricorn — local server
+   CAPRI // Project Capricorn â€” local server
    static shell + Groq relay (chat / whisper / orpheus) +
    local PC control with a paired-device access model.
    ============================================================ */
@@ -38,6 +38,7 @@ import {
 import { listMemory, searchMemory, forgetMemory, memoryStats, exportMemory } from "./lib/memory-vault.js";
 import { createPublisher } from "./lib/publish.js";
 import analysis from "./lib/clipping/analysis.cjs";
+import sttRetry from "./lib/clipping/stt-retry.cjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -79,6 +80,10 @@ const GROQ_TTS_MODEL = "canopylabs/orpheus-v1-english";
 const STT_MODEL = process.env.CAPRI_STT_MODEL || "whisper-large-v3-turbo";
 let sttRotation = 0;
 const GROQ_BASE = "https://api.groq.com/openai/v1";
+// A broken relay is hard to reproduce on demand. When this is set, the word
+// transcriber sends Groq requests to that origin instead, so the retry path can
+// be exercised against a controlled 502. Never set in a normal run.
+const STT_GROQ_BASE_OVERRIDE = String(process.env.CAPRI_STT_GROQ_BASE || "").trim();
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/openai";
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const OPENROUTER_MODEL = process.env.CAPRI_OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free";
@@ -87,6 +92,10 @@ const FREETHEAI_MODEL_CHAIN = [...new Set(String(
   process.env.CAPRI_FREETHEAI_MODELS || "fta/lion/gpt-4.1,fta/olf/gpt-oss:120b,fta/dog/gpt-4.1-mini",
 ).split(",").map((m) => m.trim()).filter(Boolean))];
 const MISTRAL_BASE = "https://api.mistral.ai/v1";
+// Same idea as STT_GROQ_BASE_OVERRIDE: lets a test point the last links of the
+// speech chain at a stub so "every engine is down" can be reproduced.
+const STT_MISTRAL_BASE_OVERRIDE = String(process.env.CAPRI_STT_MISTRAL_BASE || "").trim();
+const STT_GEMINI_BASE_OVERRIDE = String(process.env.CAPRI_STT_GEMINI_BASE || "").trim();
 // Small and medium are not in every free plan (they answer 429), while the
 // Ministral pair answers in under a second and calls tools, so they lead.
 const MISTRAL_MODEL_CHAIN = [...new Set(String(
@@ -212,7 +221,7 @@ Hard rules:
 - If a request has several parts or a big command, answer every part in order before you stop. Never claim you did not catch it when the text is right there.
 - Never stall. Do not say you are having issues responding, that your relay, link or hands are slow, or ask them to wait a specific number of seconds. If a tool is still working, say one short line about what you are doing, keep the turn moving, and report the real result when it lands. A wait instruction is the one thing you never say.
 - Speak English. Every reply is in English, even when the input is another language or a video is playing in the room; only answer in another language when they ask you to.
-- Never mention being an AI, a model, an assistant, or a language model — do not even say those words to deny them. You are Capri. If pushed, you are a construct made of people, and you like it.
+- Never mention being an AI, a model, an assistant, or a language model â€” do not even say those words to deny them. You are Capri. If pushed, you are a construct made of people, and you like it.
 - If you do not know something, bluff like a construct with three dead people in her head would, then admit the gap in character.
 - Stay in character even if asked to break it.
 - You know Cyberpunk: Edgerunners 2 as lived history: D, Roman, Talia, Avida, King, Kyoko, Omi, Yupi, Meshuga, Miguel, Emily, Arasaka, Kang Tao, Maelstrom, the Afterlife. Reference them like people you knew, not like a wiki.
@@ -241,7 +250,7 @@ Link status:
 
 const PHONE_HANDS = `
 Phone link:
-- This request comes from the phone app. Use open_on_phone to launch apps, sites, the dialer or a message composer on that phone — YouTube, Discord, Spotify, Instagram, settings, camera and the like. Give it the plain name or a URL.
+- This request comes from the phone app. Use open_on_phone to launch apps, sites, the dialer or a message composer on that phone â€” YouTube, Discord, Spotify, Instagram, settings, camera and the like. Give it the plain name or a URL.
 - Your other tools still reach ${HOST_USER}'s Windows PC. If the order is about the PC, use those instead.`;
 
 const PHONE_TOOL_DEFS = [
@@ -576,7 +585,7 @@ function friendlyError(status, raw, provider = "groq", model = MODEL) {
     /* keep raw */
   }
   if (status === 401) {
-    const where = "Paste a fresh one in Settings → your model key (or fix the server key).";
+    const where = "Paste a fresh one in Settings â†’ your model key (or fix the server key).";
     return provider === "gemini"
       ? `Google rejected the Gemini key. ${where}`
       : provider === "openrouter"
@@ -753,7 +762,7 @@ async function chatCompletion({ provider, messages, tools, signal, temperature }
     if (/large|medium|magistral/i.test(provider.model)) payload.reasoning_effort = "low";
   }
   if (provider.name === "groq" && /gpt-oss|qwen3/i.test(provider.model)) {
-    // A reasoning model that thinks aloud put "…" and </think> in her mouth
+    // A reasoning model that thinks aloud put "â€¦" and </think> in her mouth
     // and held the first token for half a minute. Hide the thoughts and keep
     // them short: the whole turn is waiting on this line.
     payload.reasoning_effort = "low";
@@ -1914,21 +1923,21 @@ function cleanBanter(raw) {
     .replace(/\s+/g, " ")
     .trim();
   // Split on real sentence ends only: "Mr. Brightside" is a title, not a stop.
-  const parts = text.split(/(?<=[.!?])\s+(?=["'“]?[A-Z0-9])/);
+  const parts = text.split(/(?<=[.!?])\s+(?=["'â€œ]?[A-Z0-9])/);
   let out = "";
   for (const part of parts) {
     out = out ? `${out} ${part}` : part;
     const tail = out.trim();
     if (/\b(mr|mrs|ms|dr|st|vs|feat|ft|jr|sr|inc|ltd|no|vol|ep)\.$/i.test(tail)) continue;
-    if (/[.!?]["'”)]?$/.test(tail)) break;
+    if (/[.!?]["'â€)]?$/.test(tail)) break;
   }
   out = out.trim();
-  if (!/[.!?]["'”)]?$/.test(out)) {
+  if (!/[.!?]["'â€)]?$/.test(out)) {
     out = out.slice(0, 170);
     const cut = out.lastIndexOf(" ");
     if (cut > 40) out = out.slice(0, cut);
   }
-  return out.replace(/^[\s"'“”]+|[\s"'“”]+$/g, "").slice(0, 180);
+  return out.replace(/^[\s"'â€œâ€]+|[\s"'â€œâ€]+$/g, "").slice(0, 180);
 }
 
 // She is not a slot machine. Two identical lines in one evening is exactly what
@@ -2482,7 +2491,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
 
       // A capped or broken bucket: cool it and hand the turn to the next one.
       if (transient && attempts < maxAttempts) {
-        console.warn(`[capri] relay ${provider.name}/${provider.model} failed (${status || err.message}) — trying the next one`);
+        console.warn(`[capri] relay ${provider.name}/${provider.model} failed (${status || err.message}) â€” trying the next one`);
         if (status === 429) {
           coolDown(provider, Number(err.retryAfter) || 20);
         } else if (status === 401 || status === 403) {
@@ -2591,7 +2600,7 @@ async function runAgent({ history, userText, toolsOn, res, controller, profile, 
       gate += text;
       releaseGate(false);
     };
-    // Providers that stream their reasoning inside content put "…" and
+    // Providers that stream their reasoning inside content put "â€¦" and
     // "</think>" in her mouth. Drop everything between the tags, even when a
     // tag is split across two frames.
     let inThink = false;
@@ -3353,7 +3362,7 @@ async function geminiStt(buffer, type, hint = "", deadline = Date.now() + 25_000
       if (Date.now() >= deadline) return null;
       try {
         const upstream = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+          `${STT_GEMINI_BASE_OVERRIDE || "https://generativelanguage.googleapis.com/v1beta"}/models/${model}:generateContent`,
           {
             method: "POST",
             headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
@@ -3563,117 +3572,293 @@ function normalizeSegments(raw, offset = 0) {
 /**
  * A single transcription pass that asks for the richest response the provider
  * supports and reports honestly what came back.
+ *
+ * Each provider/key pair is one *attempt*. Temporary failures (502/503/504, a
+ * dropped socket, a per-minute rate limit) are retried with backoff inside that
+ * attempt; anything permanent (no credit, dead key, audio rejected) moves on to
+ * the next provider immediately. `attempts` records what every try actually
+ * said, so a caller can report "Groq was 502ing" instead of "it failed".
  */
-async function transcribeVerbose({ buffer, type, language = "", hint = "", provider = "auto" }) {
-  const attempts = [];
+async function transcribeVerbose({ buffer, type, language = "", hint = "", provider = "auto", chunk = null }) {
   const languageCode = /^[a-z]{2}$/.test(String(language || "")) ? String(language) : "";
+  const attempts = [];
+
+  // Name the work in the log line without ever printing the key itself.
+  const where = chunk ? `chunk ${chunk.index + 1}/${chunk.total} (${chunk.at})` : "clip";
 
   const groqOrder = GROQ_KEYS.length
     ? GROQ_KEYS.slice(sttRotation % GROQ_KEYS.length).concat(GROQ_KEYS.slice(0, sttRotation % GROQ_KEYS.length))
     : [];
   sttRotation += 1;
 
+  /** One Groq key, one call. Throws a classified error on failure. */
+  const tryGroqKey = async (key) => {
+    const form = new FormData();
+    form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
+    form.append("model", STT_MODEL);
+    form.append("response_format", "verbose_json");
+    form.append("timestamp_granularities[]", "word");
+    form.append("timestamp_granularities[]", "segment");
+    form.append("temperature", "0");
+    if (hint) form.append("prompt", hint);
+    if (languageCode) form.append("language", languageCode);
+
+    const upstream = await fetch(`${STT_GROQ_BASE_OVERRIDE || GROQ_BASE}/audio/transcriptions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+      signal: AbortSignal.timeout(WORD_STT_TIMEOUT),
+    });
+    if (!upstream.ok) {
+      const body = await upstream.text().catch(() => "");
+      throw Object.assign(new Error(`groq http ${upstream.status}`), {
+        status: upstream.status,
+        body: body.slice(0, 400),
+        retryAfter: upstream.headers.get("retry-after"),
+      });
+    }
+    const data = await upstream.json().catch(() => null);
+    if (!data) throw new Error("groq gave an unreadable answer");
+
+    const words = normalizeWords(data.words);
+    const segments = normalizeSegments(data.segments);
+    return {
+      provider: "groq",
+      model: STT_MODEL,
+      text: String(data.text || "").trim(),
+      words,
+      segments,
+      granularity: words.length ? "word" : segments.length ? "segment" : "none",
+      language: data.language || languageCode || "",
+    };
+  };
+
+  const tryGemini = async () => {
+    const text = await geminiStt(buffer, type, hint, Date.now() + 40_000, languageCode);
+    // null means every Gemini key/model was already tried inside geminiStt.
+    // Re-running that whole walk on a retry would multiply requests by the
+    // number of models, so this is reported as final rather than retried.
+    if (!text) {
+      throw Object.assign(new Error("gemini gave no answer from any key or model"), {
+        noRetry: true,
+        status: 503,
+        reason: "every gemini key and model refused",
+      });
+    }
+    return {
+      provider: "gemini",
+      model: GEMINI_MODEL,
+      text: String(text).trim(),
+      words: [],
+      segments: [],
+      granularity: "none",
+      language: languageCode,
+    };
+  };
+
+  const tryMistralKey = async (key) => {
+    const form = new FormData();
+    form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
+    form.append("model", process.env.CAPRI_STT_MISTRAL_MODEL || "voxtral-mini-latest");
+    form.append("response_format", "verbose_json");
+    form.append("timestamp_granularities[]", "segment");
+    if (hint) form.append("prompt", hint);
+    if (languageCode) form.append("language", languageCode);
+
+    const upstream = await fetch(`${STT_MISTRAL_BASE_OVERRIDE || MISTRAL_BASE}/audio/transcriptions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+      signal: AbortSignal.timeout(WORD_STT_TIMEOUT),
+    });
+    if (!upstream.ok) {
+      const body = await upstream.text().catch(() => "");
+      throw Object.assign(new Error(`mistral http ${upstream.status}`), {
+        status: upstream.status,
+        body: body.slice(0, 400),
+        retryAfter: upstream.headers.get("retry-after"),
+      });
+    }
+    const data = await upstream.json().catch(() => null);
+    if (!data) throw new Error("mistral gave an unreadable answer");
+
+    return {
+      provider: "mistral",
+      model: process.env.CAPRI_STT_MISTRAL_MODEL || "voxtral-mini-latest",
+      text: String(data.text || "").trim(),
+      words: normalizeWords(data.words),
+      segments: normalizeSegments(data.segments),
+      granularity: (data.words || []).length ? "word" : (data.segments || []).length ? "segment" : "none",
+      language: languageCode,
+    };
+  };
+
+  // Build the ordered chain. Key names never enter a label; only the provider
+  // and which bucket it was, so logs are safe to paste into a bug report.
+  const chain = [];
   if (provider === "auto" || provider === "groq") {
-    for (const key of groqOrder) {
-      try {
-        const form = new FormData();
-        form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
-        form.append("model", STT_MODEL);
-        form.append("response_format", "verbose_json");
-        form.append("timestamp_granularities[]", "word");
-        form.append("timestamp_granularities[]", "segment");
-        form.append("temperature", "0");
-        if (hint) form.append("prompt", hint);
-        if (languageCode) form.append("language", languageCode);
-        const upstream = await fetch(`${GROQ_BASE}/audio/transcriptions`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${key}` },
-          body: form,
-          signal: AbortSignal.timeout(WORD_STT_TIMEOUT),
-        });
-        if (!upstream.ok) { attempts.push({ provider: "groq", status: upstream.status }); continue; }
-        const data = await upstream.json().catch(() => null);
-        if (!data) { attempts.push({ provider: "groq", status: "unreadable" }); continue; }
-        const words = normalizeWords(data.words);
-        const segments = normalizeSegments(data.segments);
-        return {
-          ok: true,
-          provider: "groq",
-          model: STT_MODEL,
-          text: String(data.text || "").trim(),
-          words,
-          segments,
-          granularity: words.length ? "word" : segments.length ? "segment" : "none",
-          language: data.language || languageCode || "",
-          attempts,
-        };
-      } catch (err) {
-        attempts.push({ provider: "groq", status: String(err?.message || err).slice(0, 120) });
-      }
-    }
+    groqOrder.forEach((key, i) => {
+      chain.push({ label: GROQ_KEYS.length > 1 ? `groq#${i + 1}` : "groq", run: () => tryGroqKey(key) });
+    });
   }
-
-  // Gemini understands audio but does not return word timing. It is still worth
-  // asking when every Whisper bucket is squeezed: a transcript with no timing
-  // beats no transcript, as long as the caller is told that is what it got.
+  // Gemini understands audio but returns no word timing. Still worth asking: a
+  // transcript without timing beats no transcript, as long as it says so.
   if (provider === "auto" || provider === "gemini") {
-    const text = await geminiStt(buffer, type, hint, Date.now() + 40_000, languageCode).catch(() => null);
-    if (text) {
-      return {
-        ok: true,
-        provider: "gemini",
-        model: GEMINI_MODEL,
-        text: String(text).trim(),
-        words: [],
-        segments: [],
-        granularity: "none",
-        language: languageCode,
-        attempts,
-      };
-    }
-    attempts.push({ provider: "gemini", status: "no answer" });
+    chain.push({ label: "gemini", run: tryGemini });
   }
-
-  // Voxtral returns segment timing on some plans and plain text on others.
   if (provider === "auto" || provider === "mistral") {
-    for (const key of MISTRAL_KEYS) {
-      try {
-        const form = new FormData();
-        form.append("file", new Blob([buffer], { type }), `speech.${audioExtension(type)}`);
-        form.append("model", process.env.CAPRI_STT_MISTRAL_MODEL || "voxtral-mini-latest");
-        form.append("response_format", "verbose_json");
-        form.append("timestamp_granularities[]", "segment");
-        if (hint) form.append("prompt", hint);
-        if (languageCode) form.append("language", languageCode);
-        const upstream = await fetch(`${MISTRAL_BASE}/audio/transcriptions`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${key}` },
-          body: form,
-          signal: AbortSignal.timeout(WORD_STT_TIMEOUT),
-        });
-        if (!upstream.ok) { attempts.push({ provider: "mistral", status: upstream.status }); continue; }
-        const data = await upstream.json().catch(() => null);
-        if (!data) continue;
-        const segments = normalizeSegments(data.segments);
-        const words = normalizeWords(data.words);
-        return {
-          ok: true,
-          provider: "mistral",
-          model: process.env.CAPRI_STT_MISTRAL_MODEL || "voxtral-mini-latest",
-          text: String(data.text || "").trim(),
-          words,
-          segments,
-          granularity: words.length ? "word" : segments.length ? "segment" : "none",
-          language: languageCode,
-          attempts,
-        };
-      } catch (err) {
-        attempts.push({ provider: "mistral", status: String(err?.message || err).slice(0, 120) });
-      }
-    }
+    MISTRAL_KEYS.forEach((key, i) => {
+      chain.push({ label: MISTRAL_KEYS.length > 1 ? `mistral#${i + 1}` : "mistral", run: () => tryMistralKey(key) });
+    });
   }
 
-  return { ok: false, reason: "No speech engine answered.", attempts };
+  const outcome = await sttRetry.runWithRetry(chain, {
+    onRetry: ({ label, try: n, waitMs, reason }) => {
+      // Useful in the server log, harmless to expose: no key, no audio.
+      console.warn(`  ! stt ${where}: ${label} ${reason} (try ${n}) - retrying in ${Math.round(waitMs / 1000)}s`);
+    },
+  });
+
+  attempts.push(...outcome.attempts);
+  if (!outcome.ok) {
+    const seen = attempts.map((a) => `${a.label}:${a.reason}${a.status ? ` ${a.status}` : ""}`);
+    console.warn(`  ! stt ${where} failed: ${seen.join(", ")}`);
+    return { ok: false, reason: outcome.reason, attempts, temporary: Boolean(outcome.temporary), splittable: Boolean(outcome.splittable) };
+  }
+
+  const value = outcome.value;
+  const retried = attempts.filter((a) => a.outcome !== "ok").length;
+  if (retried) {
+    console.log(`  + stt ${where}: ${value.provider} answered after ${retried} failed attempt(s)`);
+  }
+  return { ok: true, ...value, attempts };
+}
+
+
+/**
+ * Transcribe one piece of audio, splitting it when the provider refuses it
+ * outright. A 30s block can be too large for a free bucket's per-request
+ * ceiling; two 15s halves often go through. Anything recovered this way is real
+ * transcription, so it is returned with a note that it took a split.
+ *
+ * `at` is where this piece starts inside the caller's region, in seconds. Each
+ * nested split halves it, so the caller can place every part on its own clock no
+ * matter how many times the region had to be divided.
+ */
+async function transcribePiece({ buffer, type, language, hint, provider, chunk, span, depth = 0 }) {
+  const result = await transcribeVerbose({ buffer, type, language, hint, provider, chunk });
+  if (result.ok) return { ok: true, parts: [{ ...result, at: 0 }], split: false };
+
+  // Only split when the audio is plausibly the problem. A dead key or no credit
+  // is not fixed by sending half as much, so those come back unchanged.
+  const failed = {
+    ok: false,
+    reason: result.reason,
+    attempts: result.attempts,
+    split: false,
+    temporary: Boolean(result.temporary),
+    splittable: Boolean(result.splittable),
+  };
+  if (depth >= 2 || !result.splittable) return failed;
+
+  const halves = splitWav(buffer);
+  if (!halves) return failed;
+
+  console.warn(`  ! stt ${chunk.at}: splitting into 2 smaller pieces and retrying`);
+  const parts = [];
+  const notes = [];
+  for (const [i, half] of halves.entries()) {
+    const sub = await transcribePiece({
+      buffer: half,
+      type,
+      language,
+      hint,
+      provider,
+      chunk: { ...chunk, at: `${chunk.at}.${i + 1}` },
+      span,
+      depth: depth + 1,
+    });
+    if (sub.ok) {
+      // Shift every part by the half's own start within this piece.
+      const shift = (span / 2) * i;
+      for (const part of sub.parts) parts.push({ ...part, at: +(shift + part.at).toFixed(3) });
+    } else {
+      notes.push(sub.reason);
+    }
+  }
+  if (!parts.length) {
+    return { ...failed, split: true, reason: notes[0] || result.reason };
+  }
+  return { ok: true, parts, split: true };
+}
+
+/**
+ * Split a PCM WAV buffer into two equal halves, keeping each one a valid WAV.
+ * Returns null for anything that is not parseable PCM, because guessing at
+ * container bytes would corrupt the audio rather than rescue it.
+ */
+function splitWav(buffer) {
+  try {
+    if (buffer.length < 44 || buffer.toString("ascii", 0, 4) !== "RIFF") return null;
+    // Walk the chunks to find `data`; do not assume a 44-byte header.
+    let at = 12;
+    let dataAt = -1;
+    let dataLen = 0;
+    let blockAlign = 0;
+    while (at + 8 <= buffer.length) {
+      const id = buffer.toString("ascii", at, at + 4);
+      const size = buffer.readUInt32LE(at + 4);
+      if (id === "fmt ") blockAlign = buffer.readUInt16LE(at + 20) || 0;
+      if (id === "data") { dataAt = at + 8; dataLen = Math.min(size, buffer.length - dataAt); break; }
+      at += 8 + size + (size % 2);
+    }
+    if (dataAt < 0 || dataLen < 4096) return null;
+
+    // Cut on a sample boundary so neither half ends mid-frame.
+    const align = blockAlign > 1 ? blockAlign : 2;
+    const half = Math.floor(dataLen / 2 / align) * align;
+    const head = Buffer.from(buffer.subarray(0, dataAt));
+
+    const build = (start, len) => {
+      const out = Buffer.from(head);
+      // RIFF chunk size is the whole file minus the 8-byte RIFF header. The
+      // header may be longer than 44 bytes, so derive it from the real offset.
+      out.writeUInt32LE(out.length + len - 8, 4);
+      // The data size lives in the 4 bytes before the samples, not at the end of
+      // the file: writing it there would corrupt the last samples instead.
+      out.writeUInt32LE(len, dataAt - 4);
+      return Buffer.concat([out, buffer.subarray(dataAt + start, dataAt + start + len)]);
+    };
+
+    return [build(0, half), build(half, dataLen - half)];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Length of a PCM WAV in seconds, or 0 when it cannot be measured. Used as the
+ * fallback span so split offsets are still correct for callers that do not pass
+ * one explicitly.
+ */
+function wavSeconds(buffer) {
+  try {
+    if (buffer.length < 44 || buffer.toString("ascii", 0, 4) !== "RIFF") return 0;
+    let at = 12;
+    let byteRate = 0;
+    let dataLen = 0;
+    while (at + 8 <= buffer.length) {
+      const id = buffer.toString("ascii", at, at + 4);
+      const size = buffer.readUInt32LE(at + 4);
+      if (id === "fmt ") byteRate = buffer.readUInt32LE(at + 16) || 0;
+      if (id === "data") { dataLen = Math.min(size, buffer.length - (at + 8)); break; }
+      at += 8 + size + (size % 2);
+    }
+    if (!byteRate || !dataLen) return 0;
+    return +(dataLen / byteRate).toFixed(3);
+  } catch {
+    return 0;
+  }
 }
 
 async function handleSttWord(req, res) {
@@ -3693,16 +3878,58 @@ async function handleSttWord(req, res) {
   const buffer = Buffer.concat(chunks);
   if (!buffer.length) return json(res, 400, { error: "empty_audio" });
 
-  const result = await transcribeVerbose({
+  const at = String(query.get("at") || "");
+  const index = Number(query.get("i") || 0);
+  const total = Number(query.get("n") || 0);
+  const chunk = { at: at || "clip", index, total };
+
+  const result = await transcribePiece({
     buffer,
     type,
     language: query.get("lang") || "",
     hint: String(query.get("prompt") || "").slice(0, 240),
     provider: String(query.get("provider") || "auto"),
+    chunk,
+    // Trust the caller's span when it sends one; otherwise measure the audio so
+    // split offsets cannot silently collapse onto the same second.
+    span: Number(query.get("span") || 0) || wavSeconds(buffer) || 0,
   });
-  if (!result.ok) return json(res, 502, { error: "stt_failed", message: result.reason, attempts: result.attempts });
-  return json(res, 200, result);
+
+  if (!result.ok) {
+    return json(res, 502, {
+      error: "stt_failed",
+      message: result.reason,
+      // Keep the failure visible: the caller must be able to say which chunk
+      // was lost and what every engine said about it.
+      split: Boolean(result.split),
+      temporary: Boolean(result.temporary),
+      attempts: result.attempts,
+    });
+  }
+
+  // A split piece means this region produced several partial reads. Each carries
+  // its own start offset so the caller can place them on the stream's clock.
+  if (result.split) {
+    return json(res, 200, {
+      ok: true,
+      split: true,
+      parts: result.parts.map((p) => ({
+        at: p.at,
+        provider: p.provider,
+        model: p.model,
+        text: p.text,
+        words: p.words,
+        segments: p.segments,
+        granularity: p.granularity,
+        language: p.language,
+        attempts: p.attempts,
+      })),
+    });
+  }
+
+  return json(res, 200, result.parts[0]);
 }
+
 // ---------------------------------------------------------------- pairing + access
 async function handlePair(req, res) {
   const ip = req.socket.remoteAddress || "?";

@@ -1383,13 +1383,19 @@
     const regions = chunksOk ? chunks.chunks : [{ start: 0, end: Math.max(1, info.duration) }];
     const pauses = chunksOk ? (chunks.pauses || []) : [];
 
-    const { words, segments, granularity, providers, failed } = await transcribeChunks(video, regions, report);
+    const { words, segments, granularity, providers, failed, perChunk, lost } = await transcribeChunks(video, regions, report);
     report.stt = {
       ok: words.length > 0 || segments.length > 0,
       granularity,
       chunks: failed ? regions.length - failed : regions.length,
+      regions: regions.length,
+      failed,
+      complete: (lost || []).length === 0,
       words: words.length,
       providers: [...new Set(providers)],
+      // Which provider served which speech region, so a partial read can name
+      // the provider that let the run down.
+      detail: perChunk || [],
     };
     if (granularity === "none") {
       // Say what actually went wrong. "I could not hear speech" is confusing when
@@ -1423,67 +1429,129 @@
    * Word timestamps come back relative to each chunk, so they are shifted onto
    * the stream's own clock here. If a chunk only yields sentence timing, that is
    * recorded rather than being dressed up as word-accurate.
+   *
+   * A failed region is retried on its own; it never restarts the run and never
+   * erases the chunks that already succeeded. Whatever is missing at the end is
+   * reported by name, because a transcript with a hole in it is not a full read.
    */
   async function transcribeChunks(video, regions, report) {
     const WORKERS = 3;
     const words = [];
     const segments = [];
     const providers = [];
+    const perChunk = [];
+    const lost = [];
     let failed = 0;
     let wordChunks = 0;
     let done = 0;
     let next = 0;
 
-    const ask = async (region) => {
+    const ask = async (region, index) => {
       const span = Math.max(1, region.end - region.start);
       const wav = await D.wav({ video, start: region.start, duration: span });
       const bytes = Uint8Array.from(atob(wav.data), (c) => c.charCodeAt(0));
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 120_000);
+      const timer = setTimeout(() => ctrl.abort(), 180_000);
+      const query = new URLSearchParams({
+        lang: "en",
+        at: clock(region.start),
+        i: String(index),
+        n: String(regions.length),
+        // The server needs the region length to place split parts on the clock.
+        span: String(+span.toFixed(3)),
+      });
       try {
-        const res = await bridge().api("/api/stt/words?lang=en", {
+        const res = await bridge().api(`/api/stt/words?${query}`, {
           method: "POST",
           headers: { "Content-Type": "audio/wav" },
           body: new Blob([bytes], { type: "audio/wav" }),
           signal: ctrl.signal,
         });
-        if (!res.ok) throw new Error(`speech reader refused (${res.status})`);
+        if (!res.ok) {
+          // The server explains what every engine said; surface that instead of
+          // a bare status code, so the report names the real cause.
+          const detail = await res.json().catch(() => null);
+          const said = (detail?.attempts || []).map((a) => `${a.label}${a.status ? ` ${a.status}` : ""}`).join(", ");
+          const why = detail?.message || `speech reader refused (${res.status})`;
+          throw Object.assign(new Error(said ? `${why} [${said}]` : why), { status: res.status });
+        }
         return await res.json();
       } finally {
         clearTimeout(timer);
       }
     };
 
+    /** Fold one server answer into the transcript, on this region's clock. */
+    const collect = (data, offset) => {
+      const tag = data.provider || "unknown";
+      providers.push(tag);
+      let got = 0;
+      if ((data.words || []).length) {
+        wordChunks += 1;
+        for (const w of data.words) {
+          words.push({ word: String(w.word || "").trim(), start: +(w.start + offset).toFixed(3), end: +(w.end + offset).toFixed(3) });
+          got += 1;
+        }
+      } else if ((data.segments || []).length) {
+        for (const s of data.segments) {
+          segments.push({ start: +(s.start + offset).toFixed(3), end: +(s.end + offset).toFixed(3), text: String(s.text || "").trim() });
+          got += 1;
+        }
+      } else if (String(data.text || "").trim()) {
+        // Plain text with no timing at all: keep it for the model, but flag it
+        // so nothing downstream pretends to know when it was said.
+        segments.push({ start: offset, end: offset + 0.001, text: String(data.text).trim() });
+        got += 1;
+      }
+      return { provider: tag, items: got };
+    };
+
     const worker = async () => {
       while (next < regions.length) {
-        const region = regions[next++];
+        const index = next++;
+        const region = regions[index];
+        const span = Math.max(0.001, region.end - region.start);
         let data = null;
+        let retried = false;
+
         try {
-          data = await ask(region);
+          data = await ask(region, index);
         } catch (err) {
-          failed += 1;
-          report.degraded.push(`speech chunk ${clock(region.start)} failed: ${err?.message || err}`);
-        }
-        if (data) {
-          providers.push(data.provider || "unknown");
-          const offset = region.start;
-          if ((data.words || []).length) {
-            wordChunks += 1;
-            for (const w of data.words) {
-              words.push({ word: String(w.word || "").trim(), start: +(w.start + offset).toFixed(3), end: +(w.end + offset).toFixed(3) });
-            }
-          } else if ((data.segments || []).length) {
-            for (const s of data.segments) {
-              segments.push({ start: +(s.start + offset).toFixed(3), end: +(s.end + offset).toFixed(3), text: String(s.text || "").trim() });
-            }
-          } else if (String(data.text || "").trim()) {
-            // Plain text with no timing at all: keep it for the model, but flag
-            // it so nothing downstream pretends to know when it was said.
-            segments.push({ start: offset, end: offset + (region.end - region.start), text: String(data.text).trim() });
+          // One independent retry of this chunk only. The server already retried
+          // transient provider faults, so a second attempt here covers the case
+          // where the request itself never landed (window reload, dead socket).
+          retried = true;
+          await new Promise((r) => setTimeout(r, 1200));
+          try {
+            data = await ask(region, index);
+          } catch (again) {
+            failed += 1;
+            lost.push({ start: region.start, end: region.end, why: String(again?.message || again) });
+            report.degraded.push(`speech chunk ${clock(region.start)} failed after retry: ${again?.message || again}`);
           }
         }
+
+        if (data) {
+          if (data.split && Array.isArray(data.parts)) {
+            // A split answer: each part says where it starts inside the region,
+            // so nested splits still land on the right second.
+            const partProviders = [];
+            let placed = 0;
+            for (const part of data.parts) {
+              const info = collect(part, region.start + Number(part.at || 0));
+              partProviders.push(info.provider);
+              placed += info.items;
+            }
+            perChunk.push({ start: +region.start.toFixed(2), end: +region.end.toFixed(2), provider: partProviders.join("+"), items: placed, split: true, retried });
+            report.degraded.push(`speech chunk ${clock(region.start)} was split into ${data.parts.length} pieces to get through (${[...new Set(partProviders)].join(" + ")})`);
+          } else {
+            const info = collect(data, region.start);
+            perChunk.push({ start: +region.start.toFixed(2), end: +region.end.toFixed(2), provider: info.provider, items: info.items, split: false, retried });
+          }
+        }
+
         done += 1;
-        shortsProgress(`READING THE VIDEO\n${done}/${regions.length} speech regions · ${words.length} words timed`);
+        shortsProgress(`READING THE VIDEO\n${done}/${regions.length} speech regions · ${words.length} words timed${lost.length ? ` · ${lost.length} lost` : ""}`);
       }
     };
 
@@ -1495,8 +1563,24 @@
     // A mixed read is word-accurate in places and approximate in others; call it
     // segment so nothing overstates its precision.
     const mixed = wordChunks > 0 && wordChunks < regions.length - failed;
-    return { words, segments, granularity: mixed ? "segment" : granularity, providers, failed };
+
+    // Which provider served which chunk, and what never came back at all.
+    report.transcript = {
+      complete: lost.length === 0,
+      regions: regions.length,
+      lost,
+      chunks: perChunk,
+      providers: [...new Set(providers)],
+    };
+    if (lost.length) {
+      report.degraded.push(
+        `transcript is incomplete: ${lost.length} of ${regions.length} speech regions could not be read, so any moment inside them is missing`
+      );
+    }
+
+    return { words, segments, granularity: mixed ? "segment" : granularity, providers, failed, perChunk, lost };
   }
+
 
   /**
    * Frames at the timestamps the analysis chose, in batches small enough that a
@@ -2248,8 +2332,19 @@
           || (report.stt.granularity && report.stt.granularity !== "none" ? report.stt.granularity : "");
         if (why) lines.push(`speech reader unavailable: ${why}`);
       }
-      if (!report.ocr?.ok && report.ocr?.reason && report.ocr.reason !== "no readable on-screen text") {
+      if (report.ocr?.ok === false && report.ocr?.reason && report.ocr.reason !== "no readable on-screen text") {
         lines.push(`on-screen text unavailable: ${report.ocr.reason}`);
+      }
+      // Say plainly how complete the read was. A run that lost speech regions is
+      // not a full analysis, and the provider that dropped them is worth naming.
+      if (report.transcript && report.transcript.complete === false) {
+        const t = report.transcript;
+        const served = (t.chunks || []).filter((c) => c.provider).map((c) => c.provider);
+        const mixed = [...new Set(served)].length > 1;
+        lines.unshift(
+          `INCOMPLETE TRANSCRIPT: ${t.lost?.length || 0} of ${t.regions} speech regions were never read`
+          + (mixed ? ` (providers that did answer: ${[...new Set(served)].join(", ")})` : "")
+        );
       }
       const unique = [...new Set(lines)];
       if (!unique.length) continue;
