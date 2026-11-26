@@ -80,6 +80,12 @@ The console prints the LAN address and the six-digit pair code on every boot.
 | `CAPRI_CERT` / `CAPRI_KEY` | `cert.pem` / `key.pem` | Custom certificate paths. |
 | `CAPRI_ALLOW_ORIGINS` | — | Comma-separated extra origins allowed to call the API. |
 | `ELEVENLABS_API_KEY` / `ELEVENLABS_VOICE_ID` | — | Optional real voice clone. Both must be set. |
+| `CAPRI_STT_MAX_RETRIES` | `3` | Tries per speech engine before moving to the next. |
+| `CAPRI_STT_BUDGET_WAITS` | `6` | How many times one chunk may wait for Groq's audio budget to refill. |
+| `CAPRI_STT_BUDGET_WAIT_MS` | `120000` | Longest single budget pause. |
+| `CAPRI_STT_BUDGET_TOTAL_MS` | `240000` | Total queueing allowed inside one request, so it always answers before the HTTP client's 300s limit. |
+
+**Long videos and the speech budget.** Groq allows a fixed number of *audio-seconds* per rolling hour (7,200 on the free tier, published in `x-ratelimit-limit-audio-seconds`). A two-hour stream fits; a three-hour one does not. Capri reads what the window allows, paces itself against the published figure, and pauses to let the window refill. A region it could not read is reported as **queued behind the speech budget**, never as a hole in the transcript, and the run says so instead of claiming the video was fully analysed.
 
 `.env`, profiles, device tokens, the audit log, publish logs and certificates are gitignored.
 
