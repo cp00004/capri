@@ -5638,6 +5638,25 @@ window.capriDevBridge = {
   say: (text, userText) => sayLocally(text, userText),
 };
 
+// Developer Mode is a full-screen overlay drawn over this page. When the user
+// presses CLOSE DEV MODE, that overlay hides itself and asks the normal app to
+// come back - without this, the chat sits behind a screen that just went away
+// and can look frozen if it was mid-render when dev mode opened.
+// It is deliberately gentle: un-hide the sheets this page owns, make sure the
+// chat is the visible view, and clear the pointer-events lock the overlay could
+// have left on the body.
+window.capriAppResume = () => {
+  try {
+    document.body.classList.remove("dev-open");
+    document.body.style.removeProperty("overflow");
+    const dev = document.getElementById("devScreen");
+    if (dev) dev.classList.add("hidden");
+    // The greeting row is a live region; re-announcing is what makes the return
+    // obvious instead of silent.
+    showNotice("Back in Capri.", null, null, 2600);
+  } catch { /* the normal app keeps running even if this tidies nothing */ }
+};
+
 /* ---------------------------------------------------------------- my side */
 
 // Owner-only capture: microphone plus every sound coming out of the PC, mixed

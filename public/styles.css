@@ -1158,7 +1158,14 @@ body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 
 .dev-rail {
   width: 272px; min-width: 272px; display: flex; flex-direction: column;
   border-right: 1px solid var(--line); background: rgba(9, 1, 14, 0.72);
+  /* The shortlist, the file tree and the story/toon controls all grow inside
+     this column. Without a bound they push CLOSE DEV MODE past the bottom of
+     the window, where it cannot be clicked and cannot even be scrolled to. */
+  min-height: 0; overflow: hidden;
 }
+/* The panels scroll; the exit button stays pinned at the bottom where it is
+   always reachable, however long the list above it gets. */
+.dev-rail .dev-pane { min-height: 0; overflow: auto; flex: 1 1 auto; }
 .dev-tabs, .dev-viewtabs { display: flex; border-bottom: 1px solid var(--line); }
 .dev-tab, .dev-viewtab {
   flex: 1; font-family: var(--font); font-weight: 700; font-size: 10.5px; letter-spacing: 1.6px;
