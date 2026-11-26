@@ -1494,20 +1494,39 @@
     let wordChunks = 0;
     let done = 0;
     let next = 0;
-    /* Saving is serialised: three workers finishing at once would otherwise
-       interleave read-modify-write on one document and lose regions. */
+    /* Saves are serialised and coalesced. Serialised because three workers
+       finishing at once would interleave read-modify-write on one document and
+       lose regions; coalesced because a 3.4h read saves 236 times, and
+       re-serialising a growing transcript each time is pure overhead. The
+       document is updated in memory immediately, so nothing is lost - only the
+       disk write is shared, and a write always carries every region saved so far. */
     let saves = Promise.resolve();
+    let saveQueued = false;
     let saveFailed = false;
+    let lastSave = null;
 
     const persist = (region, payload, meta) => {
       if (!cache || !SC) return;
       SC.add(cache.doc, region, payload, meta);
+      if (saveQueued) return;
+      saveQueued = true;
       saves = saves.then(async () => {
+        saveQueued = false;
         try {
-          const out = await cache.store.sttCacheSave(cache.id, cache.doc);
-          if (out && out.ok === false) saveFailed = true;
+          lastSave = await cache.store.sttCacheSave(cache.id, cache.doc);
+          if (lastSave && lastSave.ok === false) saveFailed = true;
         } catch { saveFailed = true; }
       });
+    };
+
+    /** Write once more at the end so the final region is certainly on disk. */
+    const flush = async () => {
+      await saves;
+      if (!cache || !SC) return;
+      try {
+        lastSave = await cache.store.sttCacheSave(cache.id, cache.doc);
+        if (lastSave && lastSave.ok === false) saveFailed = true;
+      } catch { saveFailed = true; }
     };
 
     const ask = async (region, index) => {
@@ -1686,7 +1705,7 @@
     await Promise.all(Array.from({ length: Math.min(WORKERS, regions.length) }, () => worker()));
     // Let every queued save finish before the read reports, so a run that ends
     // here leaves nothing on disk unsaved.
-    await saves;
+    await flush();
     words.sort((a, b) => a.start - b.start);
     segments.sort((a, b) => a.start - b.start);
 

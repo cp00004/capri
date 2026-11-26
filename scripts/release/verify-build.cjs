@@ -69,10 +69,22 @@ if (fs.existsSync(exeDir)) {
   if (fs.existsSync(devPath)) {
     const dev = fs.readFileSync(devPath, "utf8");
     ok("packaged dev.js reports an incomplete transcript", /INCOMPLETE TRANSCRIPT/.test(dev));
+    ok("packaged dev.js resumes a saved transcript", /openTranscriptCache/.test(dev));
+  }
+  const cachePath = path.join(appRoot, "public", "stt-cache.js");
+  if (fs.existsSync(cachePath)) {
+    const cache = fs.readFileSync(cachePath, "utf8");
+    ok("packaged stt-cache.js carries the region matcher", /function find\(/.test(cache));
+  }
+  const storePath = path.join(appRoot, "lib", "clipping", "stt-cache-store.cjs");
+  if (fs.existsSync(storePath)) {
+    ok("packaged cache store writes atomically", /renameSync/.test(fs.readFileSync(storePath, "utf8")));
+  } else {
+    ok("packaged cache store present", false);
   }
 }
 
-for (const f of ["clip-math.js", "dev.js", "app.js", "index.html", "version.json"]) {
+for (const f of ["clip-math.js", "stt-cache.js", "dev.js", "app.js", "index.html", "version.json"]) {
     const p = path.join(appRoot, "public", f);
     const exists = fs.existsSync(p);
     ok(`packaged public/${f} present`, exists);

@@ -6,7 +6,9 @@ const path = require("path");
 
 const files = [
   "index.html", "app.js", "dev.js", "styles.css",
-  "clip-math.js", "version.json", "Capri-v4.sha256",
+  // stt-cache.js must travel with dev.js: dev.js reads it off window at call
+  // time, and a page without it silently loses the resumable transcript.
+  "clip-math.js", "stt-cache.js", "version.json", "Capri-v4.sha256",
   "toon.js", "zdf.js", "manifest.webmanifest",
 ];
 

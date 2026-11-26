@@ -280,3 +280,28 @@ test("cached regions count as read for granularity and completeness", async () =
   assert.strictEqual(again.result.segments.length, 1);
   assert.strictEqual(again.report.transcript.complete, true);
 });
+
+test("saves are coalesced but every region still reaches the disk", async () => {
+  const SC = makeCache();
+  const doc = SC.empty(SC.identity("video.mp4", { size: 1, duration: 400 }));
+  // Ten regions: saving a growing document ten times is the cost being removed.
+  const many = Array.from({ length: 10 }, (_, i) => ({ start: i * 40, end: i * 40 + 40 }));
+  const { saved, result } = await runRead({ SC, doc, regions: many, answer: (i) => words(`w${i}`) });
+
+  assert.strictEqual(result.lost.length, 0);
+  assert.ok(saved.length < many.length, `expected fewer writes than regions, got ${saved.length} for ${many.length}`);
+  // The last write must be complete: a run that ends here loses nothing.
+  const last = JSON.parse(saved[saved.length - 1]);
+  assert.strictEqual(Object.keys(last.regions).length, many.length);
+});
+
+test("a run with nothing new to save still leaves a usable document", async () => {
+  const SC = makeCache();
+  const doc = SC.empty(SC.identity("video.mp4", { size: 1, duration: 160 }));
+  await runRead({ SC, doc, regions: REGIONS, answer: (i) => words(`a${i}`) });
+  // Second run finds everything cached; no persist() is called at all.
+  const again = await runRead({ SC, doc, regions: REGIONS, answer: (i) => words(`b${i}`) });
+  assert.strictEqual(again.result.cached, REGIONS.length);
+  assert.strictEqual(SC.size(doc), REGIONS.length, "the in-memory transcript is untouched");
+  assert.ok(again.saved.length >= 1, "the final flush still writes, so the file is not abandoned mid-life");
+});
