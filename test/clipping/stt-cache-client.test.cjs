@@ -265,6 +265,46 @@ test("the report says how much came from cache and that a re-run resumes", async
     "a clean reuse must not be reported as degraded");
 });
 
+test("a resumed run that finished says so instead of sounding like a hole", async () => {
+  const SC = makeCache();
+  const doc = SC.empty(SC.identity("video.mp4", { size: 1, duration: 160 }));
+
+  // Run one reads two of four; run two reads the rest.
+  await runRead({ SC, doc, regions: REGIONS, budget: 80, answer: (i) => words(`first${i}`) });
+  const two = await runRead({ SC, doc, regions: REGIONS, answer: (i) => words(`second${i}`) });
+
+  const note = (two.report.notes || []).find((d) => /kept from an earlier run/.test(d));
+  assert.ok(note, `expected a resume note, got ${two.report.notes}`);
+  // The reported failure was a completed transcript announced as "172 of 236 were
+  // never read again", which reads like unfinished work. A finished read must say
+  // it is finished, and must not use the old never-read wording.
+  assert.match(note, /reused/, `the note must say the saved regions were reused: ${note}`);
+  assert.match(note, /the transcript is complete/,
+    `a finished resume must say the transcript is complete: ${note}`);
+  assert.equal(two.report.transcript.complete, true);
+  assert.equal(two.report.transcript.regions, 4, "the full region count is reported");
+  // Nothing was lost, so nothing may be described as never read.
+  assert.equal(two.report.transcript.lost.length, 0);
+  assert.equal(two.report.transcript.deferred.length, 0);
+});
+
+test("a resume with nothing left to read does not claim regions are unread", async () => {
+  const SC = makeCache();
+  const doc = SC.empty(SC.identity("video.mp4", { size: 1, duration: 160 }));
+
+  await runRead({ SC, doc, regions: REGIONS, answer: (i) => words(`a${i}`) });
+  const again = await runRead({ SC, doc, regions: REGIONS, answer: (i) => words(`b${i}`) });
+
+  const note = (again.report.notes || []).find((d) => /kept from an earlier run/.test(d));
+  assert.ok(note, `expected a resume note, got ${again.report.notes}`);
+  assert.match(note, /nothing was left to read/, `got ${note}`);
+  // The exact wording that confused the user must be gone.
+  assert.doesNotMatch(note, /were not read again/, `old wording is back: ${note}`);
+  assert.equal(again.report.transcript.complete, true);
+  assert.equal(again.report.transcript.regions, REGIONS.length);
+  assert.equal(again.report.transcript.cached, REGIONS.length);
+});
+
 test("cached regions count as read for granularity and completeness", async () => {
   const SC = makeCache();
   const doc = SC.empty(SC.identity("video.mp4", { size: 1, duration: 160 }));

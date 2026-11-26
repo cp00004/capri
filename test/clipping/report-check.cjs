@@ -100,7 +100,7 @@ console.log(`  says it once, not twice         ${(silentText.match(/no audio tra
 //    its own note and must not appear under DEGRADED THIS RUN.
 const resumed = {
   degraded: [],
-  notes: ["12 of 40 speech regions were kept from an earlier run, so they were not read again"],
+  notes: ["12 of 40 speech regions were kept from an earlier run and reused - the 28 still missing were read now, so the transcript is complete"],
   audio: { ok: true },
   stt: { ok: true },
   ocr: { ok: true },
@@ -114,6 +114,10 @@ console.log(resumeText.split("\n").filter(Boolean).map((l) => `   ${l}`).join("\
 console.log(`\nresume checks:`);
 console.log(`  shows the saved work              ${/kept from an earlier run/.test(resumeText)}`);
 console.log(`  not labelled as degraded          ${!/DEGRADED THIS RUN/.test(resumeText)}`);
+// A completed resume must not be dressed up as unfinished work. The reported run
+// said "172 of 236 were not read again" over a transcript that was actually whole.
+console.log(`  does not sound like a hole        ${!/were not read again/.test(resumeText)}`);
+console.log(`  says it finished, not resumed     ${/FINISHED FROM AN EARLIER RUN/.test(resumeText) && !/RESUMED FROM AN EARLIER RUN/.test(resumeText)}`);
 
 // 6. A partial run that resumes: the instruction must say the next run continues.
 const partial = {
