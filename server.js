@@ -3806,7 +3806,9 @@ async function transcribeVerbose({ buffer, type, language = "", hint = "", provi
   // Pace once per chunk, before any provider is asked. Doing it inside each
   // key's attempt meant a retry within the same pass paced again, stacking
   // minutes of pause into a single request the client will abort at 900s.
-  const pacedMs = await paceSpeech(buffer, deadlineAt);
+  // Only Groq publishes an audio-second budget, so only pace when it is in play.
+  const usesGroq = (provider === "auto" || provider === "groq") && GROQ_KEYS.length > 0;
+  const pacedMs = usesGroq ? await paceSpeech(buffer, deadlineAt) : 0;
 
   const outcome = await sttRetry.runWithRetry(chain, {
     // Pacing already spent part of this request's allowance; the queue may only
