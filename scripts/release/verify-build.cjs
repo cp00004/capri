@@ -64,17 +64,35 @@ if (fs.existsSync(exeDir)) {
     const server = fs.readFileSync(serverPath, "utf8");
     ok("packaged server.js imports the retry policy", /stt-retry\.cjs/.test(server));
     ok("packaged server.js can split a failed chunk", /function splitWav\(/.test(server));
+    // The reported failure's two server-side causes: a one-pass relay sweep and
+    // an unreadable JSON reply treated as a dead window.
+    ok("packaged server.js queues a capped relay", /queueMs/.test(server) && /sweeps >= 4/.test(server));
+    ok("packaged server.js retries unreadable JSON", /async function jsonCompletion\(/.test(server));
+    ok("packaged server.js does not blame pictures for a cap", /function isRelayCap\(/.test(server));
   }
   const devPath = path.join(appRoot, "public", "dev.js");
   if (fs.existsSync(devPath)) {
     const dev = fs.readFileSync(devPath, "utf8");
     ok("packaged dev.js reports an incomplete transcript", /INCOMPLETE TRANSCRIPT/.test(dev));
     ok("packaged dev.js resumes a saved transcript", /openTranscriptCache/.test(dev));
+    // The Continue button is the user-facing half of resuming: without these the
+    // app would keep its saved regions but give no way to finish them.
+    ok("packaged dev.js offers CONTINUE for a stopped run", /function resumeOffer\(/.test(dev));
+    ok("packaged dev.js paints the CONTINUE button", /shortsContinue\.classList\.toggle/.test(dev));
+    ok("packaged dev.js resumes instead of restarting", /runShorts\(resume = false\)/.test(dev));
+    ok("packaged dev.js has no generic \"unknown error\" fallback", !/\|\| "unknown error"/.test(dev));
+  }
+  const htmlPath = path.join(appRoot, "public", "index.html");
+  if (fs.existsSync(htmlPath)) {
+    ok("packaged index.html has the CONTINUE button", /id="shortsContinue"/.test(fs.readFileSync(htmlPath, "utf8")));
   }
   const cachePath = path.join(appRoot, "public", "stt-cache.js");
   if (fs.existsSync(cachePath)) {
     const cache = fs.readFileSync(cachePath, "utf8");
     ok("packaged stt-cache.js carries the region matcher", /function find\(/.test(cache));
+    // A saved doc must be able to prove it stopped short, or CONTINUE cannot
+    // survive an app restart.
+    ok("packaged stt-cache.js can tell a partial transcript", /function partial\(/.test(cache) && /function markTotal\(/.test(cache));
   }
   const storePath = path.join(appRoot, "lib", "clipping", "stt-cache-store.cjs");
   if (fs.existsSync(storePath)) {
