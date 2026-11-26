@@ -70,6 +70,7 @@ const continueChecks = {
   "runShorts accepts a resume flag": /async function runShorts\(resume = false\)/.test(dev),
   "resume filters to resumable videos": /!resume \|\| v\.resumable/.test(dev),
   "a stopped read marks the entry resumable": /entry\.resumable = Boolean\(read\.incomplete\)/.test(dev),
+  "the button label comes from the tested rule": /dev\.els\.shortsContinue\.textContent = offer\.label/.test(dev),
 };
 for (const [name, ok] of Object.entries(continueChecks)) {
   if (!ok) console.log(`  CONTINUE broken: ${name}`);

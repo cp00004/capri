@@ -1186,6 +1186,18 @@ function cleanShortsClip(raw, ws, we, duration, platform) {
  * the transcript alone. Whatever happens is returned in `vision` so the caller can
  * say exactly how much the model could see.
  */
+/**
+ * True when a failure is the relay being briefly capped rather than the request
+ * itself being wrong. Dropping an image cannot fix a cap, so the step-down must
+ * not dress one up as "the pictures could not be sent".
+ */
+function isRelayCap(err) {
+  const status = Number(err?.status);
+  if (status === 429) return true;
+  if (status === 402 || status === 401 || status === 403 || status === 404) return false;
+  return /rate limit|capped|too many requests/i.test(String(err?.message || ""));
+}
+
 async function shortsCompletion(messages, temperature, queueMs = 0) {
   if (!devHasImages(messages)) {
     return collectDevCompletion({ messages, tools: undefined, temperature, queueMs });
@@ -1229,11 +1241,19 @@ async function shortsCompletion(messages, temperature, queueMs = 0) {
       if (plan.keep === total && !firstErr) return out;
       // Strip a trailing full stop so the note does not read "...choom..".
       const why = String(firstErr?.message || "the relay refused the request").replace(/[.\s]+$/, "").slice(0, 160);
+      // Be accurate about *why* the pictures are missing. A capped relay did not
+      // reject the images - dropping an image cannot fix a 429 - and saying "the
+      // pictures could not be sent" there reads like a vision fault when the real
+      // cause was a temporary cap that the next run will not hit at all.
+      const capped = isRelayCap(firstErr);
+      const missing = plan.keep > 0
+        ? (capped ? `only the first ${plan.keep} of ${total} frames could be sent` : plan.note)
+        : (capped ? "the relay was capped, so the pictures were not sent" : plan.note);
       return {
         ...out,
         vision: plan.keep > 0
-          ? `${plan.note} - ${why}. Judged from fewer frames.`
-          : `${plan.note} - ${why}. This pass read the transcript only.`,
+          ? `${missing} - ${why}. Judged from fewer frames.`
+          : `${missing} - ${why}. This pass read the transcript only.`,
       };
     } catch (err) {
       if (!firstErr) firstErr = err;
