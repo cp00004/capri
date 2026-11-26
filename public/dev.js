@@ -1712,7 +1712,7 @@
     };
     if (cached) {
       // A note, not a degradation: reusing a saved region is the feature working.
-      report.notes.push(
+      (report.notes ||= []).push(
         `${cached} of ${regions.length} speech regions were kept from an earlier run, so they were not read again`
       );
     }

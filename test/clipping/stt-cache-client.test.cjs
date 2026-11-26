@@ -257,8 +257,12 @@ test("the report says how much came from cache and that a re-run resumes", async
 
   const { report } = await runRead({ SC, doc, regions: REGIONS, answer: (i) => words(`fresh${i}`) });
   assert.strictEqual(report.transcript.cached, 1);
-  assert.ok(report.degraded.some((d) => /kept from an earlier run/.test(d)),
-    `expected the cache to be reported, got ${report.degraded}`);
+  assert.ok((report.notes || []).some((d) => /kept from an earlier run/.test(d)),
+    `expected the cache to be reported as a note, got ${report.notes}`);
+  // Reusing saved work is not a degradation; showing it as one would put a warning
+  // on every resumed run.
+  assert.ok(!(report.degraded || []).some((d) => /kept from an earlier run/.test(d)),
+    "a clean reuse must not be reported as degraded");
 });
 
 test("cached regions count as read for granularity and completeness", async () => {
