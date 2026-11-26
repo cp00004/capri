@@ -288,3 +288,32 @@ test("a valid answer uses only one call", async () => {
   assert.strictEqual(calls.length, 1);
   assert.strictEqual(out.parsed.moments.length, 1);
 });
+test("a dead relay beside a capped one does not cancel the wait", async () => {
+  // The live case: FreeTheAI answers 402 (dead account) while Groq is merely
+  // capped. Requiring a clean sweep of failures here is the same mistake that
+  // turned queued speech regions into 64 permanent holes.
+  const r = await run({
+    queueMs: 60_000,
+    candidates: ["freetheai", "groq"],
+    plan: (name, n) => {
+      if (name === "freetheai") return { ok: false, status: 402 };
+      // Groq is capped on the first sweep, then has room.
+      return n === 1
+        ? { ok: false, status: 429, retryAfter: 6 }
+        : { ok: true, text: "answered after the window opened" };
+    },
+  });
+  assert.strictEqual(r.ok, true, `a dead relay must not stop the queue wait (${r.err?.message})`);
+  assert.strictEqual(r.out.content, "answered after the window opened");
+  assert.strictEqual(r.callCount.get("groq"), 2, "groq should have been asked again");
+});
+
+test("every relay dead still fails without waiting", async () => {
+  // No cap anywhere: waiting cannot help, so the window fails at once.
+  const r = await run({
+    queueMs: 60_000,
+    plan: () => ({ ok: false, status: 402 }),
+  });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.logs.length, 3, `expected one sweep, got ${r.logs.join(", ")}`);
+});
