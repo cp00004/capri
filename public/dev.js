@@ -1535,60 +1535,58 @@
         let data = null;
         let retried = false;
 
-        try {
-          data = await ask(region, index);
-        } catch (err) {
-          // A budget refusal means the audio is fine and the account's window is
-          // momentarily empty. Waiting and resending the same chunk is the whole
-          // fix for "69 of 236 regions were never read": the old code treated
-          // this as a permanent loss and moved on.
-          if (err?.deferred) {
-            // Honour the server's hint, but never come back in under half a
-            // minute: a window that has just emptied cannot have refilled yet.
-            const hint = Number(err.retryAfter) > 0 ? Number(err.retryAfter) * 1000 : 60_000;
-            const wait = Math.max(30_000, Math.min(900_000, hint));
-            deferredCount += 1;
-            shortsProgress(
-              `READING THE VIDEO\npaused - the speech budget is spent, resuming in ${Math.round(wait / 1000)}s` +
-              ` (${done}/${regions.length} read so far)`
-            );
-            await new Promise((r) => setTimeout(r, wait));
-            try {
-              data = await ask(region, index);
-              deferredRescued += 1;
-            } catch (again) {
-              if (again?.deferred) {
-                // Still queued. Keep this chunk pending rather than losing it.
-                deferred.push({ start: region.start, end: region.end, why: String(again?.message || again) });
-                done += 1;
-                continue;
+        // A chunk may have to be resent several times while the account's audio
+        // window refills. The server answers "queued" promptly rather than
+        // holding the request past the HTTP client's 300s patience, so resending
+        // is normal, not a failure. These bound the total wait so one chunk can
+        // never stall the whole read forever.
+        const MAX_QUEUE_WAITS = 12;
+        const QUEUE_BUDGET_MS = 3_600_000;
+        const queueStart = Date.now();
+        let queueWaits = 0;
+
+        for (;;) {
+          try {
+            data = await ask(region, index);
+            if (queueWaits) deferredRescued += 1;
+            break;
+          } catch (err) {
+            if (err?.deferred) {
+              queueWaits += 1;
+              const outOfPatience =
+                queueWaits > MAX_QUEUE_WAITS || Date.now() - queueStart > QUEUE_BUDGET_MS;
+              if (outOfPatience) {
+                // Still queued after a fair wait. Keep it pending rather than
+                // calling it unreadable: the audio is fine, the window is not.
+                deferred.push({ start: region.start, end: region.end, why: String(err?.message || err) });
+                break;
               }
-              failed += 1;
-              lost.push({ start: region.start, end: region.end, why: String(again?.message || again) });
-              report.degraded.push(`speech chunk ${clock(region.start)} failed after retry: ${again?.message || again}`);
-              done += 1;
+              // Honour the server's hint, but never return in under half a
+              // minute: a window that just emptied cannot have refilled yet.
+              const hint = Number(err.retryAfter) > 0 ? Number(err.retryAfter) * 1000 : 60_000;
+              const wait = Math.max(30_000, Math.min(600_000, hint));
+              deferredCount += 1;
+              shortsProgress(
+                `READING THE VIDEO\npaused - the speech budget is spent, resuming in ${Math.round(wait / 1000)}s` +
+                ` (${done}/${regions.length} read so far)`
+              );
+              await new Promise((r) => setTimeout(r, wait));
               continue;
             }
-          } else {
-            // One independent retry of this chunk only. The server already retried
-            // transient provider faults, so a second attempt here covers the case
-            // where the request itself never landed (window reload, dead socket).
-            retried = true;
-            await new Promise((r) => setTimeout(r, 1200));
-            try {
-              data = await ask(region, index);
-            } catch (again) {
-              if (again?.deferred) {
-                deferred.push({ start: region.start, end: region.end, why: String(again?.message || again) });
-                done += 1;
-                continue;
-              }
-              failed += 1;
-              lost.push({ start: region.start, end: region.end, why: String(again?.message || again) });
-              report.degraded.push(`speech chunk ${clock(region.start)} failed after retry: ${again?.message || again}`);
-              done += 1;
+
+            // Not a queue wait: one independent retry of this chunk only. The
+            // server already retried transient provider faults, so this covers
+            // the case where the request itself never landed.
+            if (!retried) {
+              retried = true;
+              await new Promise((r) => setTimeout(r, 1200));
               continue;
             }
+
+            failed += 1;
+            lost.push({ start: region.start, end: region.end, why: String(err?.message || err) });
+            report.degraded.push(`speech chunk ${clock(region.start)} failed after retry: ${err?.message || err}`);
+            break;
           }
         }
 

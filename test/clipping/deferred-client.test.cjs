@@ -168,6 +168,33 @@ test("a second refusal leaves the region queued, never marked lost", async () =>
   assert.match(said, /stopped before it could finish/i);
 });
 
+test("a long video's chunk is resent until the window opens", async () => {
+  // The server answers "queued" promptly instead of holding a request past the
+  // HTTP client's 300s patience, so resending several times is the normal path
+  // for a video that outlives one hourly budget - not a failure.
+  const { result, report, attempts } = await runRead([REGIONS[0]], (index, attempt) =>
+    attempt <= 4 ? budgetRefusal(40) : wordsAt("eventually", 0.3)
+  );
+
+  assert.deepStrictEqual([...result.words].map((w) => w.word), ["eventually"]);
+  assert.strictEqual(result.lost.length, 0);
+  assert.strictEqual(result.deferred.length, 0);
+  assert.strictEqual(report.transcript.complete, true);
+  assert.strictEqual(attempts.get(0), 5, "four refusals, then the window opened");
+  assert.strictEqual(report.transcript.budget.pauses, 4);
+  assert.strictEqual(report.transcript.budget.rescued, 1);
+});
+
+test("a chunk that stays queued is counted once and given up on politely", async () => {
+  // After a fair total wait, keeping the worker spinning would starve every
+  // later region. It is recorded as queued (not lost) and the read moves on.
+  const { result, attempts } = await runRead([REGIONS[0]], () => budgetRefusal(30));
+
+  assert.strictEqual(result.lost.length, 0, "never counted as unreadable");
+  assert.strictEqual(result.deferred.length, 1);
+  assert.ok(attempts.get(0) > 2, "it must try more than once before giving up");
+  assert.ok(attempts.get(0) <= 13, `must be bounded, made ${attempts.get(0)} attempts`);
+});
 test("a real provider failure is still reported as lost", async () => {
   const hard = {
     ok: false,
