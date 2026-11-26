@@ -2526,7 +2526,7 @@
         // rather than "never read" - and say what to do about it.
         const parts = [];
         if (lostCount) parts.push(`${lostCount} of ${t.regions} speech regions were never read`);
-        if (queued) parts.push(`${queued} of ${t.regions} are still queued behind the hourly speech budget`);
+        if (queued) parts.push(`${queued} of ${t.regions} ${queued === 1 ? "is" : "are"} still queued behind the hourly speech budget`);
         lines.unshift(
           `INCOMPLETE TRANSCRIPT: ${parts.join(" and ")}`
           + (mixed ? ` (providers that did answer: ${[...new Set(served)].join(", ")})` : "")

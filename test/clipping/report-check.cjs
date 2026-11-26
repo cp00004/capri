@@ -95,3 +95,46 @@ console.log(`  names the real cause            ${/no audio track/.test(silentTex
 console.log(`  no phantom "speech reader" line ${!/speech reader unavailable/.test(silentText)}`);
 console.log(`  no noise about absent OCR text  ${!/on-screen text unavailable/.test(silentText)}`);
 console.log(`  says it once, not twice         ${(silentText.match(/no audio track/g) || []).length === 1}`);
+
+// 5. A clean resume: reusing saved regions is the feature working, so it must be
+//    its own note and must not appear under DEGRADED THIS RUN.
+const resumed = {
+  degraded: [],
+  notes: ["12 of 40 speech regions were kept from an earlier run, so they were not read again"],
+  audio: { ok: true },
+  stt: { ok: true },
+  ocr: { ok: true },
+  transcript: { complete: true, regions: 40, lost: [], deferred: [], cached: 12, chunks: [] },
+};
+const before = box.children.length;
+appendReport(box, [resumed]);
+const resumeText = box.children.slice(before).map((c) => textOf(c)).join("\n");
+console.log(`\nclean resume    new blocks=${box.children.length - before}`);
+console.log(resumeText.split("\n").filter(Boolean).map((l) => `   ${l}`).join("\n"));
+console.log(`\nresume checks:`);
+console.log(`  shows the saved work              ${/kept from an earlier run/.test(resumeText)}`);
+console.log(`  not labelled as degraded          ${!/DEGRADED THIS RUN/.test(resumeText)}`);
+
+// 6. A partial run that resumes: the instruction must say the next run continues.
+const partial = {
+  degraded: [],
+  notes: [],
+  audio: { ok: true },
+  stt: { ok: true },
+  ocr: { ok: true },
+  transcript: {
+    complete: false, regions: 40, cached: 12,
+    lost: [],
+    deferred: [{ start: 100, end: 140, why: "budget" }],
+    chunks: [],
+  },
+};
+const before2 = box.children.length;
+appendReport(box, [partial]);
+const partialText = box.children.slice(before2).map((c) => textOf(c)).join("\n");
+console.log(`\npartial run     new blocks=${box.children.length - before2}`);
+console.log(partialText.split("\n").filter(Boolean).map((l) => `   ${l}`).join("\n"));
+console.log(`\npartial checks:`);
+console.log(`  says regions are still queued     ${/still queued/.test(partialText)}`);
+console.log(`  says the next run resumes         ${/continues from there instead of starting over/.test(partialText)}`);
+
