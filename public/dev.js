@@ -1642,7 +1642,7 @@
       report.degraded.push(
         `speech budget ran out: ${deferred.length} of ${regions.length} speech regions are still queued`
         + " - the account allows a fixed amount of audio per hour, and this video needs more than that."
-        + " Re-running once the window refills will read only the missing regions."
+        + " This run stopped before it could finish them."
       );
     }
     if (deferredCount && deferredRescued) {
@@ -2433,7 +2433,7 @@
         if (queued) {
           lines.unshift(
             "TO FINISH THIS TRANSCRIPT: run it again after the speech window refills."
-            + " Regions already read are kept, so only the queued ones are fetched."
+            + " The pause is the account's hourly audio limit, not a problem with the video."
           );
         }
       }
