@@ -87,6 +87,10 @@ The console prints the LAN address and the six-digit pair code on every boot.
 
 **Long videos and the speech budget.** Groq allows a fixed number of *audio-seconds* per rolling hour (7,200 on the free tier, published in `x-ratelimit-limit-audio-seconds`). A two-hour stream fits; a three-hour one does not. Capri reads what the window allows, paces itself against the published figure, and pauses to let the window refill. A region it could not read is reported as **queued behind the speech budget**, never as a hole in the transcript, and the run says so instead of claiming the video was fully analysed.
 
+**A long video finishes across several runs.** The transcript is saved region by region under the app's own data folder (`stt-cache/`, beside `session.json`), so a video that needs more than one hourly window does not start over. Each run keeps what it read; the next run skips those regions and asks only for the missing ones. Words come back on the same clock because the server's answer for a region is stored verbatim and folded in by the same code as a fresh read.
+
+The cache is keyed by the video's path and byte size, and a saved transcript is only reused when its recorded duration still matches the file (within a second). Two exports with the same name, or a video re-trimmed in place, cannot inherit each other's words: the stale cache is dropped and the read starts clean. Saved regions count as read when reporting completeness, so a resumed run can honestly say the transcript is whole. Caches expire after 30 days and the newest 60 are kept.
+
 `.env`, profiles, device tokens, the audit log, publish logs and certificates are gitignored.
 
 ## Her hands
