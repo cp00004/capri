@@ -131,12 +131,17 @@ async function readPass(label, info, regions, doc, budget, id) {
   console.log(`run 2 read every leftover region: ${runTwoGotAll}`);
 
   fs.rmSync(DIR, { recursive: true, force: true });
+  // With a cap, run one must leave work behind and run two must finish it. With
+  // --all, run two is the check that nothing is re-sent at all.
+  const capped = Number.isFinite(LIMIT);
   const pass = one.saved.ok
     && reSent.length === 0
     && kept === regions.length
     && SC.sameVideo(reloaded, ident)
     && runTwoGotAll
-    && leftover.length > 0;
-  console.log(pass ? "PASS: the second run resumed instead of starting over" : "FAIL");
+    && (capped ? leftover.length > 0 && two.fresh.length === leftover.length : two.fresh.length === 0);
+  console.log(pass
+    ? `PASS: ${capped ? "the second run resumed instead of starting over" : "a finished transcript costs nothing to re-open"}`
+    : "FAIL");
   process.exit(pass ? 0 : 1);
 })().catch((err) => { console.error(err); process.exit(1); });
