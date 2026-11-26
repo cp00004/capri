@@ -2564,6 +2564,25 @@
       warn.appendChild(list);
       box.appendChild(warn);
     }
+
+    // What a re-run reused is information, not a warning. Saying it here keeps
+    // the degraded box meaningful: it only ever names things that went wrong.
+    const notes = [...new Set((reports || []).flatMap((r) => r?.notes || []))];
+    if (notes.length) {
+      const note = document.createElement("div");
+      note.className = "clip-report";
+      const head = document.createElement("strong");
+      head.textContent = "RESUMED FROM AN EARLIER RUN";
+      note.appendChild(head);
+      const list = document.createElement("ul");
+      for (const line of notes) {
+        const li = document.createElement("li");
+        li.textContent = line;
+        list.appendChild(li);
+      }
+      note.appendChild(list);
+      box.appendChild(note);
+    }
   }
 
   /* ------------------------------------------------------------ open/close */
