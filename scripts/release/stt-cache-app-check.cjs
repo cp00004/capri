@@ -4,7 +4,7 @@
  */
 "use strict";
 
-const CDP = "http://127.0.0.1:9222";
+const CDP = process.env.CAPRI_CDP || "http://127.0.0.1:9222";
 
 async function pageTarget() {
   const list = await (await fetch(`${CDP}/json/list`)).json();
