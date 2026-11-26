@@ -2753,6 +2753,20 @@ ipcMain.handle("capri-hands-policy-set", (_event, patch) => {
   return handsSummary();
 });
 ipcMain.handle("capri-hands-undo", () => undoHands());
+
+// ── Resumable transcript cache ───────────────────────────────────────────────
+// A long video needs more speech-reading than one hourly audio budget holds, so
+// the read is saved region by region and a later run picks up where the last one
+// stopped. It lives beside the app (not in the workspace, not next to the video)
+// because it is Capri's scratch work, and it is keyed by the renderer.
+const sttCache = require("../lib/clipping/stt-cache-store.cjs");
+const sttCacheDir = () => path.join(app.getPath("userData"), "stt-cache");
+ipcMain.handle("capri-stt-cache-load", (_event, id) => sttCache.load(sttCacheDir(), id));
+ipcMain.handle("capri-stt-cache-save", (_event, id, doc) => sttCache.save(sttCacheDir(), id, doc));
+ipcMain.handle("capri-stt-cache-drop", (_event, id) => sttCache.remove(sttCacheDir(), id));
+// Run once at startup so an abandoned run cannot grow this folder forever.
+try { sttCache.prune(sttCacheDir()); } catch { /* pruning is housekeeping */ }
+
 // Developer mode workspace tools. Windows-only overlay feature, so the tool
 // surface simply is not registered anywhere else.
 require("../lib/dev-tools.cjs").register(ipcMain);

@@ -1366,7 +1366,32 @@
    * The audio pass and the scene pass do not depend on each other, so they run
    * together.
    */
+  /**
+   * The saved transcript for this file, ready to resume from.
+   *
+   * Returns null when there is no cache at all (no browser bridge, or a file
+   * Capri cannot identify), in which case the read simply behaves as it always
+   * did. A cache belonging to a different cut of a same-named file is dropped
+   * rather than reused: its timestamps would land on the wrong seconds.
+   */
+  async function openTranscriptCache(video, info, report) {
+    const SC = window.CapriSttCache;
+    if (!SC || typeof D?.sttCacheLoad !== "function") return null;
+    const ident = SC.identity(video, info);
+    if (!ident.ok) return null;
+    let doc = null;
+    try { doc = await D.sttCacheLoad(ident.id); } catch { doc = null; }
+    if (doc && !SC.sameVideo(doc, ident)) {
+      report.degraded.push("discarded a saved transcript that belonged to a different version of this file");
+      try { await D.sttCacheDrop(ident.id); } catch { /* the stale file is simply ignored */ }
+      doc = null;
+    }
+    return { id: ident.id, ident, doc: doc || SC.empty(ident), store: D };
+  }
+
   async function readVideo(video, info, report) {
+    // Loaded before the transcript starts so a resumed run knows what it can skip.
+    const cache = await openTranscriptCache(video, info, report).catch(() => null);
     const [audio, chunks, scenes] = await Promise.all([
       D.audioAnalyse({ video, sampleRate: 16000 }).catch((err) => ({ ok: false, reason: String(err?.message || err), events: [] })),
       D.speechChunks({ video, targetSeconds: 45, maxSeconds: 90, minSeconds: 8 }).catch((err) => ({ ok: false, reason: String(err?.message || err), chunks: [] })),
@@ -1383,7 +1408,8 @@
     const regions = chunksOk ? chunks.chunks : [{ start: 0, end: Math.max(1, info.duration) }];
     const pauses = chunksOk ? (chunks.pauses || []) : [];
 
-    const { words, segments, granularity, providers, failed, perChunk, lost, deferred } = await transcribeChunks(video, regions, report);
+    const { words, segments, granularity, providers, failed, perChunk, lost, deferred, cached } =
+      await transcribeChunks(video, regions, report, cache);
     report.stt = {
       ok: words.length > 0 || segments.length > 0,
       granularity,
@@ -1397,6 +1423,7 @@
       // the provider that let the run down.
       detail: perChunk || [],
       deferred: (deferred || []).length,
+      cached: cached || 0,
     };
     if (granularity === "none") {
       // Say what actually went wrong. "I could not hear speech" is confusing when
@@ -1428,6 +1455,10 @@
       words,
       segments,
       granularity,
+      // A partial read must not be reused as if it were finished, or a re-run
+      // would report a transcript with holes in it as complete.
+      incomplete: (lost || []).length > 0 || (deferred || []).length > 0,
+      cached,
     };
   }
 
@@ -1442,13 +1473,16 @@
    * erases the chunks that already succeeded. Whatever is missing at the end is
    * reported by name, because a transcript with a hole in it is not a full read.
    */
-  async function transcribeChunks(video, regions, report) {
+  async function transcribeChunks(video, regions, report, cache) {
+    const SC = window.CapriSttCache;
     const WORKERS = 3;
     const words = [];
     const segments = [];
     const providers = [];
     const perChunk = [];
     const lost = [];
+    // Regions whose answer came from a previous run instead of the speech reader.
+    let cached = 0;
     // Chunks queued behind the account's speech budget rather than lost.
     const deferred = [];
     let deferredCount = 0;
@@ -1457,6 +1491,21 @@
     let wordChunks = 0;
     let done = 0;
     let next = 0;
+    /* Saving is serialised: three workers finishing at once would otherwise
+       interleave read-modify-write on one document and lose regions. */
+    let saves = Promise.resolve();
+    let saveFailed = false;
+
+    const persist = (region, payload, meta) => {
+      if (!cache || !SC) return;
+      SC.add(cache.doc, region, payload, meta);
+      saves = saves.then(async () => {
+        try {
+          const out = await cache.store.sttCacheSave(cache.id, cache.doc);
+          if (out && out.ok === false) saveFailed = true;
+        } catch { saveFailed = true; }
+      });
+    };
 
     const ask = async (region, index) => {
       const span = Math.max(1, region.end - region.start);
@@ -1535,6 +1584,15 @@
         let data = null;
         let retried = false;
 
+        // Already read on an earlier run: reuse the answer instead of spending
+        // the account's audio budget on the same seconds twice. A cached answer
+        // is folded in by exactly the code below, so it keeps its own shape.
+        const hit = cache && SC ? SC.find(cache.doc, region) : null;
+        if (hit) {
+          data = hit.payload;
+          cached += 1;
+        }
+
         // A chunk may have to be resent several times while the account's audio
         // window refills. The server answers "queued" promptly rather than
         // holding the request past the HTTP client's 300s patience, so resending
@@ -1546,6 +1604,7 @@
         let queueWaits = 0;
 
         for (;;) {
+          if (data) break;
           try {
             data = await ask(region, index);
             if (queueWaits) deferredRescued += 1;
@@ -1601,26 +1660,37 @@
               partProviders.push(info.provider);
               placed += info.items;
             }
-            perChunk.push({ start: +region.start.toFixed(2), end: +region.end.toFixed(2), provider: partProviders.join("+"), items: placed, split: true, retried });
-            report.degraded.push(`speech chunk ${clock(region.start)} was split into ${data.parts.length} pieces to get through (${[...new Set(partProviders)].join(" + ")})`);
+            perChunk.push({ start: +region.start.toFixed(2), end: +region.end.toFixed(2), provider: partProviders.join("+"), items: placed, split: true, retried, cached: Boolean(hit) });
+            // A fresh answer is saved whole, split or not, so the next run can
+            // replay it through this same branch.
+            if (!hit) persist(region, data, { provider: partProviders.join("+"), retried });
+            if (!hit) report.degraded.push(`speech chunk ${clock(region.start)} was split into ${data.parts.length} pieces to get through (${[...new Set(partProviders)].join(" + ")})`);
           } else {
             const info = collect(data, region.start);
-            perChunk.push({ start: +region.start.toFixed(2), end: +region.end.toFixed(2), provider: info.provider, items: info.items, split: false, retried });
+            perChunk.push({ start: +region.start.toFixed(2), end: +region.end.toFixed(2), provider: info.provider, items: info.items, split: false, retried, cached: Boolean(hit) });
+            if (!hit) persist(region, data, { provider: info.provider, retried });
           }
         }
 
         done += 1;
-        shortsProgress(`READING THE VIDEO\n${done}/${regions.length} speech regions · ${words.length} words timed${lost.length ? ` · ${lost.length} lost` : ""}`);
+        shortsProgress(
+          `READING THE VIDEO\n${done}/${regions.length} speech regions · ${words.length} words timed`
+          + `${cached ? ` · ${cached} kept from last run` : ""}${lost.length ? ` · ${lost.length} lost` : ""}`
+        );
       }
     };
 
     await Promise.all(Array.from({ length: Math.min(WORKERS, regions.length) }, () => worker()));
+    // Let every queued save finish before the read reports, so a run that ends
+    // here leaves nothing on disk unsaved.
+    await saves;
     words.sort((a, b) => a.start - b.start);
     segments.sort((a, b) => a.start - b.start);
 
     const granularity = words.length ? "word" : segments.length ? "segment" : "none";
     // A mixed read is word-accurate in places and approximate in others; call it
     // segment so nothing overstates its precision.
+    // Cached regions count as read: the transcript covers them.
     const mixed = wordChunks > 0 && wordChunks < regions.length - failed;
 
     // Which provider served which chunk, and what never came back at all.
@@ -1634,8 +1704,19 @@
       deferred,
       chunks: perChunk,
       providers: [...new Set(providers)],
+      cached,
       budget: deferredCount ? { pauses: deferredCount, rescued: deferredRescued } : null,
     };
+    if (cached) {
+      report.degraded.push(
+        `${cached} of ${regions.length} speech regions were kept from an earlier run, so they were not read again`
+      );
+    }
+    if (saveFailed) {
+      report.degraded.push(
+        "this transcript could not be saved for a later run, so the next run will have to read the whole video again"
+      );
+    }
     if (deferred.length) {
       report.degraded.push(
         `speech budget ran out: ${deferred.length} of ${regions.length} speech regions are still queued`
@@ -1654,7 +1735,7 @@
       );
     }
 
-    return { words, segments, granularity: mixed ? "segment" : granularity, providers, failed, perChunk, lost, deferred };
+    return { words, segments, granularity: mixed ? "segment" : granularity, providers, failed, perChunk, lost, deferred, cached };
   }
 
 
@@ -2158,20 +2239,38 @@
         entry.clipReport = report;
         try {
           shortsProgress(`VIDEO ${tag}\nreading the audio · ${clock(info.duration)}`);
-          // One read per file, reused on a re-run at the same length.
+          // One read per file, reused on a re-run at the same length. A partial
+          // read is never reused: it would be reported as a finished transcript
+          // when regions are still missing, so the reader is called again and it
+          // resumes from the saved regions instead.
           let read = entry.read;
-          if (!read || read.duration !== info.duration) {
+          if (!read || read.duration !== info.duration || read.incomplete) {
             read = await readVideo(video.path, info, report);
             entry.read = { ...read, duration: info.duration };
           } else {
             // The cached read is still valid; copy its shape into the report so
-            // Developer Mode shows what actually ran.
+            // Developer Mode shows what actually ran. The region count is real,
+            // not zero: every one of them was read, just not on this run.
+            const served = read.perChunk || [];
             report.audio = { ok: (read.events || []).length > 0 || !report.degraded.length, reason: "", events: (read.events || []).length };
             report.scenes = { ok: true, reason: "", cuts: (read.scenes || []).length };
             report.stt = {
               ok: true, granularity: read.granularity,
-              chunks: 0, words: (read.words || []).length, providers: [],
+              chunks: served.length, words: (read.words || []).length,
+              providers: [...new Set(served.map((c) => c.provider).filter(Boolean))],
             };
+            report.transcript = {
+              complete: true,
+              regions: served.length,
+              lost: [],
+              deferred: [],
+              chunks: served,
+              providers: report.stt.providers,
+              cached: served.length,
+            };
+            report.degraded.push(
+              `whole transcript kept from an earlier run of this video - ${served.length} speech regions were not read again`
+            );
           }
           report.stt.granularity = read.granularity;
           report.duration = info.duration;
@@ -2428,10 +2527,20 @@
           `INCOMPLETE TRANSCRIPT: ${parts.join(" and ")}`
           + (mixed ? ` (providers that did answer: ${[...new Set(served)].join(", ")})` : "")
         );
+        // Say what a re-run will actually do. The saved regions are the difference
+        // between "start over" and "pick up where this stopped", and the user
+        // needs to know the second run is not wasted work.
+        const kept = t.cached || 0;
+        const canResume = kept > 0 || t.regions > (lostCount + queued);
         if (queued) {
           lines.unshift(
             "TO FINISH THIS TRANSCRIPT: run it again after the speech window refills."
             + " The pause is the account's hourly audio limit, not a problem with the video."
+            + (canResume ? " The regions already read are saved, so the next run continues from there instead of starting over." : "")
+          );
+        } else if (canResume) {
+          lines.unshift(
+            "TO FINISH THIS TRANSCRIPT: run it again. The regions already read are saved, so the next run continues from there instead of starting over."
           );
         }
       }

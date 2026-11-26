@@ -101,5 +101,9 @@ contextBridge.exposeInMainWorld("capriDev", {
   frames: (args) => ipcRenderer.invoke("capri-dev-frames", args || {}),
   ocr: (args) => ipcRenderer.invoke("capri-dev-ocr", args || {}),
   speechChunks: (args) => ipcRenderer.invoke("capri-dev-speech-chunks", args || {}),
+  // Resumable transcript cache: saved beside the app, keyed by the video.
+  sttCacheLoad: (id) => ipcRenderer.invoke("capri-stt-cache-load", String(id || "")),
+  sttCacheSave: (id, doc) => ipcRenderer.invoke("capri-stt-cache-save", String(id || ""), doc || null),
+  sttCacheDrop: (id) => ipcRenderer.invoke("capri-stt-cache-drop", String(id || "")),
   cleanup: () => ipcRenderer.invoke("capri-dev-cleanup"),
 });

@@ -22,12 +22,14 @@ const vm = require("node:vm");
 function liftTranscribeChunks() {
   const file = path.resolve(__dirname, "../../public/dev.js");
   const src = fs.readFileSync(file, "utf8");
-  const marker = "async function transcribeChunks(video, regions, report)";
-  const start = src.indexOf(marker);
-  assert.ok(start > 0, "transcribeChunks should exist in public/dev.js");
+  // Match up to the parameter list's closing paren so adding an argument (the
+  // transcript cache) does not silently detach this test from the real code.
+  const found = /async function transcribeChunks\s*\(([^)]*)\)/.exec(src);
+  assert.ok(found, "transcribeChunks should exist in public/dev.js");
+  const start = found.index;
 
   let depth = 0;
-  let i = src.indexOf("{", start);
+  let i = src.indexOf("{", found.index + found[0].length - 1);
   for (; i < src.length; i += 1) {
     if (src[i] === "{") depth += 1;
     else if (src[i] === "}") {
@@ -35,8 +37,8 @@ function liftTranscribeChunks() {
       if (depth === 0) break;
     }
   }
-  const body = src.slice(src.indexOf("{", start), i + 1);
-  return `async function transcribeChunks(video, regions, report) ${body}`;
+  const body = src.slice(src.indexOf("{", found.index + found[0].length - 1), i + 1);
+  return `async function transcribeChunks(${found[1]}) ${body}`;
 }
 
 const SOURCE = liftTranscribeChunks();
@@ -53,7 +55,8 @@ async function runRead(regions, answer) {
   let timerId = 0;
 
   const sandbox = {
-    // A base64 payload is all the loop needs from the audio extractor.
+    // dev.js reads the cache module off `window`, exactly as the browser does.
+    // Point window back at the sandbox so the lifted code is unchanged.
     D: { wav: async () => ({ data: Buffer.from("wav").toString("base64") }) },
     atob: (s) => Buffer.from(s, "base64").toString("binary"),
     Blob,
@@ -87,6 +90,7 @@ async function runRead(regions, answer) {
   });
 
   vm.createContext(sandbox);
+  sandbox.window = sandbox;
   vm.runInContext(`${SOURCE}\nthis.run = transcribeChunks;`, sandbox, {
     filename: "transcribeChunks.js",
   });

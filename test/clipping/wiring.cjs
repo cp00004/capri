@@ -43,7 +43,7 @@ for (const dead of removed) {
   if (dev.includes(dead)) console.log(`  still referenced: ${dead}`);
 }
 
-// Bridge contract: every D.x() the renderer calls must exist in the preload.
+// The bridge contract: every D.x() the renderer calls must exist in the preload.
 const calls = [...new Set([...dev.matchAll(/\bD\.(\w+)\(/g)].map((m) => m[1]))].sort();
 const bridgeMissing = calls.filter((c) => !new RegExp(`\\b${c}\\s*:`).test(preload));
 console.log(`bridge methods: ${calls.length - bridgeMissing.length}/${calls.length} present in preload`);
@@ -54,4 +54,10 @@ const mathAt = html.indexOf("clip-math.js");
 const devAt = html.indexOf('src="dev.js');
 console.log(`clip-math loaded before dev.js: ${mathAt > -1 && devAt > -1 && mathAt < devAt}`);
 
-process.exit(missing.length || bridgeMissing.length || cmMissing.length ? 1 : 0);
+// The resumable transcript cache is loaded the same way, and dev.js reads it off
+// window at call time, so it has to be on the page before dev.js runs.
+const sttCacheAt = html.indexOf("stt-cache.js");
+console.log(`stt-cache loaded before dev.js: ${sttCacheAt > -1 && devAt > -1 && sttCacheAt < devAt}`);
+const sttCacheMissing = sttCacheAt > -1 ? [] : ["stt-cache.js"];
+
+process.exit(missing.length || bridgeMissing.length || cmMissing.length || sttCacheMissing.length ? 1 : 0);
