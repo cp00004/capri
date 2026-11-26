@@ -3581,49 +3581,34 @@ function wavSecondsOf(buffer) {
  * Wait here when the last answer said the window is nearly empty, so the next
  * chunk is sent when it will be accepted instead of being refused and retried.
  *
- * Pacing is serialised and reserves each chunk's audio when it is sent. Without
- * that, three workers read the same "remaining" figure, all decide their chunk
- * fits, and fire together - which spends the window twice as fast as any one of
- * them expected and is how a run ends up refused partway through.
- */
-let paceChain = Promise.resolve();
-
-/**
- * @param {Buffer} buffer
- * @param {number} [deadlineAt] wall-clock ms by which the whole request must end
- * @returns {Promise<number>} the wall-clock time this call spent waiting
+ * The reservation is made atomically, but the waiting is not serialised. Before
+ * this, three workers queued behind one another, so a 120s pause each cost six
+ * minutes per round; and reading the same "remaining" figure without reserving
+ * let all three decide they fit and spend the window at triple the expected rate.
  */
 async function paceSpeech(buffer, deadlineAt = Infinity) {
   const need = wavSecondsOf(buffer);
-  const run = paceChain.then(async () => {
-    const budget = speechBudget.groq;
-    if (!budget) return 0;
-    const wait = sttBudget.waitForRoom(budget, need, Date.now());
-    let spent = 0;
-    if (wait > 0) {
-      // Pacing is a short proactive wait to avoid a refusal; the patient waiting
-      // belongs to the retry layer. Both draw from one request deadline, because
-      // exceeding it kills the request on the wire rather than queueing it.
-      const room = Math.max(0, deadlineAt - Date.now());
-      const capped = Math.min(wait, 120_000, room);
-      if (capped > 0) {
-        console.log(`  · stt pacing: ${Math.round(need)}s of audio needs ${Math.round(capped / 1000)}s of budget window`);
-        await new Promise((r) => setTimeout(r, capped));
-        spent = capped;
-      }
-    }
-    // Reserve now, not on the answer: the next worker in line must see this
-    // audio as already spoken for. The real figure replaces this on the next
-    // response via recordBudget.
-    if (speechBudget.groq) {
-      speechBudget.groq.remainingSeconds = Math.max(0, speechBudget.groq.remainingSeconds - need);
-      speechBudget.groq.seenAt = Date.now();
-    }
-    return spent;
-  });
-  // Keep the chain alive even if one pause throws.
-  paceChain = run.catch(() => {});
-  return run;
+  const budget = speechBudget.groq;
+  if (!budget) return 0;
+
+  // Atomic read-and-reserve: JavaScript will not interleave another task between
+  // these statements, so two workers cannot both claim the same audio-seconds.
+  const wait = sttBudget.waitForRoom(budget, need, Date.now());
+  budget.remainingSeconds = Math.max(0, budget.remainingSeconds - need);
+  budget.seenAt = Date.now();
+
+  if (wait <= 0) return 0;
+
+  // Pacing is a short proactive wait to avoid a refusal; the patient waiting
+  // belongs to the retry layer. Both draw from one request deadline, because
+  // exceeding it kills the request on the wire rather than queueing it.
+  const room = Math.max(0, deadlineAt - Date.now());
+  const capped = Math.min(wait, 30_000, room);
+  if (capped <= 0) return 0;
+
+  console.log(`  · stt pacing: ${Math.round(need)}s of audio needs ${Math.round(capped / 1000)}s of budget window`);
+  await new Promise((r) => setTimeout(r, capped));
+  return capped;
 }
 
 function normalizeWords(raw, offset = 0) {

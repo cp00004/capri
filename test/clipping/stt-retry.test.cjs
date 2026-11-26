@@ -136,6 +136,35 @@ test("a budget wait longer than the pass deadline is not a lost chunk", async ()
   assert.strictEqual(calls, 2);
   assert.ok(clock > 60_000, `the test must actually pause past the deadline, paused ${clock}ms`);
 });
+test("queue time is shared across keys, not granted to each", async () => {
+  // Two Groq keys could otherwise pause the full allowance each, doubling the
+  // request's life past the point where the HTTP client gives up.
+  let clock = 0;
+  const waits = [];
+  const refuse = async () => {
+    const err = httpError(429, "Rate limit reached for audio-seconds per hour");
+    err.budget = { resetMs: 200_000, limitSeconds: 7200, remainingSeconds: 0 };
+    throw err;
+  };
+  const result = await runWithRetry(
+    [
+      { label: "groq#1", run: refuse },
+      { label: "groq#2", run: refuse },
+    ],
+    {
+      sleep: async (ms) => { waits.push(ms); clock += ms; },
+      now: () => clock,
+      maxRetries: 1,
+      budgetWaits: 99,
+      budgetWaitMs: 900_000,
+      budgetTotalMs: 240_000,
+    }
+  );
+
+  const total = waits.reduce((n, w) => n + w, 0);
+  assert.strictEqual(result.deferred, true);
+  assert.ok(total <= 240_000, `two keys paused ${total}ms together, must stay within one deadline`);
+});
 test("one request never outlives the caller's patience", async () => {
   // The client aborts a request at 900s. Six independent 900s waits would be
   // cut off mid-pause, which turns a queued chunk back into a lost one.
