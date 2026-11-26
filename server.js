@@ -3588,21 +3588,29 @@ function wavSecondsOf(buffer) {
  */
 let paceChain = Promise.resolve();
 
-async function paceSpeech(buffer) {
+/**
+ * @param {Buffer} buffer
+ * @param {number} [deadlineAt] wall-clock ms by which the whole request must end
+ * @returns {Promise<number>} the wall-clock time this call spent waiting
+ */
+async function paceSpeech(buffer, deadlineAt = Infinity) {
   const need = wavSecondsOf(buffer);
   const run = paceChain.then(async () => {
     const budget = speechBudget.groq;
-    if (!budget) return;
+    if (!budget) return 0;
     const wait = sttBudget.waitForRoom(budget, need, Date.now());
+    let spent = 0;
     if (wait > 0) {
-      // Pacing is a short proactive wait to avoid a refusal. The long, patient
-      // waits belong to the retry layer, which bounds them and reports the chunk
-      // as queued. Capping pacing low enough that pacing + a queued retry + a
-      // provider call all fit inside the client's 900s request timeout keeps the
-      // request from being aborted mid-pause.
-      const capped = Math.min(wait, 120_000);
-      console.log(`  · stt pacing: ${Math.round(need)}s of audio needs ${Math.round(capped / 1000)}s of budget window`);
-      await new Promise((r) => setTimeout(r, capped));
+      // Pacing is a short proactive wait to avoid a refusal; the patient waiting
+      // belongs to the retry layer. Both draw from one request deadline, because
+      // exceeding it kills the request on the wire rather than queueing it.
+      const room = Math.max(0, deadlineAt - Date.now());
+      const capped = Math.min(wait, 120_000, room);
+      if (capped > 0) {
+        console.log(`  · stt pacing: ${Math.round(need)}s of audio needs ${Math.round(capped / 1000)}s of budget window`);
+        await new Promise((r) => setTimeout(r, capped));
+        spent = capped;
+      }
     }
     // Reserve now, not on the answer: the next worker in line must see this
     // audio as already spoken for. The real figure replaces this on the next
@@ -3611,6 +3619,7 @@ async function paceSpeech(buffer) {
       speechBudget.groq.remainingSeconds = Math.max(0, speechBudget.groq.remainingSeconds - need);
       speechBudget.groq.seenAt = Date.now();
     }
+    return spent;
   });
   // Keep the chain alive even if one pause throws.
   paceChain = run.catch(() => {});
@@ -3651,7 +3660,7 @@ function normalizeSegments(raw, offset = 0) {
  * the next provider immediately. `attempts` records what every try actually
  * said, so a caller can report "Groq was 502ing" instead of "it failed".
  */
-async function transcribeVerbose({ buffer, type, language = "", hint = "", provider = "auto", chunk = null }) {
+async function transcribeVerbose({ buffer, type, language = "", hint = "", provider = "auto", chunk = null, deadlineAt = Infinity }) {
   const languageCode = /^[a-z]{2}$/.test(String(language || "")) ? String(language) : "";
   const attempts = [];
 
@@ -3797,9 +3806,12 @@ async function transcribeVerbose({ buffer, type, language = "", hint = "", provi
   // Pace once per chunk, before any provider is asked. Doing it inside each
   // key's attempt meant a retry within the same pass paced again, stacking
   // minutes of pause into a single request the client will abort at 900s.
-  await paceSpeech(buffer);
+  const pacedMs = await paceSpeech(buffer, deadlineAt);
 
   const outcome = await sttRetry.runWithRetry(chain, {
+    // Pacing already spent part of this request's allowance; the queue may only
+    // use what is left, so the whole response still lands inside the wire limit.
+    budgetTotalMs: Math.max(0, REQUEST_DEADLINE_MS - pacedMs),
     onRetry: ({ label, try: n, waitMs, reason }) => {
       // Useful in the server log, harmless to expose: no key, no audio.
       console.warn(`  ! stt ${where}: ${label} ${reason} (try ${n}) - retrying in ${Math.round(waitMs / 1000)}s`);
@@ -3845,8 +3857,8 @@ async function transcribeVerbose({ buffer, type, language = "", hint = "", provi
  * nested split halves it, so the caller can place every part on its own clock no
  * matter how many times the region had to be divided.
  */
-async function transcribePiece({ buffer, type, language, hint, provider, chunk, span, depth = 0 }) {
-  const result = await transcribeVerbose({ buffer, type, language, hint, provider, chunk });
+async function transcribePiece({ buffer, type, language, hint, provider, chunk, span, depth = 0, deadlineAt = Infinity }) {
+  const result = await transcribeVerbose({ buffer, type, language, hint, provider, chunk, deadlineAt });
   if (result.ok) return { ok: true, parts: [{ ...result, at: 0 }], split: false };
 
   // Only split when the audio is plausibly the problem. A dead key or no credit
@@ -3881,6 +3893,9 @@ async function transcribePiece({ buffer, type, language, hint, provider, chunk, 
       chunk: { ...chunk, at: `${chunk.at}.${i + 1}` },
       span,
       depth: depth + 1,
+      // A split halves the audio, not the time available: both halves share the
+      // one deadline the original request was given.
+      deadlineAt,
     });
     if (sub.ok) {
       // Shift every part by the half's own start within this piece.
@@ -3997,6 +4012,9 @@ async function handleSttWord(req, res) {
     hint: String(query.get("prompt") || "").slice(0, 240),
     provider: String(query.get("provider") || "auto"),
     chunk,
+    // Every pause this request makes - proactive pacing and queueing alike -
+    // draws from one deadline short of the HTTP client's own 300s limit.
+    deadlineAt: Date.now() + REQUEST_DEADLINE_MS,
     // Trust the caller's span when it sends one; otherwise measure the audio so
     // split offsets cannot silently collapse onto the same second.
     span: Number(query.get("span") || 0) || wavSeconds(buffer) || 0,
