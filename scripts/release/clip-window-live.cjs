@@ -32,6 +32,10 @@ const STUB_PORT = Number(process.env.CAPRI_STUB_PORT || 4197);
 const SERVER_PORT = Number(process.env.CAPRI_SERVER_PORT || 4177);
 
 const calls = { groq: 0, mistral: 0, freetheai: 0 };
+// Enough calls to cover one full sweep of the candidate list (up to six
+// provider/model pairs), so the first sweep of a "both" run is entirely capped
+// - which is exactly the shape that used to fail a whole window.
+const CAPPED_CALLS = Number(process.env.CAPRI_STUB_CAPPED_CALLS || 6);
 
 const VALID = {
   moments: [{
