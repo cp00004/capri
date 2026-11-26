@@ -36,6 +36,8 @@ const calls = { groq: 0, mistral: 0, freetheai: 0 };
 // provider/model pairs), so the first sweep of a "both" run is entirely capped
 // - which is exactly the shape that used to fail a whole window.
 const CAPPED_CALLS = Number(process.env.CAPRI_STUB_CAPPED_CALLS || 6);
+// How many 200s have been handed out, for the unreadable-JSON beat.
+let answered = 0;
 
 const VALID = {
   moments: [{
@@ -85,9 +87,11 @@ const stub = http.createServer((req, res) => {
     }
 
     // Then one relay answers with prose: a bad answer, not a bad window.
+    // Tracked against the first *answered* call, so the prose beat still lands
+    // after however many capped calls the mode needs.
     if (MODE === "json" || MODE === "both") {
-      const prose = total === 2 || (MODE === "json" && total === 1);
-      if (prose) {
+      answered += 1;
+      if (answered === 1) {
         console.log(`  ${who} #${calls[who]} -> 200 unreadable JSON`);
         return sse("Sure! Here is my thinking about the video: it is quite long and has many moments.");
       }
