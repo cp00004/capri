@@ -8,10 +8,15 @@ const apkPath = "android/app/build/outputs/apk/release/app-release.apk";
 const apk = fs.readFileSync(apkPath);
 const sha = crypto.createHash("sha256").update(apk).digest("hex");
 
+// Take the version from package.json so a release bump cannot leave the feed
+// pointing at an older build than the one that was just made.
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8").replace(/^\uFEFF/, ""));
+const version = process.argv[2] || pkg.version;
+
 for (const f of ["public/version.json", "version.json"]) {
   const raw = fs.readFileSync(f, "utf8").replace(/^\uFEFF/, "");
   const j = JSON.parse(raw);
-  j.version = "5.7.0";
+  j.version = version;
   j.apkSha256 = sha;
   j.apkSize = apk.length;
   fs.writeFileSync(f, JSON.stringify(j, null, 2) + "\n", "utf8");
