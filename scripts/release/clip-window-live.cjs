@@ -184,10 +184,14 @@ stub.listen(STUB_PORT, "127.0.0.1", async () => {
   if (body.windows) console.log(`windows: ${JSON.stringify(body.windows).slice(0, 400)}`);
   if (body.message) console.log(`message: ${body.message}`);
 
+  const failures = body.failures || [];
   const ok =
     MODE === "dead"
-      ? status === 502 && (body.failures || []).length === 1
-      : status === 200 && (body.moments || []).length === 1 && (body.failures || []).length === 0;
+      // A cap that never clears is a real failure: the endpoint must say so at
+      // the top level rather than answer 200 with an empty list the renderer
+      // would report as "nothing postable".
+      ? status === 502 && /rate limit|capped/i.test(String(body.message || ""))
+      : status === 200 && (body.moments || []).length === 1 && failures.length === 0;
 
   console.log(ok ? "\nPASS" : "\nFAIL");
   if (!ok) console.log("\n----- server log -----\n" + log.join("").slice(-3000));
