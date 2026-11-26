@@ -60,4 +60,13 @@ const sttCacheAt = html.indexOf("stt-cache.js");
 console.log(`stt-cache loaded before dev.js: ${sttCacheAt > -1 && devAt > -1 && sttCacheAt < devAt}`);
 const sttCacheMissing = sttCacheAt > -1 ? [] : ["stt-cache.js"];
 
-process.exit(missing.length || bridgeMissing.length || cmMissing.length || sttCacheMissing.length ? 1 : 0);
+// IPC contract: every channel the preload invokes must be handled in the main
+// process, or the renderer's call rejects at runtime with no hint why.
+const main = fs.readFileSync(path.join(root, "electron/main.cjs"), "utf8");
+const devTools = fs.readFileSync(path.join(root, "lib/dev-tools.cjs"), "utf8");
+const invoked = [...new Set([...preload.matchAll(/ipcRenderer\.(?:invoke|send)\("([\w-]+)"/g)].map((m) => m[1]))];
+const unhandled = invoked.filter((ch) => !main.includes(`"${ch}"`) && !devTools.includes(`\`capri-dev-`) && !ch.startsWith("capri-dev-"));
+console.log(`ipc channels: ${invoked.length - unhandled.length}/${invoked.length} handled`);
+if (unhandled.length) console.log(`  MISSING: ${unhandled.join(", ")}`);
+
+process.exit(missing.length || bridgeMissing.length || cmMissing.length || sttCacheMissing.length || unhandled.length ? 1 : 0);
