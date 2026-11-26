@@ -610,7 +610,10 @@
     // button silently did nothing forever. The picker does not touch a run that
     // is already going: it only appends to the queue.
     try {
-      const files = await D.pickVideos();
+      // The native dialog is one of only two things an automated check cannot
+      // click, so a check may stand in for it. Everything after this line - the
+      // de-duplication, the probe, the rows - is the real code path.
+      const files = dev.pickOverride ? await dev.pickOverride() : await D.pickVideos();
       if (!files.length) return;
       const added = [];
       for (const f of files) {
