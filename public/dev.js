@@ -1317,6 +1317,24 @@
     box.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  /**
+   * What CONTINUE should say, given the studio's state.
+   *
+   * Pure and separate from the DOM so the rule can be tested on its own: no
+   * button when nothing stopped short, and a count when several videos did.
+   */
+  function resumeOffer(videos, { hasRoot, busy }) {
+    const list = (videos || []).filter((v) => v?.info?.hasAudio && v.resumable);
+    const show = Boolean(hasRoot) && list.length > 0 && !busy;
+    return {
+      show,
+      count: list.length,
+      paths: list.map((v) => v.path),
+      label: !show ? "" : list.length === 1 ? "CONTINUE" : `CONTINUE (${list.length})`,
+      title: "Finish the speech regions this video still has unread. Everything already read is kept.",
+    };
+  }
+
   function paintStudio() {
     if (!dev.els?.ytTitle) return;
     const video = dev.video;
@@ -1348,13 +1366,12 @@
     // CONTINUE only exists when a run actually stopped short. It resumes the
     // same video from the transcript saved on disk, so the seconds already read
     // are not paid for twice.
-    const resumeList = dev.videos.filter((v) => v.info?.hasAudio && v.resumable);
-    const canResume = Boolean(dev.root) && resumeList.length > 0 && !dev.shortsBusy;
-    dev.els.shortsContinue.classList.toggle("hidden", !canResume);
-    if (canResume) {
+    const offer = resumeOffer(dev.videos, { hasRoot: Boolean(dev.root), busy: dev.shortsBusy });
+    dev.els.shortsContinue.classList.toggle("hidden", !offer.show);
+    if (offer.show) {
       dev.els.shortsContinue.disabled = false;
-      dev.els.shortsContinue.textContent = resumeList.length === 1 ? "CONTINUE" : `CONTINUE (${resumeList.length})`;
-      dev.els.shortsContinue.title = "Finish the speech regions this video still has unread. Everything already read is kept.";
+      dev.els.shortsContinue.textContent = offer.label;
+      dev.els.shortsContinue.title = offer.title;
     }
   }
 
@@ -2685,7 +2702,24 @@
     try { window.capriNative?.log?.("dev: closed"); } catch { /* browser */ }
   }
 
-  window.CapriDev = { open, close, isOpen: () => dev.open };
+  // The studio's own state is private by design. This exposes only what an
+  // automated check (or a user with the console open) needs to see the resume
+  // decision without reaching into the internals: whether the button is on
+  // screen, and which videos it would act on.
+  window.CapriDev = {
+    open,
+    close,
+    isOpen: () => dev.open,
+    continueState: () => ({
+      visible: Boolean(dev.els?.shortsContinue && !dev.els.shortsContinue.classList.contains("hidden")),
+      label: dev.els?.shortsContinue?.textContent || "",
+      busy: Boolean(dev.shortsBusy),
+      resumable: dev.videos.filter((v) => v.resumable).map((v) => v.path),
+      offer: resumeOffer(dev.videos, { hasRoot: Boolean(dev.root), busy: dev.shortsBusy }),
+    }),
+    // Repaint after a test or a user pokes the state; harmless in normal use.
+    repaint: () => paintStudio(),
+  };
 
   function wire() {
     initRefs();
