@@ -215,6 +215,32 @@ test("a real provider failure is still reported as lost", async () => {
   assert.match(report.degraded.join(" | "), /groq 401/, "the refusing engine must be named");
 });
 
+test("a single request can never outlive the HTTP client's patience", () => {
+  // Node's HTTP client abandons a response after 300s (measured: 306s,
+  // UND_ERR_HEADERS_TIMEOUT). A server that paused longer would have the request
+  // killed on the wire, and the chunk would be lost after all - which is why the
+  // server must answer "queued" in good time and let the caller resend.
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const server = fs.readFileSync(path.resolve(__dirname, "../../server.js"), "utf8");
+  const retry = fs.readFileSync(path.resolve(__dirname, "../../lib/clipping/stt-retry.cjs"), "utf8");
+
+  const deadline = server.match(/const REQUEST_DEADLINE_MS = ([\d_]+)/);
+  assert.ok(deadline, "the server must name one request deadline");
+  const ms = Number(deadline[1].replace(/_/g, ""));
+  assert.ok(ms > 0 && ms < 300_000, `a request must answer inside 300s, got ${ms}ms`);
+
+  // The retry layer's own queue bound must not exceed that deadline either.
+  const total = retry.match(/budgetTotalMs: Number\(process\.env\.CAPRI_STT_BUDGET_TOTAL_MS \?\? ([\d_]+)\)/);
+  assert.ok(total, "the queue must have a total bound");
+  const queueMs = Number(total[1].replace(/_/g, ""));
+  assert.ok(queueMs <= ms, `queueing ${queueMs}ms must fit the ${ms}ms request deadline`);
+
+  // And pacing has to draw from the same allowance, not add to it.
+  assert.match(server, /deadlineAt: Date\.now\(\) \+ REQUEST_DEADLINE_MS/, "the request must set its deadline");
+  assert.match(server, /budgetTotalMs: Math\.max\(0, REQUEST_DEADLINE_MS - pacedMs\)/,
+    "queueing must use only what pacing left");
+});
 test("the visible report separates queued regions from unreadable ones", () => {
   const src = fs.readFileSync(path.resolve(__dirname, "../../public/dev.js"), "utf8");
 
