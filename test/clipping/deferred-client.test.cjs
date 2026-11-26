@@ -165,7 +165,7 @@ test("a second refusal leaves the region queued, never marked lost", async () =>
   const said = report.degraded.join(" | ");
   assert.match(said, /still queued/);
   assert.ok(!/could not be read/.test(said), "queued must not be described as unreadable");
-  assert.match(said, /window refills/);
+  assert.match(said, /stopped before it could finish/i);
 });
 
 test("a real provider failure is still reported as lost", async () => {
@@ -195,6 +195,9 @@ test("the visible report separates queued regions from unreadable ones", () => {
   // A queued region must get its own sentence and a way forward.
   assert.match(src, /still queued behind the hourly speech budget/);
   assert.match(src, /TO FINISH THIS TRANSCRIPT/);
+  // But it must not promise a partial resume: the app keeps one all-or-nothing
+  // read per video, so a re-run fetches every region again.
+  assert.ok(!/only the (queued|missing)/i.test(src), "must not promise a resume that does not exist");
   // And the old blanket claim must be gone.
   assert.ok(
     !/INCOMPLETE TRANSCRIPT: \$\{t\.lost\?\.length \|\| 0\} of \$\{t\.regions\} speech regions were never read`/.test(src),
