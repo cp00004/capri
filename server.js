@@ -1109,8 +1109,14 @@ async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 
       const until = providerCooldown.get(candidateId(c)) || 0;
       return until > Date.now() ? Math.min(soon, until) : soon;
     }, Infinity);
-    const wait = Math.max(250, Math.min(45_000, Number.isFinite(soonest) ? soonest - Date.now() + 250 : 5_000));
-    if (Date.now() + wait > queuedUntil) break;
+    // Wait for the soonest relay, but never past the budget this call was given.
+    // Spilling over the remaining budget instead of skipping the wait matters: a
+    // relay that asks for 60s under a 45s budget would otherwise not wait at all,
+    // and the window would be reported blind for want of a 15s shortfall.
+    const room = Math.max(0, queuedUntil - Date.now());
+    if (room < 1_000) break;
+    const wanted = Math.max(250, Math.min(45_000, Number.isFinite(soonest) ? soonest - Date.now() + 250 : 5_000));
+    const wait = Math.min(wanted, room);
     await new Promise((r) => setTimeout(r, wait));
   }
   throw (vision ? (visionErr || lastErr) : lastErr) || new Error(cappedMessage());
