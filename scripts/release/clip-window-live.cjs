@@ -75,7 +75,7 @@ const stub = http.createServer((req, res) => {
 
     // First sweep: every relay is capped. This is the shape that used to fail a
     // whole window, because the sweep was one pass and done.
-    if (MODE !== "json" && total <= 2) {
+    if (MODE !== "json" && total <= CAPPED_CALLS) {
       console.log(`  ${who} #${calls[who]} -> 429 (sweep one)`);
       return upstream(res, 429, { error: { message: "Rate limit reached for requests per minute (RPM). Please try again in 2s." } });
     }
