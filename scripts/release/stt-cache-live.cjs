@@ -66,7 +66,7 @@ async function wordsFor(wav) {
  * Mirrors the renderer: consult the cache first, save each fresh answer as soon
  * as it lands, and never re-send a region already on disk.
  */
-async function readPass(label, info, regions, doc, budget) {
+async function readPass(label, info, regions, doc, budget, id) {
   const fresh = [];
   const hitCount = [];
   const failures = [];
@@ -88,7 +88,7 @@ async function readPass(label, info, regions, doc, budget) {
     process.stdout.write(`  ${label} ${clock(region.start)} ${r.body?.provider || "?"} ${(r.body?.words || []).length}w\n`);
   }
 
-  const saved = store.save(DIR, "feedfacecafebeef", doc);
+  const saved = store.save(DIR, id, doc);
   return { fresh, hitCount, failures, saved };
 }
 
@@ -96,8 +96,13 @@ async function readPass(label, info, regions, doc, budget) {
   const info = await media.probe(video);
   const chunks = await media.speechChunks({ video, targetSeconds: 45, maxSeconds: 90, minSeconds: 8 });
   if (!chunks?.ok) { console.error("no speech regions:", chunks?.reason); process.exit(1); }
-  const regions = chunks.chunks;
-  console.log(`${path.basename(video)} · ${clock(info.duration)} · ${regions.length} speech regions · limit ${LIMIT}`);
+  // A real 3.4h stream has hundreds of regions; scanning all of them just to test
+  // the resume is not needed, so only the first few are used on a long file.
+  const scanArg = process.argv.indexOf("--regions");
+  const maxRegions = scanArg > 0 ? Number(process.argv[scanArg + 1]) : 6;
+  const allRegions = chunks.chunks;
+  const regions = allRegions.slice(0, maxRegions);
+  console.log(`${path.basename(video)} · ${clock(info.duration)} · ${allRegions.length} speech regions (using ${regions.length}) · limit ${LIMIT}`);
 
   const ident = SC.identity(video, info);
   console.log(`cache id ${ident.id} (${ident.size} bytes, ${ident.duration}s)`);
@@ -105,25 +110,33 @@ async function readPass(label, info, regions, doc, budget) {
   const existing = store.load(DIR, ident.id);
   const doc = existing && SC.sameVideo(existing, ident) ? existing : SC.empty(ident);
 
-  const one = await readPass("run1", info, regions, doc, LIMIT);
+  const one = await readPass("run1", info, regions, doc, LIMIT, ident.id);
   console.log(`run 1: ${one.fresh.length} read, ${one.hitCount.length} from cache, ${one.failures.length} failed, saved=${one.saved.ok}`);
 
-  const two = await readPass("run2", info, regions, doc, Infinity);
+  const two = await readPass("run2", info, regions, doc, Infinity, ident.id);
   console.log(`run 2: ${two.fresh.length} read, ${two.hitCount.length} from cache, ${two.failures.length} failed, saved=${two.saved.ok}`);
 
   const reloaded = store.load(DIR, ident.id);
   const kept = SC.size(reloaded);
   console.log(`on disk: ${kept} regions, still valid for this file: ${SC.sameVideo(reloaded, ident)}`);
-  console.log(`run 2 re-sent any run-1 region: ${two.fresh.some((s) => one.fresh.includes(s))}`);
+  const reSent = two.fresh.filter((s) => one.fresh.includes(s));
+  console.log(`run 2 re-sent any run-1 region: ${reSent.length ? `YES (${reSent.join(", ")})` : "no"}`);
 
-  // The second pass must have covered exactly what the first left.
-  const doneAfterOne = new Set([...one.fresh, ...one.hitCount.map((s) => SC.find(doc, { start: s, end: regions.find((r) => r.start === s).end })?.start)]);
+  // Run one is deliberately capped, so it is expected to leave work. The claim
+  // under test is that run two covers that leftover without repeating run one.
+  const doneAfterOne = new Set([...one.fresh, ...one.hitCount]);
   const leftover = regions.filter((r) => !doneAfterOne.has(r.start));
   console.log(`regions still missing after run 1: ${leftover.length}`);
-  console.log(`run 2 read them all: ${leftover.every((r) => two.fresh.includes(r.start) || two.hitCount.includes(r.start))}`);
+  const runTwoGotAll = leftover.every((r) => two.fresh.includes(r.start));
+  console.log(`run 2 read every leftover region: ${runTwoGotAll}`);
 
   fs.rmSync(DIR, { recursive: true, force: true });
-  const pass = one.saved.ok && two.fresh.every((s) => !one.fresh.includes(s)) && leftover.length === 0;
+  const pass = one.saved.ok
+    && reSent.length === 0
+    && kept === regions.length
+    && SC.sameVideo(reloaded, ident)
+    && runTwoGotAll
+    && leftover.length > 0;
   console.log(pass ? "PASS: the second run resumed instead of starting over" : "FAIL");
   process.exit(pass ? 0 : 1);
 })().catch((err) => { console.error(err); process.exit(1); });
