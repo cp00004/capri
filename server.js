@@ -1469,15 +1469,19 @@ async function handleClipPlan(req, res) {
   const duration = Math.max(1, Number(body.duration) || 0);
   const events = Array.isArray(body.events) ? body.events : [];
   const segments = Array.isArray(body.segments) ? body.segments : [];
+  // A word-accurate read sends timed words and no segments. The planner has to
+  // see them or it cannot tell that the video has any speech at all.
+  const words = Array.isArray(body.words) ? body.words : [];
   const candidates = analysis.scoring.buildCandidates({
     events,
     segments,
+    words,
     duration,
     maxCandidates: Math.max(4, Math.min(40, Number(body.maxCandidates) || 24)),
   });
   return json(res, 200, {
     candidates,
-    considered: { events: events.length, segments: segments.length },
+    considered: { events: events.length, segments: segments.length, words: words.length },
     duration,
   });
 }

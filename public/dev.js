@@ -2033,6 +2033,9 @@
       duration: info.duration,
       events: read.events,
       segments: read.segments,
+      // A word-accurate read has no segments: send the words too, or the planner
+      // cannot see the speech and proposes nothing.
+      words: read.words,
       maxCandidates: 12,
     }, 60_000);
     const candidates = (plan?.candidates || []).filter((c) => c.end - c.start >= 4);
