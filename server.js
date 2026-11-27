@@ -1736,6 +1736,11 @@ async function handleClipPropose(req, res) {
       : Array.isArray(parsed?.clips) ? parsed.clips
         : parsed?.start != null ? [parsed] : [];
     const moments = list.map((m) => analysis.coerceMoment(m, w, duration)).filter(Boolean).slice(0, 3);
+    // Provenance, per moment. `visual` is only true when this window's request
+    // actually carried its frame; the step-down path sets `vision`, which means
+    // the pictures were dropped. Saying "validated" for a transcript-only read is
+    // the silent-degradation bug this exists to stop.
+    const sawPictures = framesFor(w).length > 0 && !reply.vision;
     return {
       window: w,
       moments,
@@ -1743,6 +1748,14 @@ async function handleClipPropose(req, res) {
       // Set when the pictures were dropped and the window was judged from the
       // transcript alone; the renderer shows this in the degraded report.
       vision: reply.vision,
+      provenance: {
+        transcript: true,
+        visual: sawPictures,
+        provider: reply.provider || "",
+        note: sawPictures
+          ? `watched with ${framesFor(w).length} frame${framesFor(w).length === 1 ? "" : "s"}`
+          : (reply.vision || (framesFor(w).length ? "the frame was dropped before the model saw it" : "no frame was taken for this window")),
+      },
       // Kept for Developer Mode transparency: when a window yields nothing it
       // is useful to know whether the model said so or the reply was unusable.
       raw: body.debug ? String(reply.content || "").slice(0, 1500) : undefined,
@@ -1765,7 +1778,7 @@ async function handleClipPropose(req, res) {
   };
   await Promise.all([workers(), workers(), workers()]);
 
-  const moments = results.flatMap((r) => (r.moments || []).map((m) => ({ ...m, window: r.window, provider: r.provider })));
+  const moments = results.flatMap((r) => (r.moments || []).map((m) => ({ ...m, window: r.window, provider: r.provider, provenance: r.provenance })));
   const failures = results.filter((r) => r.error).map((r) => ({ window: r.window, error: r.error }));
   const providers = [...new Set(results.map((r) => r.provider).filter(Boolean))];
   // Windows that were judged from text because their pictures could not be sent.
@@ -1853,7 +1866,23 @@ async function handleClipReview(req, res) {
   const review = analysis.coerceReview(parsed, moment, duration, limits);
   if (!review) return devToolError(res, 502, "The review returned nothing usable.");
 
-  return json(res, 200, { review, provider: out.provider, vision: out.vision });
+  // Provenance for the reviewed moment: did this pass see a picture, or only
+  // hear it? The renderer must never call a transcript-only review "fully
+  // validated", so the fact travels with the answer instead of being inferred.
+  const sawPictures = frames.length > 0 && !out.vision;
+  return json(res, 200, {
+    review,
+    provider: out.provider,
+    vision: out.vision,
+    provenance: {
+      transcript: true,
+      visual: sawPictures,
+      provider: out.provider || "",
+      note: sawPictures
+        ? `reviewed with ${frames.length} frame${frames.length === 1 ? "" : "s"}`
+        : (out.vision || (frames.length ? "the frame was dropped before the model saw it" : "no frame was attached to the review")),
+    },
+  });
 }
 
 function actionLabel(name, args) {

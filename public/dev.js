@@ -2230,16 +2230,22 @@
           }, 180_000);
           const review = data?.review;
           if (!review) return;
+          // Provenance is a fact about the review, not a guess: it says whether
+          // the second pass saw a picture or only the transcript. Kept on the
+          // candidate so the results panel can never imply full validation for a
+          // text-only read.
+          const seen = data?.provenance || { transcript: true, visual: false, note: data?.vision || "no picture supplied" };
           if (data?.vision) {
             report.degraded.push(`review at ${clock(moment.start)} was partly blind: ${data.vision}`);
           }
+          if (!seen.visual) report.vision.partial = Math.max(Number(report.vision.partial) || 0, 1);
           report.passes.reviewed += 1;
           if (review.decision === "reject") {
             report.passes.rejected += 1;
             reviewed.push({
               id: `${platform}:${moment.start}-${moment.end}`,
               rejected: true,
-              moment, candidate, review,
+              moment, candidate, review, provenance: seen,
               start: Number(moment.start), end: Number(moment.end),
               reasons: [review.reject_reason || "rejected on review"],
             });
@@ -2253,6 +2259,7 @@
             bareReaction: Boolean(candidate.bareReaction),
             hasDialogue: speechInside(read, Number(review.start), Number(review.end)),
             passTwo: "accepted",
+            provenance: seen,
           });
         } catch (err) {
           report.passes.reviewed += 1;
@@ -2294,6 +2301,13 @@
 
     const byId = new Map(reviewed.map((r) => [r.id, r]));
     const picks = (ranked?.picks || []).map((p) => ({ ...byId.get(p.id), ...p })).filter((p) => p.moment);
+    // The ranker compares content, not provenance. Carrying the review's
+    // provenance back onto each pick keeps the "was this actually watched?"
+    // answer attached to the clip that gets cut.
+    for (const p of picks) {
+      const src = byId.get(p.id);
+      if (src) p.provenance = p.provenance || src.provenance;
+    }
     if (!picks.length) {
       report.empty = "rank";
       if (!ctx.multi) throw new Error("Nothing cleared the bar for posting.");
@@ -2387,6 +2401,10 @@
         // came from, and so a retried export keeps the same provenance.
         evidence: CM().eventsWithin(read.events || [], start, end),
         components: pick.components || {},
+        // What the pipeline actually saw for this clip. `visual:false` means a
+        // transcript-only judgement, which the panel must say out loud rather
+        // than presenting as a full visual validation.
+        provenance: pick.provenance || pick.moment?.provenance || { transcript: true, visual: false, note: "judged from the transcript only" },
         captionSource: "",
         status: "pending",
         error: "",
@@ -2733,6 +2751,17 @@
         + "Your review work is kept - RETRY EXPORT re-renders only the file, it does not analyse the video again.";
       box.appendChild(note);
     }
+    // Visual validation is not required to keep a candidate: if every visual
+    // provider failed, the clip stays in the list marked transcript-only so it can
+    // be reviewed later. This banner is in the existing panel, not a new screen.
+    const transcriptOnly = entries.filter((e) => !e.provenance?.visual);
+    if (transcriptOnly.length) {
+      const note = document.createElement("p");
+      note.className = "yt-meta";
+      note.textContent = `${transcriptOnly.length} of ${entries.length} clip${entries.length === 1 ? "" : "s"} were judged from the transcript only - no picture reached the model for ${transcriptOnly.length === 1 ? "it" : "them"}. `
+        + "They are kept so you can still review them; they are not fully visually validated.";
+      box.appendChild(note);
+    }
     const copyText = (pick) => `${pick.title || ""}\n${(pick.hashtags || []).map((t) => `#${t}`).join(" ")}`;
     const copy = (text, note) => {
       navigator.clipboard?.writeText(text).then(() => sysLine(note)).catch(() => {});
@@ -2879,6 +2908,12 @@
           ? (entry.evidence || entry.plan.evidence).map((e) => `${e.type.replace(/_/g, " ")} ${e.start}-${e.end}s (${Math.round((e.confidence || 0) * 100)}%)`).join("\n")
           : "none detected inside this clip", ""],
         ["FULL VALIDATION", (entry.plan?.passTwo || entry.pick?.passTwo) === "accepted" ? "yes — second read accepted it" : "no — accepted on the first pass only", "warn"],
+        // Provenance, said plainly. A clip judged from the transcript is a real
+        // clip, but it was not watched - and the difference is the whole point of
+        // this row.
+        ["VISUAL CHECK", entry.provenance?.visual
+          ? `yes — ${entry.provenance.note || "frames seen"}`
+          : `no — ${entry.provenance?.note || "judged from the transcript only"}`, entry.provenance?.visual ? "" : "warn"],
         ["CAPTIONS", entry.captionSource === "word" ? "word-accurate timing" : entry.captionSource === "segment" ? "approximate — sentence timing only" : "none", entry.captionSource === "word" ? "" : "warn"],
       ];
       const comp = entry.components || {};
