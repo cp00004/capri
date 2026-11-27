@@ -128,6 +128,9 @@ if (fs.existsSync(exeDir)) {
     ok("packaged dev.js can retry only the export", /RETRY EXPORT/.test(dev) && /async function exportClip\(/.test(dev));
     ok("packaged dev.js records visual provenance", /VISUAL CHECK/.test(dev) && /provenance:\s*pick\.provenance/.test(dev));
     ok("packaged dev.js can force a fresh transcription", /freshTranscript/.test(dev));
+    // Tightening the cache identity must not discard a transcript the user already
+    // paid for. A v1 doc that matches this exact file is upgraded, not re-read.
+    ok("packaged dev.js looks for a v1 transcript before giving up", /D\.sttCacheLegacy\(/.test(dev));
     ok("packaged app.js can hand the screen back", /window\.capriAppResume\s*=/.test(fs.readFileSync(path.join(appRoot, "public", "app.js"), "utf8")));
   }
   const htmlPath = path.join(appRoot, "public", "index.html");
@@ -153,12 +156,15 @@ if (fs.existsSync(exeDir)) {
     ok("packaged stt-cache.js keys on a content fingerprint", /fingerprint/.test(cache) && /VERSION = 2/.test(cache));
     // Tightening the identity must not throw away a transcript the user already
     // paid for: a v1 doc that provably belongs to this exact file is upgraded.
-    ok("packaged stt-cache.js upgrades a v1 transcript", /function upgrade\(doc, ident\)/.test(cache) && /function legacyId\(/.test(cache));
-    ok("packaged dev.js looks for a v1 transcript before giving up", /SC\.legacyId\(video, info\)/.test(dev));
+    ok("packaged stt-cache.js upgrades a v1 transcript", /function upgrade\(doc, ident\)/.test(cache));
   }
   const storePath = path.join(appRoot, "lib", "clipping", "stt-cache-store.cjs");
   if (fs.existsSync(storePath)) {
-    ok("packaged cache store writes atomically", /renameSync/.test(fs.readFileSync(storePath, "utf8")));
+    const storeSrc = fs.readFileSync(storePath, "utf8");
+    ok("packaged cache store writes atomically", /renameSync/.test(storeSrc));
+    // The v1 id cannot be re-derived, so an old transcript is found by the video
+    // record it carries. Without this the upgrade path could never reach it.
+    ok("packaged cache store can find a v1 transcript", /function findLegacy\(dir, want\)/.test(storeSrc));
   } else {
     ok("packaged cache store present", false);
   }

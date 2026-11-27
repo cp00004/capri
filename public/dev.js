@@ -1493,25 +1493,27 @@
     }
     let doc = null;
     try { doc = await D.sttCacheLoad(ident.id); } catch { doc = null; }
-    // A doc written by the previous version lives under the old id. It is looked
-    // for only so it can be checked and upgraded: a transcript of a 3.4-hour stream
-    // costs real money and real time, and discarding one that provably belongs to
-    // this exact file (same path, byte size and duration) would throw that away.
-    // The fingerprint is added as part of the upgrade, so from then on it is
-    // identified by its bytes like any other.
-    if (!doc && typeof SC.legacyId === "function") {
-      const legacy = SC.legacyId(video, info);
+    // A transcript written by the previous version lives under an id built from a
+    // path spelling that cannot be re-derived now. It is looked for only so it can
+    // be checked and upgraded: a transcript of a 3.4-hour stream costs real money
+    // and real time, and discarding one that provably belongs to this exact file
+    // (same path, byte size and duration) would throw that away. The doc's own
+    // video record is the search key; the fingerprint is added by the upgrade, so
+    // from then on it is identified by its bytes like any other.
+    if (!doc && typeof D.sttCacheLegacy === "function") {
       let old = null;
-      if (legacy) { try { old = await D.sttCacheLoad(legacy); } catch { old = null; } }
-      const up = old ? SC.upgrade(old, ident) : null;
+      try {
+        old = await D.sttCacheLegacy({ path: ident.path, size: ident.size, duration: ident.duration });
+      } catch { old = null; }
+      const up = old && old.doc ? SC.upgrade(old.doc, ident) : null;
       if (up) {
         doc = up;
-        report.notes.push(`upgraded a transcript saved by the previous version (${SC.size(up)} region${SC.size(up) === 1 ? "" : "s"} kept) - it now follows this file's contents`);
+        report.notes.push(`reused a transcript saved by the previous version (${SC.size(up)} region${SC.size(up) === 1 ? "" : "s"} kept) - it now follows this file's contents`);
         try {
           await D.sttCacheSave(ident.id, up);
           // The old file is removed only after the new one is on disk, so an
           // interrupted upgrade cannot lose the transcript entirely.
-          await D.sttCacheDrop(legacy);
+          if (old.id) await D.sttCacheDrop(old.id);
         } catch { /* the in-memory doc still resumes this run */ }
       }
     }

@@ -220,20 +220,7 @@
     return size(doc) < num(doc.regionsTotal);
   }
 
-  /**
-   * The cache id v1 would have used for this file.
-   *
-   * v1 keyed on `path|size`. Only used to find a doc written by the previous
-   * version so it can be checked and upgraded; nothing is ever *stored* under it.
-   */
-  function legacyId(path, info) {
-    const abs = String(path || "");
-    const size = num(info?.size);
-    if (!abs || !(num(info?.duration) > 0)) return "";
-    return hash(`${abs.toLowerCase()}|${size}`);
-  }
-
-  const api = { VERSION, TOLERANCE, hash, identity, legacyId, empty, sameVideo, upgrade, key, find, add, size, markTotal, partial };
+  const api = { VERSION, TOLERANCE, hash, identity, empty, sameVideo, upgrade, key, find, add, size, markTotal, partial };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (root) root.CapriSttCache = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

@@ -122,3 +122,55 @@ test("the file count cap keeps the newest and drops the rest", () => {
   assert.strictEqual(fs.readdirSync(dir).length, store.MAX_FILES);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("a v1 transcript is found by the video it says it belongs to", () => {
+  // The real failure: the v1 id was built from a path spelling the renderer no
+  // longer produces, so re-deriving the id missed the file on disk. The document
+  // records its own video, so that record is what the search uses.
+  const dir = tmpDir();
+  const video = { path: "C:\\Users\\me\\Downloads\\Episode 12.mp4", size: 695750682, duration: 12238.89 };
+  const doc = { version: 1, video, regions: { "0-46.88": { start: 0, end: 46.88 } }, regionsTotal: 236 };
+  // Stored under an id nobody can recompute - exactly the on-disk situation.
+  fs.writeFileSync(path.join(dir, "0255019f0ebe14bd.json"), JSON.stringify(doc));
+
+  assert.deepStrictEqual(store.load(dir, "0255019f0ebe14bd"), doc, "the file is where the app looks");
+
+  const hit = store.findLegacy(dir, { path: video.path, size: video.size, duration: video.duration });
+  assert.ok(hit, "the doc is found by its own video record");
+  assert.strictEqual(hit.id, "0255019f0ebe14bd", "and its real id comes back");
+  assert.deepStrictEqual(hit.doc, doc);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("the v1 search ignores other files, other cuts and other versions", () => {
+  const dir = tmpDir();
+  const video = { path: "C:\\v\\a.mp4", size: 500, duration: 61 };
+  const legacy = (over) => ({ version: 1, video: { ...video, ...over }, regions: { "0-30": {} }, regionsTotal: 2 });
+  fs.writeFileSync(path.join(dir, "aaaaaaaaaaaaaaaa.json"), JSON.stringify(legacy({ path: "C:\\v\\b.mp4" })));
+  fs.writeFileSync(path.join(dir, "bbbbbbbbbbbbbbbb.json"), JSON.stringify(legacy({ size: 501 })));
+  fs.writeFileSync(path.join(dir, "cccccccccccccccc.json"), JSON.stringify(legacy({ duration: 600 })));
+  // A current doc is never returned by the legacy search, whatever it says.
+  fs.writeFileSync(path.join(dir, "dddddddddddddddd.json"), JSON.stringify({ ...legacy({}), version: 2 }));
+
+  assert.strictEqual(store.findLegacy(dir, video), null);
+  assert.strictEqual(store.findLegacy(dir, { path: "", size: 500, duration: 61 }), null, "no path is not a search");
+  assert.strictEqual(store.findLegacy(dir, { path: video.path, size: 0, duration: 61 }), null, "no size is not a search");
+
+  // And it does find the right one when it exists alongside them.
+  fs.writeFileSync(path.join(dir, "eeeeeeeeeeeeeeee.json"), JSON.stringify(legacy({})));
+  const hit = store.findLegacy(dir, video);
+  assert.strictEqual(hit.id, "eeeeeeeeeeeeeeee");
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a path spelled with the other separator still matches", () => {
+  // v1 lower-cased the path but kept whatever separators it was given; the same
+  // file reaching the app by a forward-slash path must not lose its transcript.
+  const dir = tmpDir();
+  const doc = { version: 1, video: { path: "C:\\V\\A.mp4", size: 500, duration: 61 }, regions: { "0-30": {} } };
+  fs.writeFileSync(path.join(dir, "ffffffffffffffff.json"), JSON.stringify(doc));
+  const hit = store.findLegacy(dir, { path: "C:/v/a.mp4", size: 500, duration: 61 });
+  assert.ok(hit, "case and separator spelling are ignored");
+  assert.strictEqual(hit.id, "ffffffffffffffff");
+  fs.rmSync(dir, { recursive: true, force: true });
+});

@@ -2764,6 +2764,13 @@ const sttCacheDir = () => path.join(app.getPath("userData"), "stt-cache");
 ipcMain.handle("capri-stt-cache-load", (_event, id) => sttCache.load(sttCacheDir(), id));
 ipcMain.handle("capri-stt-cache-save", (_event, id, doc) => sttCache.save(sttCacheDir(), id, doc));
 ipcMain.handle("capri-stt-cache-drop", (_event, id) => sttCache.remove(sttCacheDir(), id));
+// Look for a transcript saved by the previous identity. Its id was built from a
+// path spelling that is no longer recoverable, so the doc's own video record is
+// the search key instead.
+ipcMain.handle("capri-stt-cache-legacy", (_event, want) => {
+  const hit = sttCache.findLegacy(sttCacheDir(), want);
+  return hit ? { id: hit.id, doc: hit.doc } : null;
+});
 // Run once at startup so an abandoned run cannot grow this folder forever.
 try { sttCache.prune(sttCacheDir()); } catch { /* pruning is housekeeping */ }
 

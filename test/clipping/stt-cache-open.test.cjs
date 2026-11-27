@@ -57,8 +57,9 @@ const INFO = { size: 700_000_000, duration: 12238.89, fingerprint: FP };
  * Run the real function against a fake disk.
  * @param {object|null} stored  what the disk currently holds for this id
  * @param {boolean} withBridge  whether the app has the cache IPC at all
+ * @param {{id:string,doc:object}|null} legacy  a doc saved by the previous version
  */
-async function open({ stored = null, withBridge = true, info = INFO, force = false } = {}) {
+async function open({ stored = null, withBridge = true, info = INFO, force = false, legacy = null } = {}) {
   const saved = [];
   const dropped = [];
   const D = withBridge
@@ -66,6 +67,7 @@ async function open({ stored = null, withBridge = true, info = INFO, force = fal
       sttCacheLoad: async () => stored,
       sttCacheSave: async (_id, doc) => { saved.push(doc); return { ok: true }; },
       sttCacheDrop: async (id) => { dropped.push(id); return true; },
+      sttCacheLegacy: async () => legacy,
     }
     : {};
 
@@ -154,6 +156,43 @@ test("a file with no fingerprint is read but not cached", async () => {
   const { out, report } = await open({ info: { size: 1, duration: 100 } });
   assert.strictEqual(out, null, "without a fingerprint there is no safe identity");
   assert.ok([...report.notes].some((n) => /content fingerprint/.test(n)), "and the user is told");
+});
+
+test("a transcript from the previous version is adopted and re-keyed", async () => {
+  // The reported cost: a 3.4h stream's transcript was paid for, and tightening the
+  // identity to a fingerprint discarded it because its old id could not be
+  // recomputed. The doc says which video it belongs to, so it is found, checked
+  // against this exact file, and re-saved under the content identity.
+  const video = "C:\\streams\\episode.mp4";
+  const old = {
+    version: 1,
+    video: { path: video, size: INFO.size, duration: INFO.duration },
+    regions: { "0-47": { start: 0, end: 47, payload: { provider: "groq", words: [{ word: "paid for", start: 0, end: 1 }] } } },
+    regionsTotal: 236,
+  };
+  const { out, report, saved, dropped } = await open({ stored: null, legacy: { id: "0255019f0ebe14bd", doc: old } });
+
+  assert.strictEqual(SC.size(out.doc), 1, "the paid-for region survives");
+  assert.strictEqual(SC.find(out.doc, { start: 0, end: 47 }).payload.words[0].word, "paid for");
+  assert.strictEqual(SC.partial(out.doc), true, "and it still knows it owes regions");
+  assert.strictEqual(saved.length, 1, "it is re-saved under the content identity");
+  assert.strictEqual(saved[0].version, SC.VERSION);
+  assert.deepStrictEqual([...dropped], ["0255019f0ebe14bd"], "the old file is removed only after the new one is saved");
+  assert.ok([...report.notes].some((n) => /previous version/.test(n)), "and the user is told what happened");
+  assert.deepStrictEqual([...report.degraded], [], "reusing saved work is not a failure");
+});
+
+test("a previous-version transcript for another file is not adopted", async () => {
+  const video = "C:\\streams\\episode.mp4";
+  const old = {
+    version: 1,
+    video: { path: video, size: INFO.size, duration: 600 },
+    regions: { "0-47": { start: 0, end: 47, payload: { provider: "groq", words: [] } } },
+  };
+  const { out, saved, dropped } = await open({ stored: null, legacy: { id: "0255019f0ebe14bd", doc: old } });
+  assert.strictEqual(SC.size(out.doc), 0, "a different cut's transcript is not reused");
+  assert.strictEqual(saved.length, 0, "nothing is written");
+  assert.deepStrictEqual([...dropped], [], "and the other file's cache is left alone");
 });
 
 test("a disk read that throws is treated as an empty cache", async () => {

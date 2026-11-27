@@ -110,5 +110,8 @@ contextBridge.exposeInMainWorld("capriDev", {
   sttCacheLoad: (id) => ipcRenderer.invoke("capri-stt-cache-load", String(id || "")),
   sttCacheSave: (id, doc) => ipcRenderer.invoke("capri-stt-cache-save", String(id || ""), doc || null),
   sttCacheDrop: (id) => ipcRenderer.invoke("capri-stt-cache-drop", String(id || "")),
+  // A transcript saved under the previous identity. Located by the video record it
+  // carries, because its v1 id cannot be re-derived from the path we have now.
+  sttCacheLegacy: (want) => ipcRenderer.invoke("capri-stt-cache-legacy", want || {}),
   cleanup: () => ipcRenderer.invoke("capri-dev-cleanup"),
 });
