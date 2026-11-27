@@ -1918,8 +1918,8 @@
     const { pick, plan, start, end } = item;
     const p = plan || {};
     const review = pick.review || p.review || {};
-    const components = p.components || {};
-    const evidence = CM().eventsWithin(item.read?.events || [], start, end);
+    const components = item.components || p.components || {};
+    const evidence = item.evidence || [];
     const file = item.cut?.abs || item.cut?.path || "";
     return [
       `VIDEO\n${item.videoName}`,
@@ -2378,7 +2378,13 @@
         info,
         read,
         platform,
+        pfx,
         report,
+        // Derived once so the results panel does not have to know where they
+        // came from, and so a retried export keeps the same provenance.
+        evidence: CM().eventsWithin(read.events || [], start, end),
+        components: pick.components || {},
+        captionSource: "",
         status: "pending",
         error: "",
         attempts: 0,
@@ -2758,12 +2764,46 @@
       body.appendChild(tags);
       const actions = document.createElement("div");
       actions.className = "dev-actions";
-      const openBtn = document.createElement("button");
-      openBtn.type = "button";
-      openBtn.className = "dev-mini";
-      openBtn.textContent = "OPEN FILE";
-      openBtn.addEventListener("click", () => D.open(cut.path).catch((e) => sysLine(String(e.message || e))));
-      actions.appendChild(openBtn);
+      if (isFailed) {
+        // Retry only the render. The candidate, its window, its review and its
+        // captions are all still here, so nothing is analysed a second time.
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "dev-mini";
+        retry.textContent = "RETRY EXPORT";
+        retry.addEventListener("click", async () => {
+          retry.disabled = true;
+          retry.textContent = "RENDERING…";
+          try {
+            const done = await exportClip(entry);
+            entry.base = `${done.fileBase}${entry.pfx || ""}`;
+            entry.meta = metaFor(entry);
+            await D.writeShorts(`shorts/${entry.base}.txt`, entry.meta);
+            entry.status = "exported";
+            entry.error = "";
+            entry.attempts += 1;
+            sysLine(`export fixed - ${entry.base}.mp4`);
+            renderShortsResults(entries, false);
+          } catch (err) {
+            entry.error = String(err?.message || err);
+            entry.attempts += 1;
+            retry.disabled = false;
+            retry.textContent = "RETRY EXPORT";
+            const line = document.createElement("p");
+            line.className = "yt-meta";
+            line.textContent = `Still failed: ${entry.error}`;
+            body.insertBefore(line, actions);
+          }
+        });
+        actions.appendChild(retry);
+      } else {
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.className = "dev-mini";
+        openBtn.textContent = "OPEN FILE";
+        openBtn.addEventListener("click", () => D.open(cut.path).catch((e) => sysLine(String(e.message || e))));
+        actions.appendChild(openBtn);
+      }
       const copyBtn = document.createElement("button");
       copyBtn.type = "button";
       copyBtn.className = "dev-mini";
