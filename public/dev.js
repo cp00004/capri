@@ -2301,8 +2301,11 @@
           const fileBase = `${slug(pick.review?.title || pick.moment?.kind || "short")}-${stamp}-${state.seq}`;
           const built = cuesForClip(read, start, end);
           captionSource = built.source;
-          await D.write(`shorts/${fileBase}.srt`, buildSrt(built.cues));
-          await D.write(`shorts/${fileBase}.ass`, buildAss(built.cues));
+          // Written into the Shorts folder, not the workspace. `D.write` is
+          // workspace-bound and threw when no folder was open, which is exactly
+          // the case this feature has to work in.
+          await D.writeShorts(`shorts/${fileBase}.srt`, buildSrt(built.cues));
+          await D.writeShorts(`shorts/${fileBase}.ass`, buildAss(built.cues));
           const cut = await D.cut({
             video: video.path,
             start,
@@ -2336,9 +2339,12 @@
           `VALIDATION\npass two ${pick.passTwo === "accepted" ? "accepted" : "not reviewed"} · captions ${captionSource === "word" ? "word-accurate" : captionSource === "segment" ? "approximate" : "none"}`,
           `SOURCE\n${video.path}`,
           `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
-          `FILE\nshorts/${hold.fileBase}.mp4`,
+          // The real location, so the info file tells the user where the MP4
+          // actually is instead of a workspace-relative `shorts/...` that no
+          // longer describes this export.
+          `FILE\n${hold.cut.abs || hold.cut.path}`,
         ].join("\n\n");
-        await D.write(`shorts/${base}.txt`, meta);
+        await D.writeShorts(`shorts/${base}.txt`, meta);
         state.made.push({
           pick: { ...review, start, end, score: pick.score },
           cut: hold.cut,
