@@ -28,32 +28,54 @@ function loadCache() {
 const SC = loadCache();
 
 const VIDEO = "C:\\Users\\me\\Videos\\long stream.mp4";
-const INFO = { size: 1234567890, duration: 12239.4 };
+// A probe now also reports a content fingerprint, which is what the cache is
+// keyed on. Fixed here so the identity tests are deterministic.
+const FP = "a1b2c3d4e5f60718293a4b5c6d7e8f90";
+const INFO = { size: 1234567890, duration: 12239.4, fingerprint: FP };
 const payload = (provider, word) => ({ provider, words: [{ word, start: 0.2, end: 0.8 }] });
 
 test("the module is reachable the way the browser loads it", () => {
   assert.ok(SC, "stt-cache.js must assign window.CapriSttCache");
   assert.strictEqual(typeof SC.find, "function");
-  assert.strictEqual(SC.VERSION, 1);
+  assert.strictEqual(SC.VERSION, 2);
 });
 
 test("identity is stable for the same file and differs for a different one", () => {
   const a = SC.identity(VIDEO, INFO);
-  const b = SC.identity(VIDEO, { size: INFO.size, duration: INFO.duration + 0.2 });
+  const b = SC.identity(VIDEO, { size: INFO.size, duration: INFO.duration + 0.2, fingerprint: FP });
   assert.strictEqual(a.ok, true);
   // Rounding drift from ffprobe must not make the cache miss on every run.
   assert.strictEqual(a.id, b.id, "a 0.2s probe difference is the same video");
-  // Windows paths can arrive in either case.
+  // Windows paths can arrive in either case; the fingerprint is the same bytes.
   assert.strictEqual(a.id, SC.identity(VIDEO.toUpperCase(), INFO).id);
+});
+
+test("two different files of the same length are not the same video", () => {
+  // This is what path + size could not tell apart: a re-encode, or two downloads
+  // that happen to match in bytes. The fingerprint is the only reliable answer.
+  const a = SC.identity(VIDEO, INFO);
+  const b = SC.identity(VIDEO, { size: INFO.size, duration: INFO.duration, fingerprint: "ffffffffffffffffffffffffffffffff" });
+  assert.notStrictEqual(a.id, b.id, "a different fingerprint is a different video");
+  assert.strictEqual(SC.sameVideo(SC.empty(a), b), false, "and its cache is not reused");
+  // A moved or copied file is the same video: the bytes did not change.
+  const moved = SC.identity("D:\\elsewhere\\same file.mp4", INFO);
+  assert.strictEqual(a.id, moved.id);
+  assert.strictEqual(SC.sameVideo(SC.empty(a), moved), true, "a copy in another folder still matches");
+});
+
+test("a video with no fingerprint is not cached", () => {
+  const ident = SC.identity(VIDEO, { size: INFO.size, duration: INFO.duration });
+  assert.strictEqual(ident.ok, false, "without a fingerprint there is no safe identity");
+  assert.strictEqual(ident.id, "");
 });
 
 test("a re-encoded file gets a different identity", () => {
   const base = SC.identity(VIDEO, INFO);
-  assert.notStrictEqual(base.id, SC.identity(VIDEO, { size: INFO.size + 1, duration: INFO.duration }).id);
-  assert.notStrictEqual(base.id, SC.identity("C:\\other.mp4", INFO).id);
+  assert.notStrictEqual(base.id, SC.identity(VIDEO, { size: INFO.size + 1, duration: INFO.duration, fingerprint: FP }).id);
+  assert.notStrictEqual(base.id, SC.identity(VIDEO, { ...INFO, fingerprint: "ffffffffffffffffffffffffffffffff" }).id);
   // A different cut of the same name keeps the id (ffprobe drift must not move it)
   // and is caught by sameVideo instead, so the doc is dropped rather than half-used.
-  const trimmed = SC.identity(VIDEO, { size: INFO.size, duration: 600 });
+  const trimmed = SC.identity(VIDEO, { size: INFO.size, duration: 600, fingerprint: FP });
   assert.strictEqual(base.id, trimmed.id);
   assert.strictEqual(SC.sameVideo(SC.empty(base), trimmed), false);
 });
@@ -102,9 +124,12 @@ test("a cache from a different cut of the same file is refused whole", () => {
 
   assert.strictEqual(SC.sameVideo(doc, ident), true);
   // Same name, shorter file: every stored timestamp is now suspect.
-  assert.strictEqual(SC.sameVideo(doc, SC.identity(VIDEO, { size: INFO.size, duration: 300 })), false);
-  assert.strictEqual(SC.sameVideo(doc, SC.identity(VIDEO, { size: 99, duration: INFO.duration })), false);
-  assert.strictEqual(SC.sameVideo(doc, SC.identity("D:\\other.mp4", INFO)), false);
+  assert.strictEqual(SC.sameVideo(doc, SC.identity(VIDEO, { size: INFO.size, duration: 300, fingerprint: FP })), false);
+  assert.strictEqual(SC.sameVideo(doc, SC.identity(VIDEO, { size: 99, duration: INFO.duration, fingerprint: FP })), false);
+  // A different file at the same size and length is now caught by its fingerprint.
+  assert.strictEqual(SC.sameVideo(doc, SC.identity("D:\\other.mp4", { ...INFO, fingerprint: "0123456789abcdef0123456789abcdef" })), false);
+  // A byte-identical copy in another folder is the same video, so its cache holds.
+  assert.strictEqual(SC.sameVideo(doc, SC.identity("D:\\other.mp4", INFO)), true);
 });
 
 test("a cache from another shape version is ignored, not guessed at", () => {

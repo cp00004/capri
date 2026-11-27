@@ -116,6 +116,31 @@ const ok = (label, cond, extra = "") => {
     ok("the videos are still listed after the failed run", afterRun.videos === 2,
       `videos=${afterRun.videos}`);
 
+    // ---- clipping does not need a coding workspace ------------------------
+    // The reported failure: with no workspace open the run stopped with "Open a
+    // workspace folder first" and never cut anything. This asks the real bridge
+    // for the real destination, which is where a run writes.
+    const output = await evaluate(send, `(async () => {
+      const r = await window.capriDev.shortsRoot();
+      const withWorkspace = await window.capriDev.root();
+      return {
+        ok: r && r.ok,
+        dir: r && r.dir,
+        error: r && r.error,
+        workspace: withWorkspace && withWorkspace.root,
+        writeShorts: typeof window.capriDev.writeShorts,
+        pickShorts: typeof window.capriDev.pickShortsRoot,
+      };
+    })()`);
+    ok("a Shorts folder resolves with no workspace open", output.ok === true,
+      `${output.dir || ""} ${output.error || ""}`);
+    ok("the Shorts folder is not the coding workspace", !output.workspace || output.dir !== output.workspace,
+      `dir=${output.dir} workspace=${output.workspace}`);
+    ok("it defaults to a Capri folder outside any project", /Capri Shorts/i.test(String(output.dir || "")),
+      String(output.dir || ""));
+    ok("the renderer can write into it without a workspace", output.writeShorts === "function");
+    ok("the output folder can be changed", output.pickShorts === "function");
+
     // ---- the × works, and the picker opens, while the lock is held --------
     // This reproduces the reported state directly: the studio left locked by a
     // run. Both controls were dead in exactly this state.

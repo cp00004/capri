@@ -117,6 +117,17 @@ if (fs.existsSync(exeDir)) {
     // "nothing postable" because the planner only ever looked at its intro.
     ok("packaged dev.js salvages an empty screening pass", /the screening pass proposed nothing/.test(dev));
     ok("packaged dev.js names the stage that emptied the run", /function explainEmpty/.test(dev));
+    // Clipping must not need a coding workspace: the run used to stop with "Open a
+    // workspace folder first" and, with one open, wrote its clips into the project.
+    ok("packaged dev.js needs no workspace to cut", /async function ensureShortsOutput\(/.test(dev));
+    ok("packaged dev.js writes captions into the shorts folder", /D\.writeShorts\(`shorts\/\$\{fileBase\}\.srt`/.test(dev));
+    ok("packaged dev.js no longer gates the run on a workspace", !/shortsRun\.disabled = !\(ready && dev\.root\)/.test(dev));
+    // A failed MP4 must not discard an approved clip: it stays listed, marked, and
+    // retryable without repeating the analysis.
+    ok("packaged dev.js keeps a clip whose export failed", /status = "export-failed"/.test(dev));
+    ok("packaged dev.js can retry only the export", /RETRY EXPORT/.test(dev) && /async function exportClip\(/.test(dev));
+    ok("packaged dev.js records visual provenance", /VISUAL CHECK/.test(dev) && /provenance:\s*pick\.provenance/.test(dev));
+    ok("packaged dev.js can force a fresh transcription", /freshTranscript/.test(dev));
     ok("packaged app.js can hand the screen back", /window\.capriAppResume\s*=/.test(fs.readFileSync(path.join(appRoot, "public", "app.js"), "utf8")));
   }
   const htmlPath = path.join(appRoot, "public", "index.html");
@@ -137,6 +148,9 @@ if (fs.existsSync(exeDir)) {
     // A saved doc must be able to prove it stopped short, or CONTINUE cannot
     // survive an app restart.
     ok("packaged stt-cache.js can tell a partial transcript", /function partial\(/.test(cache) && /function markTotal\(/.test(cache));
+    // The cache is keyed on the file's bytes, not its name: path + size could not
+    // tell two same-length downloads apart.
+    ok("packaged stt-cache.js keys on a content fingerprint", /fingerprint/.test(cache) && /VERSION = 2/.test(cache));
   }
   const storePath = path.join(appRoot, "lib", "clipping", "stt-cache-store.cjs");
   if (fs.existsSync(storePath)) {

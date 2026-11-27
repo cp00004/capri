@@ -35,7 +35,10 @@ const check = (name, ok, extra = "") => {
 };
 
 // ── a real save/load round trip through the file the app writes ──────────────
-const long = SC.identity(VIDEO, { size: 700_000_000, duration: 12238.89 });
+// The probe reports a content fingerprint, and that is what the cache is keyed
+// on. Fixed here so the checks are deterministic.
+const FP = "fedcba9876543210fedcba9876543210";
+const long = SC.identity(VIDEO, { size: 700_000_000, duration: 12238.89, fingerprint: FP });
 const doc = SC.empty(long);
 SC.add(doc, { start: 0, end: 47 }, { provider: "groq", words: [{ word: "hello", start: 0.3, end: 0.9 }] });
 SC.add(doc, { start: 47, end: 97 }, { provider: "gemini", words: [{ word: "world", start: 0.2, end: 0.6 }] });
@@ -46,18 +49,24 @@ const reloaded = store.load(dir, long.id);
 check("it loads back with both regions", SC.size(reloaded) === 2);
 
 // The same file, probed again: ffprobe wobbles by a fraction of a second.
-const reprobed = SC.identity(VIDEO, { size: 700_000_000, duration: 12238.72 });
+const reprobed = SC.identity(VIDEO, { size: 700_000_000, duration: 12238.72, fingerprint: FP });
 check("a re-probe of the same file still matches", SC.sameVideo(reloaded, reprobed) === true);
 
 // ── refusals ────────────────────────────────────────────────────────────────
-const trimmed = SC.identity(VIDEO, { size: 700_000_000, duration: 600 });
+const trimmed = SC.identity(VIDEO, { size: 700_000_000, duration: 600, fingerprint: FP });
 check("a 10-minute cut of the same name is refused", SC.sameVideo(reloaded, trimmed) === false);
 
-const reencoded = SC.identity(VIDEO, { size: 712_000_000, duration: 12238.89 });
+// A re-encode changes the bytes, so the fingerprint changes with them.
+const reencoded = SC.identity(VIDEO, { size: 712_000_000, duration: 12238.89, fingerprint: "0123456789abcdef0123456789abcdef" });
 check("a re-encoded file of the same name is refused", SC.sameVideo(reloaded, reencoded) === false);
 
-const other = SC.identity("C:\\streams\\other.mp4", { size: 700_000_000, duration: 12238.89 });
-check("a different file is refused", SC.sameVideo(reloaded, other) === false);
+// Same name, same size, same duration, different bytes: the case a name-and-size
+// key could not catch.
+const impostor = SC.identity(VIDEO, { size: 700_000_000, duration: 12238.89, fingerprint: "11111111111111111111111111111111" });
+check("a different file of the same length is refused", SC.sameVideo(reloaded, impostor) === false);
+
+const other = SC.identity("C:\\streams\\other.mp4", { size: 700_000_000, duration: 12238.89, fingerprint: FP });
+check("a byte-identical copy is the same video", SC.sameVideo(reloaded, other) === true);
 
 // A refused document must not yield a hit even if the regions look the same,
 // because the caller is supposed to drop it first. Prove the drop is real.

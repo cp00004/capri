@@ -48,12 +48,17 @@ function loadCache() {
 const SC = loadCache();
 const SOURCE = extract(fs.readFileSync(DEV_JS, "utf8"), "openTranscriptCache");
 
+/* The probe reports a content fingerprint now; a fixed one makes the identity
+   deterministic here. */
+const FP = "99887766554433221100998877665544";
+const INFO = { size: 700_000_000, duration: 12238.89, fingerprint: FP };
+
 /**
  * Run the real function against a fake disk.
  * @param {object|null} stored  what the disk currently holds for this id
  * @param {boolean} withBridge  whether the app has the cache IPC at all
  */
-async function open({ stored = null, withBridge = true, info = { size: 700_000_000, duration: 12238.89 } } = {}) {
+async function open({ stored = null, withBridge = true, info = INFO, force = false } = {}) {
   const saved = [];
   const dropped = [];
   const D = withBridge
@@ -71,7 +76,7 @@ async function open({ stored = null, withBridge = true, info = { size: 700_000_0
 
   const report = { degraded: [], notes: [] };
   const video = "C:\\streams\\episode.mp4";
-  const out = await sandbox.open(video, info, report);
+  const out = await sandbox.open(video, info, report, force);
   return { out, report, saved, dropped, video, info };
 }
 
@@ -90,7 +95,7 @@ test("a first run gets an empty document with the right identity", async () => {
 });
 
 test("a saved transcript for this file is reused", async () => {
-  const ident = SC.identity("C:\\streams\\episode.mp4", { size: 700_000_000, duration: 12238.89 });
+  const ident = SC.identity("C:\\streams\\episode.mp4", INFO);
   const doc = SC.empty(ident);
   SC.add(doc, { start: 0, end: 47 }, { provider: "groq", words: [{ word: "kept", start: 0, end: 1 }] });
 
@@ -103,23 +108,52 @@ test("a saved transcript for this file is reused", async () => {
 
 test("a cached doc for a different cut is dropped and the read starts clean", async () => {
   // Same path and byte size is not enough: the stored duration is 3.4h.
-  const ident = SC.identity("C:\\streams\\episode.mp4", { size: 700_000_000, duration: 12238.89 });
+  const ident = SC.identity("C:\\streams\\episode.mp4", INFO);
   const doc = SC.empty(ident);
   SC.add(doc, { start: 0, end: 47 }, { provider: "groq", words: [{ word: "wrong clock", start: 0, end: 1 }] });
 
   // Now the file on disk is a 10-minute cut.
-  const { out, report, dropped } = await open({ stored: doc, info: { size: 700_000_000, duration: 600 } });
+  const { out, report, dropped } = await open({ stored: doc, info: { ...INFO, duration: 600 } });
 
   assert.strictEqual(SC.size(out.doc), 0, "the stale regions must not be reachable");
   assert.strictEqual(SC.find(out.doc, { start: 0, end: 47 }), null);
   assert.strictEqual(dropped.length, 1, "the stale file is deleted, not just ignored");
-  assert.ok([...report.degraded].some((d) => /different version of this file/.test(d)),
+  assert.ok([...report.degraded].some((d) => /fingerprint did not match/.test(d)),
     `expected an honest note, got ${report.degraded}`);
 });
 
+test("a saved transcript for a different file is dropped", async () => {
+  // Same length and duration, different bytes: this is the case a name-and-size
+  // key got wrong, and reusing it would put another video's words on the clock.
+  const ident = SC.identity("C:\\streams\\episode.mp4", INFO);
+  const doc = SC.empty(ident);
+  SC.add(doc, { start: 0, end: 47 }, { provider: "groq", words: [{ word: "other video", start: 0, end: 1 }] });
+
+  const { out, dropped } = await open({ stored: doc, info: { ...INFO, fingerprint: "00000000000000000000000000000000" } });
+  assert.strictEqual(SC.size(out.doc), 0, "another file's transcript is not reused");
+  assert.strictEqual(dropped.length, 1, "and it is deleted");
+});
+
+test("a forced fresh read ignores the saved transcript", async () => {
+  const ident = SC.identity("C:\\streams\\episode.mp4", INFO);
+  const doc = SC.empty(ident);
+  SC.add(doc, { start: 0, end: 47 }, { provider: "groq", words: [{ word: "misheard", start: 0, end: 1 }] });
+
+  const { out, report, dropped } = await open({ stored: doc, force: true });
+  assert.strictEqual(SC.size(out.doc), 0, "the old regions are not carried over");
+  assert.strictEqual(dropped.length, 1, "the old cache is removed");
+  assert.ok([...report.notes].some((n) => /fresh transcription/.test(n)), "and it says why");
+});
+
 test("a file with no readable duration is not cached at all", async () => {
-  const { out } = await open({ info: { size: 1, duration: 0 } });
+  const { out } = await open({ info: { size: 1, duration: 0, fingerprint: FP } });
   assert.strictEqual(out, null, "without a duration the regions cannot be trusted");
+});
+
+test("a file with no fingerprint is read but not cached", async () => {
+  const { out, report } = await open({ info: { size: 1, duration: 100 } });
+  assert.strictEqual(out, null, "without a fingerprint there is no safe identity");
+  assert.ok([...report.notes].some((n) => /content fingerprint/.test(n)), "and the user is told");
 });
 
 test("a disk read that throws is treated as an empty cache", async () => {
@@ -132,7 +166,7 @@ test("a disk read that throws is treated as an empty cache", async () => {
   vm.createContext(sandbox);
   vm.runInContext(`${SOURCE}\nthis.open = openTranscriptCache;`, sandbox, { filename: "openTranscriptCache.js" });
   const report = { degraded: [], notes: [] };
-  const out = await sandbox.open("C:\\x.mp4", { size: 10, duration: 100 }, report);
+  const out = await sandbox.open("C:\\x.mp4", { size: 10, duration: 100, fingerprint: FP }, report);
   assert.ok(out, "the read still runs");
   assert.strictEqual(SC.size(out.doc), 0);
 });

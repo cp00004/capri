@@ -70,13 +70,13 @@ async function evaluate(send, expression) {
   check("stt-cache.js loaded in the app", shape.cacheModule === "object", shape.cacheModule);
   check("cache IPC is on the bridge", shape.hasLoad === "function" && shape.hasSave === "function" && shape.hasDrop === "function",
     `load=${shape.hasLoad} save=${shape.hasSave} drop=${shape.hasDrop}`);
-  check("cache shape version is 1", shape.version === 1, String(shape.version));
+  check("cache shape version is 2", shape.version === 2, String(shape.version));
 
   // ── a real round trip through the real main process and userData ──────────
   const id = "abcdef0123456789";
   const doc = {
-    version: 1,
-    video: { path: "C:\\\\x.mp4", size: 1, duration: 10 },
+    version: 2,
+    video: { path: "C:\\\\x.mp4", size: 1, duration: 10, fingerprint: "0123456789abcdef0123456789abcdef" },
     regions: { "0-10": { start: 0, end: 10, provider: "groq", payload: { provider: "groq", words: [{ word: "hi", start: 0, end: 1 }] } } },
     updatedAt: new Date().toISOString(),
   };

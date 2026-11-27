@@ -43,6 +43,25 @@ function lift(name) {
 
 const SOURCE = lift("collectDevCompletion");
 
+/**
+ * The provider-concurrency block, lifted verbatim.
+ *
+ * `collectDevCompletion` now caps how many requests each provider may have in
+ * flight and skips relays that are still cooling, so those helpers have to be in
+ * the sandbox or the lifted function would run against `undefined`. Slicing the
+ * real source keeps the test measuring the code that ships.
+ */
+function liftConcurrency() {
+  const src = fs.readFileSync(SERVER_JS, "utf8");
+  const start = src.indexOf("const PROVIDER_CONCURRENCY");
+  assert.ok(start > 0, "the provider concurrency table should exist in server.js");
+  const end = src.indexOf("function cooldownFrom");
+  assert.ok(end > start, "the concurrency block should end before cooldownFrom");
+  return src.slice(start, end);
+}
+
+const CONCURRENCY = liftConcurrency();
+
 /** A streamed SSE body that yields exactly `text` as one content delta. */
 function sseStream(text) {
   const frame = `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`;
@@ -121,7 +140,7 @@ async function run({ plan, queueMs = 0, candidates = ["groq", "mistral", "freeth
     "__clock.now += wait;"
   );
   assert.notStrictEqual(patched, SOURCE, "the sleep in the lifted source should be patchable");
-  vm.runInContext(`${patched}\nthis.run = collectDevCompletion;`, sandbox, {
+  vm.runInContext(`${CONCURRENCY}\n${patched}\nthis.run = collectDevCompletion;`, sandbox, {
     filename: "collectDevCompletion.js",
   });
 

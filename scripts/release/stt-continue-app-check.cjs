@@ -83,7 +83,7 @@ async function evaluate(send, expression) {
     const SC = window.CapriSttCache;
     const D = window.capriDev;
     const path = "C:\\\\__capri_continue_probe__.mp4";
-    const info = { size: 424242, duration: 160 };
+    const info = { size: 424242, duration: 160, fingerprint: "0123456789abcdef0123456789abcdef" };
     const ident = SC.identity(path, info);
     if (!ident.ok) return { error: "identity refused the probe file" };
     const doc = SC.empty(ident);

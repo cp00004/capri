@@ -2141,6 +2141,54 @@
   }
 
   /**
+   * A bounded queue for visual work.
+   *
+   * A review job grabs frames and uploads them, and each upload is the expensive
+   * part of a relay's minute. Three at once is what the run already did; more
+   * would only queue at the provider anyway. The point of this helper is that the
+   * cap is stated once and the work is always released, including on a throw.
+   */
+  function visualQueue(size = 2) {
+    let active = 0;
+    const waiting = [];
+    const run = (job) => new Promise((resolve, reject) => {
+      const start = () => {
+        active += 1;
+        Promise.resolve()
+          .then(job)
+          .then((v) => { active -= 1; next(); resolve(v); })
+          .catch((e) => { active -= 1; next(); reject(e); });
+      };
+      if (active < size) start();
+      else waiting.push(start);
+    });
+    const next = () => {
+      const start = waiting.shift();
+      if (start) start();
+    };
+    return run;
+  }
+
+  /** Retry a visual job once, with a short jittered wait, before giving up on it. */
+  async function withVisualRetry(job, attempts = 2) {
+    let last = null;
+    for (let i = 1; i <= attempts; i += 1) {
+      try {
+        return await job();
+      } catch (err) {
+        last = err;
+        const status = Number(err?.status);
+        // Only a transient refusal is worth another call. A rejected window is a
+        // verdict, not a fault, and retrying it just spends quota.
+        const transient = status === 429 || status >= 500 || !Number.isFinite(status);
+        if (!transient || i === attempts) break;
+        await new Promise((r) => setTimeout(r, 800 * i + Math.round(Math.random() * 600)));
+      }
+    }
+    throw last;
+  }
+
+  /**
    * The read for one platform: plan, propose, review, rank, then cut.
    *
    * Nothing here decides what is funny. The endpoints do that, and the ranker
@@ -2245,6 +2293,10 @@
     // 4. Pass two: review every proposal on its own evidence.
     const reviewed = [];
     let ri = 0;
+    // Two visual jobs at a time, not three workers on three frames at once: each
+    // upload spends a relay's per-minute budget, so a wider fan-out only converts
+    // a working review into a 429 and then a transcript-only fallback.
+    const visualSlot = visualQueue(2);
     const reviewWorker = async () => {
       while (ri < moments.length) {
         const moment = moments[ri++];
@@ -2253,24 +2305,28 @@
         const candidate = candidates.find((c) => moment.end > c.start && moment.start < c.end) || {
           kind: "dialogue", strength: 0.3, events: [],
         };
-        const times = reviewTimes(Number(moment.start), Number(moment.end));
-        const shot2 = await framesAtTimes(video.path, times, 720).catch(() => ({ frames: [], failed: times.length }));
-        report.vision.frames += shot2.frames.length;
-        if (!shot2.frames.length) report.vision.failed += 1;
         try {
-          const data = await apiJson("/api/dev/clip/review", {
-            duration: info.duration,
-            platform,
-            moment,
-            transcript: { words: read.words, segments: read.segments, granularity: read.granularity },
-            events: read.events,
-            ocr: ocr?.samples || [],
-            frames: shot2.frames,
-            minClip: CLIP.min,
-            maxClip: CLIP.max,
-          }, 180_000);
+          // Frames are taken inside the slot too: decoding four 720px stills at
+          // once is the same oversubscription on the machine as on the relay.
+          const data = await visualSlot(() => withVisualRetry(async () => {
+            const times = reviewTimes(Number(moment.start), Number(moment.end));
+            const shot2 = await framesAtTimes(video.path, times, 720).catch(() => ({ frames: [], failed: times.length }));
+            report.vision.frames += shot2.frames.length;
+            if (!shot2.frames.length) report.vision.failed += 1;
+            return apiJson("/api/dev/clip/review", {
+              duration: info.duration,
+              platform,
+              moment,
+              transcript: { words: read.words, segments: read.segments, granularity: read.granularity },
+              events: read.events,
+              ocr: ocr?.samples || [],
+              frames: shot2.frames,
+              minClip: CLIP.min,
+              maxClip: CLIP.max,
+            }, 180_000);
+          }));
           const review = data?.review;
-          if (!review) return;
+          if (!review) continue;
           // Provenance is a fact about the review, not a guess: it says whether
           // the second pass saw a picture or only the transcript. Kept on the
           // candidate so the results panel can never imply full validation for a
@@ -2290,7 +2346,9 @@
               start: Number(moment.start), end: Number(moment.end),
               reasons: [review.reject_reason || "rejected on review"],
             });
-            return;
+            // Not `return`: that ended this worker's whole loop, so one rejection
+            // silently stopped every later moment in the list from being reviewed.
+            continue;
           }
           report.passes.accepted += 1;
           reviewed.push({
