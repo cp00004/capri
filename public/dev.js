@@ -2391,15 +2391,16 @@
         if (cacheHit) {
           // The same footage already encoded for the other platform: reuse the
           // file, only the info file differs.
-          Object.assign(item, cacheHit, { status: "exported" });
-          item.base = `${item.fileBase}${pfx}`;
-          item.meta = metaFor(item);
-          await D.writeShorts(`shorts/${item.base}.txt`, item.meta);
+          Object.assign(item, cacheHit);
         } else {
           const done = await exportClip(item);
-          Object.assign(item, done, { status: "exported" });
           cutCache.set(key, { cut: done.cut, fileBase: done.fileBase, cues: done.cues, captionSource: done.captionSource });
         }
+        item.base = `${item.fileBase}${pfx}`;
+        item.meta = metaFor(item);
+        await D.writeShorts(`shorts/${item.base}.txt`, item.meta);
+        item.status = "exported";
+        item.error = "";
       } catch (err) {
         // A clip is not thrown away because its MP4 failed. The analysis is done
         // and paid for; the file is the only missing part, so the candidate stays
