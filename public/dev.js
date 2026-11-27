@@ -1421,6 +1421,9 @@
       // Set at the point of the early return so the empty run can name the real
       // cause instead of always blaming the bar.
       empty: "",
+      // Analysis and export are tracked separately: a clip can be found and
+      // approved and still have no MP4, and that is not an empty analysis.
+      export: { exported: 0, failed: 0 },
     };
   }
 
@@ -2419,6 +2422,10 @@
     }
     const exported = state.made.slice(before).filter((m) => m.status === "exported").length;
     const failedExports = state.made.slice(before).filter((m) => m.status === "export-failed").length;
+    // Kept on the report so the run summary can tell "analysis found nothing"
+    // apart from "analysis found clips and the encoder failed" - two different
+    // problems with two different fixes.
+    report.export = { ...(report.export || {}), exported: (report.export?.exported || 0) + exported, failed: (report.export?.failed || 0) + failedExports };
     entry.state = exported ? "done" : failedExports ? "export failed" : "nothing postable";
     return { made: exported, failedExports };
   }
@@ -2560,11 +2567,19 @@
             }
           }
           const allNothing = results.every((r) => r.nothing || r.failed);
-          if (allNothing && !state.made.some((m) => m.report === report)) {
+          const mine = state.made.filter((m) => m.report === report);
+          const okCount = mine.filter((m) => m.status === "exported").length;
+          const failedCount = mine.filter((m) => m.status === "export-failed").length;
+          if (allNothing && !okCount && !failedCount) {
             const first = results.find((r) => r.failed);
             entry.state = first ? "failed" : "nothing postable";
             if (first && !multi) throw new Error(first.failed);
           }
+          // Analysis and export are separate outcomes. An approved clip whose MP4
+          // did not render is still a result - it is not "nothing postable", and
+          // saying so would hide work the user can retry.
+          if (okCount) entry.state = "done";
+          else if (failedCount) entry.state = "export failed";
           renderShortsResults(state.made, false);
         } catch (err) {
           entry.state = "failed";
@@ -2577,7 +2592,7 @@
           renderVideoList();
         }
       }
-      if (!state.made.length) {
+      if (!state.made.some((m) => m.status === "exported" || m.status === "export-failed")) {
         // Nothing was produced, so the reason is the whole result: name the
         // actual cause instead of a generic failure. "unknown error" used to
         // hide a transcript that was still queued behind the speech budget.
@@ -2595,10 +2610,18 @@
       }
       renderShortsResults(state.made, true);
       const where = dev.outDir || "";
+      const good = state.made.filter((m) => m.status === "exported").length;
+      const bad = state.made.filter((m) => m.status === "export-failed").length;
       shortsProgress(
-        `DONE\n${state.made.length} short${state.made.length === 1 ? "" : "s"} from ${queue.length} video${queue.length === 1 ? "" : "s"}${state.failures.length ? ` · ${state.failures.length} skipped` : ""}\n${where}`
+        `DONE\n${good} short${good === 1 ? "" : "s"} exported from ${queue.length} video${queue.length === 1 ? "" : "s"}`
+        + `${bad ? ` · ${bad} failed to render (RETRY EXPORT keeps the analysis)` : ""}`
+        + `${state.failures.length ? ` · ${state.failures.length} skipped` : ""}\n${where}`
       );
-      sysLine(`${state.made.length} short${state.made.length === 1 ? "" : "s"} ready in ${where || "the Shorts folder"}`);
+      sysLine(
+        bad
+          ? `${good} short${good === 1 ? "" : "s"} ready, ${bad} file${bad === 1 ? "" : "s"} failed to render - RETRY EXPORT does not re-analyse`
+          : `${good} short${good === 1 ? "" : "s"} ready in ${where || "the Shorts folder"}`
+      );
     } catch (err) {
       shutdown(`FAILED\n${err.message || err}`);
     } finally {
@@ -2631,6 +2654,14 @@
     const proposed = passes.reduce((n, p) => n + (p.proposed || 0), 0);
     const accepted = passes.reduce((n, p) => n + (p.accepted || 0), 0);
     const rejected = passes.reduce((n, p) => n + (p.rejected || 0), 0);
+    // An encoder failure is not an empty analysis. If clips were found and
+    // approved, say so and name the export as the problem - blaming the bar here
+    // would send the user to re-run an analysis that worked.
+    const exportFailed = (reports || []).reduce((n, r) => n + (r?.export?.failed || 0), 0);
+    const exported = (reports || []).reduce((n, r) => n + (r?.export?.exported || 0), 0);
+    if (exportFailed && !exported) {
+      return `the analysis found and approved ${exportFailed} clip${exportFailed === 1 ? "" : "s"}, but the MP4 export failed - the clips are still listed and RETRY EXPORT re-renders them without reading the video again`;
+    }
 
     if (stages.has("plan")) {
       return `the whole video was read, but no stretch of it could be proposed for review${proposed ? ` (${proposed} proposed)` : ""}`;
@@ -2842,12 +2873,12 @@
       const scoreWord = (n) => (n >= 70 ? "strong" : n >= 50 ? "fair" : "weak");
       const rows = [
         ["ENTERTAINMENT", `${pick.score ?? "?"}/100 · ${scoreWord(Number(pick.score))}`, "score"],
-        ["WHY IT WAS PICKED", pick.why || entry.pick?.why || "not explained", ""],
+        ["WHY IT WAS PICKED", pick.why || entry.plan?.review?.why || entry.plan?.moment?.why || "not explained", ""],
         ["WINDOW", `${clock(entry.suggested?.start ?? pick.start)} → ${clock(entry.suggested?.end ?? pick.end)} suggested · ${clock(pick.start)} → ${clock(pick.end)} cut`, ""],
-        ["AUDIO EVENTS", (entry.evidence || []).length
-          ? entry.evidence.map((e) => `${e.type.replace(/_/g, " ")} ${e.start}-${e.end}s (${Math.round((e.confidence || 0) * 100)}%)`).join("\n")
+        ["AUDIO EVENTS", (entry.evidence || entry.plan?.evidence || []).length
+          ? (entry.evidence || entry.plan.evidence).map((e) => `${e.type.replace(/_/g, " ")} ${e.start}-${e.end}s (${Math.round((e.confidence || 0) * 100)}%)`).join("\n")
           : "none detected inside this clip", ""],
-        ["FULL VALIDATION", entry.pick?.passTwo === "accepted" ? "yes — second read accepted it" : "no — accepted on the first pass only", "warn"],
+        ["FULL VALIDATION", (entry.plan?.passTwo || entry.pick?.passTwo) === "accepted" ? "yes — second read accepted it" : "no — accepted on the first pass only", "warn"],
         ["CAPTIONS", entry.captionSource === "word" ? "word-accurate timing" : entry.captionSource === "segment" ? "approximate — sentence timing only" : "none", entry.captionSource === "word" ? "" : "warn"],
       ];
       const comp = entry.components || {};
