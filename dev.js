@@ -1414,6 +1414,10 @@
       // Neutral remarks. A re-run reusing saved work belongs here, not in
       // `degraded`, or a clean resume would be shown under "DEGRADED THIS RUN".
       notes: [],
+      // Which stage emptied the set, when one did: "plan", "review", or "rank".
+      // Set at the point of the early return so the empty run can name the real
+      // cause instead of always blaming the bar.
+      empty: "",
     };
   }
 
@@ -2046,7 +2050,8 @@
     }, 60_000);
     const candidates = (plan?.candidates || []).filter((c) => c.end - c.start >= 4);
     if (!candidates.length) {
-      if (!ctx.multi) throw new Error("She read the whole video and found nothing that happens.");
+      report.empty = "plan";
+      if (!ctx.multi) throw new Error("She read the whole video and found no stretch worth looking at.");
       return { nothing: true };
     }
     shortsProgress(`VIDEO ${tag}${label}\n${candidates.length} moment${candidates.length === 1 ? "" : "s"} to look at · grabbing frames`);
@@ -2095,8 +2100,31 @@
       report.degraded.push(`pass one was partly blind: ${proposed.visionGaps[0]}`);
       report.vision.partial = proposed.visionGaps.length;
     }
+    // Pass one is a shortlist, not the verdict - pass two is what decides. So
+    // when it comes back empty on a stream whose transcript is complete, do not
+    // end the run: hand the plan's own windows to the strict review and let it
+    // judge the real footage. A whole transcript must never produce nothing
+    // simply because the cheap screening pass was cautious.
     if (!moments.length) {
-      if (!ctx.multi) throw new Error("She watched the whole video and found nothing worth posting.");
+      // Four is deliberate: the strict review is a paid model call per window,
+      // so a cautious screening pass gets a bounded second chance, not 12 calls.
+      const salvaged = candidates.slice(0, 4).map((c) => ({
+        start: c.start, end: c.end,
+        kind: c.kind || "other",
+        why: "the screening pass was cautious, so the window itself was reviewed",
+        setup: "", payoff: "", uses: [], confidence: 0.3,
+      }));
+      if (salvaged.length) {
+        report.notes.push(
+          `the screening pass proposed nothing, so ${salvaged.length} planned window${salvaged.length === 1 ? "" : "s"} ${salvaged.length === 1 ? "was" : "were"} sent straight to the strict review`
+        );
+        moments.push(...salvaged);
+        report.passes.proposed += salvaged.length;
+      }
+    }
+    if (!moments.length) {
+      report.empty = "plan";
+      if (!ctx.multi) throw new Error("She read the whole video but no stretch of it could even be proposed.");
       return { nothing: true };
     }
 
@@ -2164,7 +2192,8 @@
     await Promise.all([reviewWorker(), reviewWorker(), reviewWorker()]);
 
     if (!reviewed.some((r) => !r.rejected)) {
-      if (!ctx.multi) throw new Error("Nothing survived the second read - the proposals did not hold up.");
+      report.empty = "review";
+      if (!ctx.multi) throw new Error("Nothing survived the second read - every proposed clip was rejected on review.");
       return { nothing: true };
     }
 
@@ -2193,6 +2222,7 @@
     const byId = new Map(reviewed.map((r) => [r.id, r]));
     const picks = (ranked?.picks || []).map((p) => ({ ...byId.get(p.id), ...p })).filter((p) => p.moment);
     if (!picks.length) {
+      report.empty = "rank";
       if (!ctx.multi) throw new Error("Nothing cleared the bar for posting.");
       return { nothing: true };
     }
@@ -2448,7 +2478,7 @@
           || (reports.some((r) => r?.transcript && r.transcript.complete === false)
             ? "the transcript is still incomplete - the speech left unread is saved, so CONTINUE finishes it"
             : reports.length
-              ? "she read the whole video but nothing in it cleared the bar for posting"
+              ? explainEmpty(reports)
               : "no video could be analysed");
         // Shown in the panel before it is thrown, so "nothing postable" is
         // followed by the reason instead of leaving the user guessing.
@@ -2476,6 +2506,35 @@
       try { renderVideoList(); } catch { /* list rebuilt on the next paint */ }
       try { paintStudio(); } catch { /* repaint is cosmetic */ }
     }
+  }
+
+  /**
+   * Why an empty run was empty, in plain words.
+   *
+   * "nothing postable" alone cannot be acted on: the fix is completely different
+   * if the screening pass was cautious, if the strict review rejected every
+   * proposal, or if the ranker refused everything below its bar. Each stage now
+   * records itself in `report.empty`, so this names the one that actually
+   * emptied the set instead of repeating that the video cleared no bar.
+   */
+  function explainEmpty(reports) {
+    const stages = new Set((reports || []).map((r) => r?.empty).filter(Boolean));
+    const passes = (reports || []).map((r) => r?.passes || {});
+    const proposed = passes.reduce((n, p) => n + (p.proposed || 0), 0);
+    const accepted = passes.reduce((n, p) => n + (p.accepted || 0), 0);
+    const rejected = passes.reduce((n, p) => n + (p.rejected || 0), 0);
+
+    if (stages.has("plan")) {
+      return `the whole video was read, but no stretch of it could be proposed for review${proposed ? ` (${proposed} proposed)` : ""}`;
+    }
+    if (stages.has("review")) {
+      const seen = accepted + rejected || proposed;
+      return `the whole video was read and ${seen} clip${seen === 1 ? " was" : "s were"} reviewed, but every one was rejected - none of them held up on a second look`;
+    }
+    if (stages.has("rank")) {
+      return `the whole video was read and ${accepted} clip${accepted === 1 ? "" : "s"} got through review, but none scored high enough to post`;
+    }
+    return "she read the whole video but nothing in it cleared the bar for posting";
   }
 
   // One block per short: the finished vertical file plays right there, the
