@@ -1624,6 +1624,12 @@ async function handleClipPropose(req, res) {
       { role: "user", content },
     ], 0.3, { queueMs: 45_000 });
     const parsed = out.parsed;
+    // `jsonCompletion` returns `{ parsed, out }`, not the reply itself. Reading
+    // `out.provider` / `out.content` off the wrapper gave undefined every time,
+    // so the window reported no provider, no vision note, and an empty `raw` -
+    // which is why an empty pass looked like the model had said nothing at all
+    // rather than like a reply that could not be used.
+    const reply = out.out || {};
     const list = Array.isArray(parsed?.moments) ? parsed.moments
       : Array.isArray(parsed?.clips) ? parsed.clips
         : parsed?.start != null ? [parsed] : [];
@@ -1631,13 +1637,13 @@ async function handleClipPropose(req, res) {
     return {
       window: w,
       moments,
-      provider: out.provider,
+      provider: reply.provider,
       // Set when the pictures were dropped and the window was judged from the
       // transcript alone; the renderer shows this in the degraded report.
-      vision: out.vision,
+      vision: reply.vision,
       // Kept for Developer Mode transparency: when a window yields nothing it
       // is useful to know whether the model said so or the reply was unusable.
-      raw: body.debug ? String(out.content || "").slice(0, 1500) : undefined,
+      raw: body.debug ? String(reply.content || "").slice(0, 1500) : undefined,
       coerced: body.debug ? list.length - moments.length : undefined,
     };
   };
