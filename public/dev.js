@@ -2667,27 +2667,44 @@
       if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
+    // Clips that cleared analysis and only failed to render are counted
+    // separately. They are real candidates - calling the run "nothing postable"
+    // because ffmpeg failed would throw away paid work and mislead the user about
+    // what the video contained.
+    const exported = entries.filter((e) => e.status !== "export-failed");
+    const failed = entries.filter((e) => e.status === "export-failed");
     const head = document.createElement("div");
     head.className = "yt-results-head";
     const h = document.createElement("h4");
     const sources = new Set(entries.map((e) => e.videoName || "this video"));
-    h.textContent = `${entries.length} short${entries.length === 1 ? "" : "s"} from ${sources.size} video${sources.size === 1 ? "" : "s"}`;
+    const made = exported.length;
+    h.textContent = `${made} short${made === 1 ? "" : "s"} ready${failed.length ? ` · ${failed.length} failed to export` : ""} from ${sources.size} video${sources.size === 1 ? "" : "s"}`;
     head.appendChild(h);
     const reveal = document.createElement("button");
     reveal.type = "button";
     reveal.className = "dev-mini";
     reveal.textContent = "OPEN SHORTS FOLDER";
-    reveal.addEventListener("click", () => D.reveal(entries[0].cut.path));
+    reveal.addEventListener("click", () => D.reveal(exported[0]?.cut?.path || failed[0]?.fileBase || "."));
     head.appendChild(reveal);
     box.appendChild(head);
+    if (failed.length) {
+      // Say what happened in the user's terms. The analysis is not repeated on a
+      // retry, which is the point: the expensive part is already done.
+      const note = document.createElement("p");
+      note.className = "yt-meta";
+      note.textContent = `${failed.length} clip${failed.length === 1 ? " was" : "s were"} analysed and approved but the MP4 did not render. `
+        + "Your review work is kept - RETRY EXPORT re-renders only the file, it does not analyse the video again.";
+      box.appendChild(note);
+    }
     const copyText = (pick) => `${pick.title || ""}\n${(pick.hashtags || []).map((t) => `#${t}`).join(" ")}`;
     const copy = (text, note) => {
       navigator.clipboard?.writeText(text).then(() => sysLine(note)).catch(() => {});
     };
     for (const entry of entries) {
       const { pick, cut, base, meta } = entry;
+      const isFailed = entry.status === "export-failed";
       const card = document.createElement("article");
-      card.className = "yt-short";
+      card.className = `yt-short${isFailed ? " export-failed" : ""}`;
       const frame = document.createElement("div");
       frame.className = "yt-short-frame";
       const player = document.createElement("video");
@@ -2695,7 +2712,9 @@
       player.controls = true;
       player.preload = "metadata";
       player.playsInline = true;
-      player.src = cut.abs ? mediaUrl(cut.abs) : "";
+      // A failed clip has no file to play. Leave the element empty rather than
+      // pointing it at a path that does not exist and showing a browser error.
+      if (!isFailed && cut?.abs) player.src = mediaUrl(cut.abs);
       frame.appendChild(player);
       const num = document.createElement("span");
       num.className = "yt-short-num";
@@ -2712,6 +2731,23 @@
       when.className = "dev-when";
       when.textContent = `${clock(pick.start)} - ${clock(pick.end)} · ${length.toFixed(1)}s · ${PLATFORMS[entry.platform || dev.platform].name}${pick.score ? ` · score ${pick.score}/100` : ""}`;
       body.appendChild(when);
+      if (isFailed) {
+        // Three separate facts, so "failed" is not mistaken for "not funny":
+        // the analysis passed, the file is missing, and this is what retrying does.
+        const badge = document.createElement("div");
+        badge.className = "yt-short-status";
+        badge.textContent = "EXPORT FAILED · ANALYSIS DONE";
+        body.appendChild(badge);
+        const why = document.createElement("p");
+        why.className = "yt-meta";
+        why.textContent = entry.error || "The MP4 could not be written.";
+        body.appendChild(why);
+      } else if (entry.status === "exported") {
+        const badge = document.createElement("div");
+        badge.className = "yt-short-status ok";
+        badge.textContent = "EXPORTED · FILE VERIFIED";
+        body.appendChild(badge);
+      }
       const from = document.createElement("div");
       from.className = "yt-short-from";
       from.textContent = `from ${entry.videoName || "selected video"}`;
