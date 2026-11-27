@@ -26,6 +26,10 @@
     info: null,
     videos: [],
     shortsBusy: false,
+    // The folder Shorts Studio exports into, as reported by the main process.
+    outDir: "",
+    // Set by the "fresh transcription" control; consumed by the next read.
+    freshTranscript: false,
     // Only ever set by the real-app check; see `forTest` on window.CapriDev.
     pickOverride: null,
     platform: "youtube",
@@ -103,7 +107,28 @@
       ytPlatform: $("ytFactPlatform"),
       ytSource: $("ytFactSource"),
       ytOutput: $("ytFactOutput"),
+      shortsFolder: $("shortsFolder"),
+      shortsFresh: $("shortsFresh"),
     };
+    // Where the shorts go is a per-run choice, not a workspace detail, so it is
+    // switched from here. The native picker is replaced in tests via the same
+    // seam as the video picker.
+    dev.els.shortsFolder?.addEventListener("click", async () => {
+      try {
+        const r = await D.pickShortsRoot();
+        if (!r?.dir) return;
+        dev.outDir = r.dir;
+        paintStudio();
+        sysLine(`shorts will be saved in ${r.dir}`);
+      } catch (err) {
+        sysLine(`could not change the folder: ${err?.message || err}`);
+      }
+    });
+    dev.els.shortsFresh?.addEventListener("change", () => {
+      // Blocking otherwise: the fresh read is what the checkbox is for, and a
+      // transcript that is complete but wrong is exactly when a user needs it.
+      dev.freshTranscript = Boolean(dev.els.shortsFresh.checked);
+    });
   }
 
   function sysLine(text) {
@@ -1445,24 +1470,40 @@
    * did. A cache belonging to a different cut of a same-named file is dropped
    * rather than reused: its timestamps would land on the wrong seconds.
    */
-  async function openTranscriptCache(video, info, report) {
+  /**
+   * Open the saved transcript for this file, or start a fresh one.
+   *
+   * `force` skips the saved work on purpose. A transcript can be complete and
+   * still wrong - the provider misheard, or the user simply wants it redone - and
+   * without this there was no way to ask for that.
+   */
+  async function openTranscriptCache(video, info, report, force) {
     const SC = window.CapriSttCache;
     if (!SC || typeof D?.sttCacheLoad !== "function") return null;
     const ident = SC.identity(video, info);
-    if (!ident.ok) return null;
+    if (!ident.ok) {
+      // Say why instead of silently reading it again every run.
+      report.notes.push("this file has no content fingerprint, so its transcript cannot be resumed next time");
+      return null;
+    }
+    if (force) {
+      try { await D.sttCacheDrop(ident.id); } catch { /* the fresh read overwrites it anyway */ }
+      report.notes.push("you asked for a fresh transcription, so the saved one was not reused");
+      return { id: ident.id, ident, doc: SC.empty(ident), store: D };
+    }
     let doc = null;
     try { doc = await D.sttCacheLoad(ident.id); } catch { doc = null; }
     if (doc && !SC.sameVideo(doc, ident)) {
-      report.degraded.push("discarded a saved transcript that belonged to a different version of this file");
+      report.degraded.push("discarded a saved transcript whose fingerprint did not match this file");
       try { await D.sttCacheDrop(ident.id); } catch { /* the stale file is simply ignored */ }
       doc = null;
     }
     return { id: ident.id, ident, doc: doc || SC.empty(ident), store: D };
   }
 
-  async function readVideo(video, info, report) {
+  async function readVideo(video, info, report, force = false) {
     // Loaded before the transcript starts so a resumed run knows what it can skip.
-    const cache = await openTranscriptCache(video, info, report).catch(() => null);
+    const cache = await openTranscriptCache(video, info, report, force).catch(() => null);
     const [audio, chunks, scenes] = await Promise.all([
       D.audioAnalyse({ video, sampleRate: 16000 }).catch((err) => ({ ok: false, reason: String(err?.message || err), events: [] })),
       D.speechChunks({ video, targetSeconds: 45, maxSeconds: 90, minSeconds: 8 }).catch((err) => ({ ok: false, reason: String(err?.message || err), chunks: [] })),
@@ -2529,8 +2570,18 @@
           // when regions are still missing, so the reader is called again and it
           // resumes from the saved regions instead.
           let read = entry.read;
+          let fresh = false;
+          if (dev.freshTranscript) {
+            // Asked for a fresh transcript: ignore both the saved doc and the
+            // in-session read, read the whole file again, and clear the request so
+            // a following run reuses what this one produced.
+            entry.read = null;
+            read = null;
+            fresh = true;
+            dev.freshTranscript = false;
+          }
           if (!read || read.duration !== info.duration || read.incomplete) {
-            read = await readVideo(video.path, info, report);
+            read = await readVideo(video.path, info, report, fresh);
             entry.read = { ...read, duration: info.duration };
           } else {
             // The cached read is still valid; copy its shape into the report so
