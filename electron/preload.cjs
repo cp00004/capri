@@ -72,6 +72,11 @@ contextBridge.exposeInMainWorld("capriDev", {
   isElectron: true,
   root: () => ipcRenderer.invoke("capri-dev-root"),
   setRoot: (dir) => ipcRenderer.invoke("capri-dev-set-root", String(dir || "")),
+  // Shorts Studio output lives outside the coding workspace on purpose.
+  shortsRoot: () => ipcRenderer.invoke("capri-dev-shorts-root"),
+  setShortsRoot: (dir) => ipcRenderer.invoke("capri-dev-shorts-set-root", String(dir || "")),
+  pickShortsRoot: () => ipcRenderer.invoke("capri-dev-shorts-pick-root"),
+  writeShorts: (p, text) => ipcRenderer.invoke("capri-dev-shorts-write", String(p || ""), String(text ?? "")),
   pickFolder: () => ipcRenderer.invoke("capri-dev-pick-folder"),
   pickVideos: () => ipcRenderer.invoke("capri-dev-pick-videos"),
   pickImages: () => ipcRenderer.invoke("capri-dev-pick-images"),
