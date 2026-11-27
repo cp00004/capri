@@ -1111,84 +1111,92 @@ async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 
     // Skip a relay that is still cooling instead of spending a call to find out.
     // The sweep used to try all six every time, so a capped provider was asked
     // again on the next tick and the cap was extended by its own retries.
-    const ready = candidates.filter((c) => !isCooling(c)).slice(0, 6);
-    // A sweep where every candidate is cooling has nothing to try; fall through
-    // to the wait below rather than counting a phantom retryable.
-    const pool = ready;
+    const pool = candidates.filter((c) => !isCooling(c)).slice(0, 6);
+    // Every candidate cooling is not a failure, it is a queue: count it as
+    // retryable so the sweep waits for the soonest window instead of throwing.
+    if (!pool.length) retryable += 1;
     for (let i = 0; i < pool.length; i += 1) {
       const provider = pool[i];
+      // One slot per provider, so three review workers do not stack onto the same
+      // free relay and turn a working key into a 429. Released in `finally` on
+      // every path - a leaked slot would starve the queue for the rest of the run.
+      const release = await acquireProvider(provider.name);
       let upstream;
-      let release;
       try {
-        // One slot per provider, so three review workers do not stack onto the
-        // same free relay and turn a working key into a 429.
-        release = await acquireProvider(provider.name);
-        upstream = await chatCompletion({ provider, messages, tools, temperature });
-      } catch (err) {
-        if (release) release();
-        release = null;
-        lastErr = err;
-        if (vision && !visionErr) visionErr = err;
-        const status = Number(err.status);
-        // 5xx and 429 both clear on their own: the relay is busy, not wrong.
-        if (status === 429) { coolDown(provider, Number(err.retryAfter) || 20); retryable += 1; }
-        else if (status === 401 || status === 403) coolDown(provider, 300);
-        else if (status === 402) coolDown(provider, 1800);
-        else if (status === 404) coolDown(provider, 600);
-        else if (status >= 500) { coolDown(provider, 15); retryable += 1; }
-        else coolDown(provider, 15);
-        continue;
-      }
-      const reader = upstream.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let content = "";
-      let calls = [];
-      let done = false;
-      try {
-        while (!done) {
-          const { value, done: ended } = await readChunk(reader, 30_000);
-          if (ended) break;
-          buffer += decoder.decode(value, { stream: true });
-          let idx;
-          while ((idx = buffer.indexOf("\n\n")) !== -1) {
-            const frame = buffer.slice(0, idx);
-            buffer = buffer.slice(idx + 2);
-            const line = frame.split("\n").find((l) => l.startsWith("data:"));
-            if (!line) continue;
-            const payload = line.slice(5).trim();
-            if (payload === "[DONE]") { done = true; break; }
-            let chunk;
-            try { chunk = JSON.parse(payload); } catch { continue; }
-            const delta = chunk.choices?.[0]?.delta;
-            if (!delta) continue;
-            if (delta.content) content += typeof delta.content === "string" ? delta.content : contentText(delta.content);
-            for (const tc of delta.tool_calls || []) {
-              const at = tc.index ?? calls.length;
-              if (!calls[at]) calls[at] = { id: tc.id || `call_${Date.now()}_${at}`, type: "function", function: { name: "", arguments: "" } };
-              if (tc.id) calls[at].id = tc.id;
-              if (tc.extra_content) calls[at].extra_content = tc.extra_content;
-              if (tc.thought_signature) calls[at].thought_signature = tc.thought_signature;
-              if (tc.function?.name) calls[at].function.name += tc.function.name;
-              if (tc.function?.arguments) calls[at].function.arguments += tc.function.arguments;
+        try {
+          upstream = await chatCompletion({ provider, messages, tools, temperature });
+        } catch (err) {
+          lastErr = err;
+          if (vision && !visionErr) visionErr = err;
+          const status = Number(err.status);
+          // 5xx and 429 both clear on their own: the relay is busy, not wrong.
+          // A `Retry-After` is honoured rather than guessed, because the server
+          // knows its own window better than a fixed 20s does.
+          if (status === 429) { coolDown(provider, Number(err.retryAfter) || 20); retryable += 1; }
+          else if (status === 401 || status === 403) coolDown(provider, 300);
+          else if (status === 402) coolDown(provider, 1800);
+          else if (status === 404) coolDown(provider, 600);
+          else if (status >= 500) { coolDown(provider, 15); retryable += 1; }
+          else coolDown(provider, 15);
+          continue;
+        }
+        const reader = upstream.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let content = "";
+        let calls = [];
+        let done = false;
+        let streamErr = null;
+        try {
+          while (!done) {
+            const { value, done: ended } = await readChunk(reader, 30_000);
+            if (ended) break;
+            buffer += decoder.decode(value, { stream: true });
+            let idx;
+            while ((idx = buffer.indexOf("\n\n")) !== -1) {
+              const frame = buffer.slice(0, idx);
+              buffer = buffer.slice(idx + 2);
+              const line = frame.split("\n").find((l) => l.startsWith("data:"));
+              if (!line) continue;
+              const payload = line.slice(5).trim();
+              if (payload === "[DONE]") { done = true; break; }
+              let chunk;
+              try { chunk = JSON.parse(payload); } catch { continue; }
+              const delta = chunk.choices?.[0]?.delta;
+              if (!delta) continue;
+              if (delta.content) content += typeof delta.content === "string" ? delta.content : contentText(delta.content);
+              for (const tc of delta.tool_calls || []) {
+                const at = tc.index ?? calls.length;
+                if (!calls[at]) calls[at] = { id: tc.id || `call_${Date.now()}_${at}`, type: "function", function: { name: "", arguments: "" } };
+                if (tc.id) calls[at].id = tc.id;
+                if (tc.extra_content) calls[at].extra_content = tc.extra_content;
+                if (tc.thought_signature) calls[at].thought_signature = tc.thought_signature;
+                if (tc.function?.name) calls[at].function.name += tc.function.name;
+                if (tc.function?.arguments) calls[at].function.arguments += tc.function.arguments;
+              }
             }
           }
+        } catch (err) {
+          streamErr = err;
         }
-      } catch (err) {
-        try { await upstream.body.cancel(); } catch { /* gone */ }
-        lastErr = err;
-        coolDown(provider, 15);
-        retryable += 1;
-        continue;
+        if (streamErr) {
+          try { await upstream.body.cancel(); } catch { /* gone */ }
+          lastErr = streamErr;
+          coolDown(provider, 15);
+          retryable += 1;
+          continue;
+        }
+        const toolCalls = calls.filter((c) => c?.function?.name);
+        if (!content.trim() && !toolCalls.length) {
+          lastErr = new Error("The relay answered with nothing.");
+          coolDown(provider, 10);
+          retryable += 1;
+          continue;
+        }
+        return { content: content.trim(), tool_calls: toolCalls, provider: provider.name };
+      } finally {
+        release();
       }
-      const toolCalls = calls.filter((c) => c?.function?.name);
-      if (!content.trim() && !toolCalls.length) {
-        lastErr = new Error("The relay answered with nothing.");
-        coolDown(provider, 10);
-        retryable += 1;
-        continue;
-      }
-      return { content: content.trim(), tool_calls: toolCalls, provider: provider.name };
     }
 
     // Every relay was tried and none had an answer. If any of them was capped or
@@ -1210,8 +1218,10 @@ async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 
     // and the window would be reported blind for want of a 15s shortfall.
     const room = Math.max(0, queuedUntil - Date.now());
     if (room < 1_000) break;
-    const wanted = Math.max(250, Math.min(45_000, Number.isFinite(soonest) ? soonest - Date.now() + 250 : 5_000));
-    const wait = Math.min(wanted, room);
+    // Jittered so three workers waiting on the same window do not wake together
+    // and immediately re-cap the relay they were waiting for.
+    const wanted = Math.max(250, Math.min(45_000, Number.isFinite(soonest) ? soonest - Date.now() : 5_000));
+    const wait = Math.min(wanted, room) + Math.round(Math.random() * 400);
     await new Promise((r) => setTimeout(r, wait));
   }
   throw (vision ? (visionErr || lastErr) : lastErr) || new Error(cappedMessage());
