@@ -107,6 +107,48 @@
     return true;
   }
 
+  /**
+   * Upgrade a v1 doc to the v2 shape, or return null.
+   *
+   * v1 keyed a transcript on path + size. That is too weak to *find* a cache with
+   * (two clips of the same name and length collided), but it is enough to
+   * *recognise* a doc this run already owns: the path, byte size and duration all
+   * have to match the file in front of us, and the probe now supplies a fingerprint
+   * for the doc going forward. Anything less exact is rejected.
+   *
+   * This exists because the alternative is throwing away a paid-for transcript of a
+   * 3.4-hour stream. The identity was only tightened against *foreign* files; a doc
+   * that provably belongs to this exact file is not foreign.
+   */
+  function upgrade(doc, ident) {
+    if (!doc || doc.version !== 1 || !ident?.ok) return null;
+    const v = doc.video || {};
+    // Same fold as the on-disk search: v1 lower-cased the path but kept whatever
+    // separators the renderer happened to send, and the probe reports the other
+    // spelling for the same file. Folding both is what stops the one real
+    // transcript in the cache from being rejected over punctuation.
+    const fold = (p) => String(p || "").toLowerCase().replace(/\//g, "\\");
+    if (fold(v.path) !== fold(ident.path)) return null;
+    if (num(v.size) !== num(ident.size)) return null;
+    if (Math.abs(num(v.duration) - num(ident.duration)) > 1) return null;
+    if (!doc.regions || typeof doc.regions !== "object") return null;
+    return {
+      ...doc,
+      version: VERSION,
+      video: {
+        path: String(ident.path || ""),
+        size: num(ident.size),
+        duration: num(ident.duration),
+        fingerprint: String(ident.fingerprint || ""),
+      },
+      // Carried over because `partial` compares these against the regions actually
+      // stored. Dropping them would turn a stopped run into one that looks finished
+      // and take CONTINUE away from the user.
+      total: num(doc.total),
+      regionsTotal: num(doc.regionsTotal) || num(doc.total),
+    };
+  }
+
   const key = (start, end) => `${round2(start)}-${round2(end)}`;
 
   /**
@@ -186,7 +228,7 @@
     return size(doc) < num(doc.regionsTotal);
   }
 
-  const api = { VERSION, TOLERANCE, hash, identity, empty, sameVideo, key, find, add, size, markTotal, partial };
+  const api = { VERSION, TOLERANCE, hash, identity, empty, sameVideo, upgrade, key, find, add, size, markTotal, partial };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (root) root.CapriSttCache = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
