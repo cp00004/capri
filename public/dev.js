@@ -2537,11 +2537,11 @@
         throw new Error(`every video failed - ${real}`);
       }
       renderShortsResults(state.made, true);
-      const where = state.made[0].cut.path.slice(0, state.made[0].cut.path.lastIndexOf("\\") + 1);
+      const where = dev.outDir || "";
       shortsProgress(
         `DONE\n${state.made.length} short${state.made.length === 1 ? "" : "s"} from ${queue.length} video${queue.length === 1 ? "" : "s"}${state.failures.length ? ` · ${state.failures.length} skipped` : ""}\n${where}`
       );
-      sysLine(`${state.made.length} short${state.made.length === 1 ? "" : "s"} ready in shorts/`);
+      sysLine(`${state.made.length} short${state.made.length === 1 ? "" : "s"} ready in ${where || "the Shorts folder"}`);
     } catch (err) {
       shutdown(`FAILED\n${err.message || err}`);
     } finally {
