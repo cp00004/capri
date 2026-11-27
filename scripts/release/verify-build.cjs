@@ -69,6 +69,8 @@ if (fs.existsSync(exeDir)) {
     ok("packaged server.js queues a capped relay", /queueMs/.test(server) && /sweeps >= 4/.test(server));
     ok("packaged server.js retries unreadable JSON", /async function jsonCompletion\(/.test(server));
     ok("packaged server.js does not blame pictures for a cap", /function isRelayCap\(/.test(server));
+    // The planner must see timed words, or a word-accurate read looks silent.
+    ok("packaged server.js plans from words", /body\.words/.test(server));
   }
   const devPath = path.join(appRoot, "public", "dev.js");
   if (fs.existsSync(devPath)) {
@@ -93,6 +95,12 @@ if (fs.existsSync(exeDir)) {
     ok("packaged dev.js has no undeclared ticker in runShorts", !/if \(ticker\) clearInterval\(ticker\);/.test(dev));
     ok("packaged dev.js removes a video without the lock", /function removeVideo[\s\S]{0,600}?dev\.videos\.splice\(/.test(dev));
     ok("packaged dev.js has the exit action", /function exitToApp\(/.test(dev) && /devExit"\)\.addEventListener\("click", exitToApp\)/.test(dev));
+    // A word-accurate read sends timed words and no segments. The planner used to
+    // read only `segments`, so a perfect transcript looked like silence and the
+    // run ended "nothing postable".
+    ok("packaged dev.js sends words to the planner", /words:\s*read\.words/.test(dev));
+    ok("packaged dev.js treats a recovered budget pause as a note", /nothing is missing from the transcript/.test(dev));
+    ok("packaged dev.js explains nothing-postable", /renderShortsResults\(\[\], false, reports, real\)/.test(dev));
     ok("packaged app.js can hand the screen back", /window\.capriAppResume\s*=/.test(fs.readFileSync(path.join(appRoot, "public", "app.js"), "utf8")));
   }
   const htmlPath = path.join(appRoot, "public", "index.html");
