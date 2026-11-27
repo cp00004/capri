@@ -1833,8 +1833,14 @@
       );
     }
     if (deferredCount && deferredRescued) {
-      report.degraded.push(
-        `the speech budget paused the read ${deferredCount} time(s); ${deferredRescued} chunk(s) were read after waiting`
+      // This is the recovery path succeeding, not a fault. It used to be pushed
+      // into `degraded`, so a run whose budget paused and then refilled showed
+      // "DEGRADED THIS RUN" while every region had in fact been read - which
+      // made a clean transcript look broken. A note says what happened without
+      // claiming something went wrong.
+      const n = deferredCount;
+      (report.notes ||= []).push(
+        `the speech budget paused the read ${n} time${n === 1 ? "" : "s"}, and ${deferredRescued} chunk${deferredRescued === 1 ? " was" : "s were"} read after waiting - nothing is missing from the transcript`
       );
     }
     if (lost.length) {
@@ -2033,6 +2039,9 @@
       duration: info.duration,
       events: read.events,
       segments: read.segments,
+      // A word-accurate read has no segments: send the words too, or the planner
+      // cannot see the speech and proposes nothing.
+      words: read.words,
       maxCandidates: 12,
     }, 60_000);
     const candidates = (plan?.candidates || []).filter((c) => c.end - c.start >= 4);
@@ -2435,13 +2444,15 @@
         // actual cause instead of a generic failure. "unknown error" used to
         // hide a transcript that was still queued behind the speech budget.
         const reports = dev.videos.filter((v) => v.clipReport).map((v) => v.clipReport);
-        renderShortsResults([], false, reports);
         const real = state.failures[0]
           || (reports.some((r) => r?.transcript && r.transcript.complete === false)
             ? "the transcript is still incomplete - the speech left unread is saved, so CONTINUE finishes it"
             : reports.length
-              ? "nothing worth posting came out of the read"
+              ? "she read the whole video but nothing in it cleared the bar for posting"
               : "no video could be analysed");
+        // Shown in the panel before it is thrown, so "nothing postable" is
+        // followed by the reason instead of leaving the user guessing.
+        renderShortsResults([], false, reports, real);
         throw new Error(`every video failed - ${real}`);
       }
       renderShortsResults(state.made, true);
@@ -2471,7 +2482,7 @@
   // caption/info script sits next to it, and the copy buttons grab the post.
   // With no clips it still renders the reason, because a run that produced
   // nothing needs an explanation more than a success does.
-  function renderShortsResults(entries, scroll = true, failingReports = []) {
+  function renderShortsResults(entries, scroll = true, failingReports = [], reason = "") {
     const box = dev.els.shortsResult;
     box.textContent = "";
     box.classList.remove("hidden");
@@ -2482,6 +2493,15 @@
       h.textContent = "nothing postable";
       head.appendChild(h);
       box.appendChild(head);
+      // Say why in one plain line. "nothing postable" on its own leaves the user
+      // with no idea whether the video was unreadable, empty, or simply not
+      // funny - and those need completely different next steps.
+      if (reason) {
+        const why = document.createElement("p");
+        why.className = "yt-meta";
+        why.textContent = reason;
+        box.appendChild(why);
+      }
       appendReport(box, failingReports.length ? failingReports : dev.videos.map((v) => v.clipReport).filter(Boolean));
       if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
@@ -2707,10 +2727,17 @@
       const note = document.createElement("div");
       note.className = "clip-report";
       const head = document.createElement("strong");
+      // The heading has to describe the notes under it. Resume notes are about
+      // work carried over from a previous run; a budget pause that recovered is
+      // about this run recovering on its own, and calling that "from an earlier
+      // run" would be plainly wrong.
+      const resumed = notes.some((n) => /earlier run/i.test(n));
+      const unfinished = (reports || []).some((r) => r?.transcript && r.transcript.complete === false);
       // "RESUMED" reads like work still outstanding. When every report finished
       // its transcript, the honest heading is that it was finished, not resumed.
-      const unfinished = (reports || []).some((r) => r?.transcript && r.transcript.complete === false);
-      head.textContent = unfinished ? "RESUMED FROM AN EARLIER RUN" : "FINISHED FROM AN EARLIER RUN";
+      head.textContent = resumed
+        ? (unfinished ? "RESUMED FROM AN EARLIER RUN" : "FINISHED FROM AN EARLIER RUN")
+        : "NOTES";
       note.appendChild(head);
       const list = document.createElement("ul");
       for (const line of notes) {
