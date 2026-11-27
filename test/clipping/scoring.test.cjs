@@ -124,7 +124,7 @@ test("equal scores prefer the tighter clip, not the longer one", () => {
   });
   // Chosen so both land on the same weighted total, as measured on the fixture.
   const tight = build(14.5, 27.0, 68, 0.75);
-  const loose = build(14.5, 35.5, 60, 0.42);
+  const loose = build(14.5, 35.5, 64, 0.42);
   assert.equal(weightedScore(tight.components), weightedScore(loose.components),
     `test premise broken: ${weightedScore(tight.components)} vs ${weightedScore(loose.components)}`);
   for (const order of [[tight, loose], [loose, tight]]) {
