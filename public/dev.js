@@ -2820,7 +2820,8 @@
       const info = document.createElement("details");
       info.className = "yt-short-info";
       const sum = document.createElement("summary");
-      sum.textContent = `${base}.txt · written next to the video`;
+      const shownBase = base || entry.fileBase || "package";
+      sum.textContent = isFailed ? `${shownBase}.txt · package ready, video missing` : `${shownBase}.txt · written next to the video`;
       info.appendChild(sum);
       const pre = document.createElement("pre");
       pre.className = "yt-short-txt";
