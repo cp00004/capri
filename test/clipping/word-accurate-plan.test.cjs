@@ -165,14 +165,29 @@ test("nothing postable is followed by the reason", () => {
   // The panel must accept and show a reason.
   const at = dev.indexOf("function renderShortsResults");
   assert.ok(at > 0, "renderShortsResults should exist");
-  const fn = dev.slice(at, at + 1100);
+  const fn = dev.slice(at, at + 1600);
   assert.match(fn, /reason = ""/, "it takes a reason");
   assert.match(fn, /if \(reason\)/, "and renders it when given");
 
-  // And the no-clips path must pass one in before throwing.
-  const empty = dev.indexOf("if (!state.made.length)");
+  // And the no-clips path must pass one in before throwing. It now keys off
+  // "nothing exported and nothing failed to export", because a candidate whose
+  // MP4 failed is a result, not an empty run.
+  const empty = dev.indexOf('if (!state.made.some((m) => m.status === "exported" || m.status === "export-failed"))');
   assert.ok(empty > 0, "the no-clips path should exist");
-  const block = dev.slice(empty, empty + 1400);
+  const block = dev.slice(empty, empty + 1600);
   assert.match(block, /renderShortsResults\(\[\], false, reports, real\)/,
     "the reason is shown in the panel, not only thrown into a banner");
+});
+
+test("a failed export is not reported as an empty analysis", () => {
+  const dev = fs.readFileSync(path.resolve(__dirname, "../../public/dev.js"), "utf8");
+  // The clip is kept with its analysis when only the file failed, so it can be
+  // retried without paying for the transcript and the model calls again.
+  assert.match(dev, /status = "export-failed"/, "a failed export is its own state");
+  assert.match(dev, /RETRY EXPORT/, "the user can retry just the render");
+  assert.match(dev, /entry\.error = String\(err\?\.message \|\| err\)/, "the failure reason is kept");
+  // And "nothing postable" must not be shown for a run that found clips.
+  const explain = dev.slice(dev.indexOf("function explainEmpty"), dev.indexOf("function explainEmpty") + 2200);
+  assert.match(explain, /exportFailed/, "the empty explanation knows about export failures");
+  assert.match(explain, /RETRY EXPORT re-renders them/, "and says the analysis does not need repeating");
 });

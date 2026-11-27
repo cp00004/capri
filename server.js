@@ -660,6 +660,85 @@ function coolDown(candidate, seconds) {
   return wait;
 }
 
+/**
+ * How many requests one provider may have in flight at once.
+ *
+ * Three review workers plus a propose sweep used to fire at the same relay at
+ * the same instant, which on a free tier turns a working key into a 429 and then
+ * into a cooldown for everyone. The caps are per provider name, not per key: a
+ * provider's rate limit is usually account-wide, so spreading across its keys
+ * does not buy more concurrency.
+ */
+const PROVIDER_CONCURRENCY = {
+  groq: 2,
+  freetheai: 2,
+  mistral: 2,
+  gemini: 2,
+  openrouter: 1,
+};
+const providerInFlight = new Map();
+const providerWaiters = new Map();
+
+function providerLimit(name) {
+  const n = Number(PROVIDER_CONCURRENCY[name]);
+  return Number.isFinite(n) && n > 0 ? n : 2;
+}
+
+/**
+ * Wait until this provider has a free slot, then take it.
+ *
+ * Resolves to a release function, so every caller has exactly one place to give
+ * the slot back - including on a throw. A waiter is woken by the release rather
+ * than polling, so a long queue does not spin.
+ */
+function acquireProvider(name) {
+  const key = String(name || "unknown");
+  const limit = providerLimit(key);
+  const active = providerInFlight.get(key) || 0;
+  if (active < limit) {
+    providerInFlight.set(key, active + 1);
+    return Promise.resolve(() => releaseProvider(key));
+  }
+  return new Promise((resolve) => {
+    const queue = providerWaiters.get(key) || [];
+    queue.push(() => {
+      providerInFlight.set(key, (providerInFlight.get(key) || 0) + 1);
+      resolve(() => releaseProvider(key));
+    });
+    providerWaiters.set(key, queue);
+  });
+}
+
+function releaseProvider(key) {
+  const next = (providerWaiters.get(key) || []).shift();
+  if (next) {
+    next();
+    return;
+  }
+  providerInFlight.set(key, Math.max(0, (providerInFlight.get(key) || 1) - 1));
+}
+
+/** Is this provider cooling right now? Used to skip it instead of burning a call. */
+function isCooling(candidate) {
+  return (providerCooldown.get(candidateId(candidate)) || 0) > Date.now();
+}
+
+/** Milliseconds until this provider may be tried again. */
+function coolingFor(candidate) {
+  return Math.max(0, (providerCooldown.get(candidateId(candidate)) || 0) - Date.now());
+}
+
+/**
+ * Full-jitter exponential backoff.
+ *
+ * A fixed sleep makes every queued worker wake at the same moment and hit the
+ * relay together, which is how one cap became four. Jitter spreads them out.
+ */
+function backoffDelay(attempt, capMs = 45_000) {
+  const base = Math.min(capMs, 600 * 2 ** Math.max(0, attempt - 1));
+  return Math.round(base / 2 + Math.random() * (base / 2));
+}
+
 function cooldownFrom(err, candidate) {
   const header = Number(err?.retryAfter);
   if (Number.isFinite(header) && header > 0) return coolDown(candidate, header);
@@ -1029,12 +1108,25 @@ async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 
   for (;;) {
     sweeps += 1;
     let retryable = 0;
-    for (let i = 0; i < Math.min(candidates.length, 6); i += 1) {
-      const provider = candidates[i];
+    // Skip a relay that is still cooling instead of spending a call to find out.
+    // The sweep used to try all six every time, so a capped provider was asked
+    // again on the next tick and the cap was extended by its own retries.
+    const ready = candidates.filter((c) => !isCooling(c)).slice(0, 6);
+    // A sweep where every candidate is cooling has nothing to try; fall through
+    // to the wait below rather than counting a phantom retryable.
+    const pool = ready;
+    for (let i = 0; i < pool.length; i += 1) {
+      const provider = pool[i];
       let upstream;
+      let release;
       try {
+        // One slot per provider, so three review workers do not stack onto the
+        // same free relay and turn a working key into a 429.
+        release = await acquireProvider(provider.name);
         upstream = await chatCompletion({ provider, messages, tools, temperature });
       } catch (err) {
+        if (release) release();
+        release = null;
         lastErr = err;
         if (vision && !visionErr) visionErr = err;
         const status = Number(err.status);
