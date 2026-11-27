@@ -123,7 +123,12 @@
   function upgrade(doc, ident) {
     if (!doc || doc.version !== 1 || !ident?.ok) return null;
     const v = doc.video || {};
-    if (String(v.path || "").toLowerCase() !== String(ident.path || "").toLowerCase()) return null;
+    // Same fold as the on-disk search: v1 lower-cased the path but kept whatever
+    // separators the renderer happened to send, and the probe reports the other
+    // spelling for the same file. Folding both is what stops the one real
+    // transcript in the cache from being rejected over punctuation.
+    const fold = (p) => String(p || "").toLowerCase().replace(/\//g, "\\");
+    if (fold(v.path) !== fold(ident.path)) return null;
     if (num(v.size) !== num(ident.size)) return null;
     if (Math.abs(num(v.duration) - num(ident.duration)) > 1) return null;
     if (!doc.regions || typeof doc.regions !== "object") return null;
@@ -136,8 +141,11 @@
         duration: num(ident.duration),
         fingerprint: String(ident.fingerprint || ""),
       },
-      // Kept, because `partial` compares this against the regions actually stored.
+      // Carried over because `partial` compares these against the regions actually
+      // stored. Dropping them would turn a stopped run into one that looks finished
+      // and take CONTINUE away from the user.
       total: num(doc.total),
+      regionsTotal: num(doc.regionsTotal) || num(doc.total),
     };
   }
 

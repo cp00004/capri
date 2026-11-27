@@ -122,6 +122,28 @@ test("a v1 doc for a different file is still refused", () => {
   assert.strictEqual(SC.upgrade(SC.empty(ident), ident), null, "a v2 doc is left alone");
 });
 
+test("the v1 upgrade accepts the other path spelling and keeps the region total", () => {
+  // Both halves of this were hit by the one real v1 transcript on disk: v1 stored
+  // the Windows path, the probe reports a forward-slash path, and the doc counts
+  // with `regionsTotal` rather than `total`. A comparison that ignored either
+  // would reject the transcript or lose the fact that it stopped short.
+  const slashed = VIDEO.replace(/\\/g, "/");
+  const ident = SC.identity(slashed, INFO);
+  const old = {
+    version: 1,
+    video: { path: VIDEO, size: INFO.size, duration: INFO.duration },
+    regions: { "0-46.88": { start: 0, end: 46.88, payload: {} } },
+    regionsTotal: 236,
+  };
+  const up = SC.upgrade(old, ident);
+  assert.ok(up, "the same file spelled either way is still this file");
+  assert.strictEqual(up.regionsTotal, 236, "the region total survives the upgrade");
+  assert.strictEqual(SC.partial(up), true, "so a stopped run still offers CONTINUE");
+  // Case alone must not decide it either.
+  const upper = SC.identity(VIDEO.toUpperCase(), INFO);
+  assert.ok(SC.upgrade(old, upper), "a differently-cased path is the same file on Windows");
+});
+
 test("a cached region is found again on the next run", () => {
   const ident = SC.identity(VIDEO, INFO);
   const doc = SC.empty(ident);
