@@ -1493,6 +1493,28 @@
     }
     let doc = null;
     try { doc = await D.sttCacheLoad(ident.id); } catch { doc = null; }
+    // A doc written by the previous version lives under the old id. It is looked
+    // for only so it can be checked and upgraded: a transcript of a 3.4-hour stream
+    // costs real money and real time, and discarding one that provably belongs to
+    // this exact file (same path, byte size and duration) would throw that away.
+    // The fingerprint is added as part of the upgrade, so from then on it is
+    // identified by its bytes like any other.
+    if (!doc && typeof SC.legacyId === "function") {
+      const legacy = SC.legacyId(video, info);
+      let old = null;
+      if (legacy) { try { old = await D.sttCacheLoad(legacy); } catch { old = null; } }
+      const up = old ? SC.upgrade(old, ident) : null;
+      if (up) {
+        doc = up;
+        report.notes.push(`upgraded a transcript saved by the previous version (${SC.size(up)} region${SC.size(up) === 1 ? "" : "s"} kept) - it now follows this file's contents`);
+        try {
+          await D.sttCacheSave(ident.id, up);
+          // The old file is removed only after the new one is on disk, so an
+          // interrupted upgrade cannot lose the transcript entirely.
+          await D.sttCacheDrop(legacy);
+        } catch { /* the in-memory doc still resumes this run */ }
+      }
+    }
     if (doc && !SC.sameVideo(doc, ident)) {
       report.degraded.push("discarded a saved transcript whose fingerprint did not match this file");
       try { await D.sttCacheDrop(ident.id); } catch { /* the stale file is simply ignored */ }

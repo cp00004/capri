@@ -85,6 +85,43 @@ test("a file with no duration cannot be cached", () => {
   assert.strictEqual(SC.identity("", INFO).ok, false);
 });
 
+test("a transcript saved by the previous version is upgraded, not thrown away", () => {
+  // The reported cost: a 3.4-hour stream's 236-region transcript was paid for, and
+  // tightening the identity to a fingerprint discarded it. A doc that matches this
+  // exact path, byte size and duration is this file's transcript, so it is kept and
+  // stamped with the fingerprint rather than re-read from scratch.
+  const ident = SC.identity(VIDEO, INFO);
+  const old = {
+    version: 1,
+    video: { path: VIDEO, size: INFO.size, duration: INFO.duration },
+    regions: { "0-46.88": { start: 0, end: 46.88, provider: "groq", payload: { provider: "groq", words: [{ word: "kept", start: 0, end: 1 }] } } },
+    regionsTotal: 236,
+  };
+  const up = SC.upgrade(old, ident);
+  assert.ok(up, "a matching v1 doc is upgraded");
+  assert.strictEqual(up.version, SC.VERSION);
+  assert.strictEqual(up.video.fingerprint, FP, "it gains the fingerprint");
+  assert.strictEqual(Object.keys(up.regions).length, 1, "its regions are kept");
+  assert.strictEqual(up.regionsTotal, 236, "and so is what it knew about the total");
+  assert.strictEqual(SC.sameVideo(up, ident), true, "it is now this file's cache");
+});
+
+test("a v1 doc for a different file is still refused", () => {
+  const ident = SC.identity(VIDEO, INFO);
+  const old = {
+    version: 1,
+    video: { path: VIDEO, size: INFO.size, duration: INFO.duration },
+    regions: { "0-46.88": { start: 0, end: 46.88, payload: {} } },
+    regionsTotal: 2,
+  };
+  // Same name, different folder and bytes.
+  assert.strictEqual(SC.upgrade(old, SC.identity("D:\\other.mp4", INFO)), null, "another path is not this file");
+  assert.strictEqual(SC.upgrade(old, SC.identity(VIDEO, { ...INFO, size: INFO.size + 1 })), null, "a different size is not this file");
+  assert.strictEqual(SC.upgrade(old, SC.identity(VIDEO, { ...INFO, duration: 600 })), null, "a different cut is not this file");
+  // And an already-current doc is not "upgraded" into something else.
+  assert.strictEqual(SC.upgrade(SC.empty(ident), ident), null, "a v2 doc is left alone");
+});
+
 test("a cached region is found again on the next run", () => {
   const ident = SC.identity(VIDEO, INFO);
   const doc = SC.empty(ident);

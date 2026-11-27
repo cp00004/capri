@@ -107,6 +107,40 @@
     return true;
   }
 
+  /**
+   * Upgrade a v1 doc to the v2 shape, or return null.
+   *
+   * v1 keyed a transcript on path + size. That is too weak to *find* a cache with
+   * (two clips of the same name and length collided), but it is enough to
+   * *recognise* a doc this run already owns: the path, byte size and duration all
+   * have to match the file in front of us, and the probe now supplies a fingerprint
+   * for the doc going forward. Anything less exact is rejected.
+   *
+   * This exists because the alternative is throwing away a paid-for transcript of a
+   * 3.4-hour stream. The identity was only tightened against *foreign* files; a doc
+   * that provably belongs to this exact file is not foreign.
+   */
+  function upgrade(doc, ident) {
+    if (!doc || doc.version !== 1 || !ident?.ok) return null;
+    const v = doc.video || {};
+    if (String(v.path || "").toLowerCase() !== String(ident.path || "").toLowerCase()) return null;
+    if (num(v.size) !== num(ident.size)) return null;
+    if (Math.abs(num(v.duration) - num(ident.duration)) > 1) return null;
+    if (!doc.regions || typeof doc.regions !== "object") return null;
+    return {
+      ...doc,
+      version: VERSION,
+      video: {
+        path: String(ident.path || ""),
+        size: num(ident.size),
+        duration: num(ident.duration),
+        fingerprint: String(ident.fingerprint || ""),
+      },
+      // Kept, because `partial` compares this against the regions actually stored.
+      total: num(doc.total),
+    };
+  }
+
   const key = (start, end) => `${round2(start)}-${round2(end)}`;
 
   /**
@@ -186,7 +220,20 @@
     return size(doc) < num(doc.regionsTotal);
   }
 
-  const api = { VERSION, TOLERANCE, hash, identity, empty, sameVideo, key, find, add, size, markTotal, partial };
+  /**
+   * The cache id v1 would have used for this file.
+   *
+   * v1 keyed on `path|size`. Only used to find a doc written by the previous
+   * version so it can be checked and upgraded; nothing is ever *stored* under it.
+   */
+  function legacyId(path, info) {
+    const abs = String(path || "");
+    const size = num(info?.size);
+    if (!abs || !(num(info?.duration) > 0)) return "";
+    return hash(`${abs.toLowerCase()}|${size}`);
+  }
+
+  const api = { VERSION, TOLERANCE, hash, identity, legacyId, empty, sameVideo, upgrade, key, find, add, size, markTotal, partial };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (root) root.CapriSttCache = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
