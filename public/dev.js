@@ -1371,13 +1371,16 @@
       dev.els.ytFrame.textContent = `${info.width}x${info.height}${info.fps ? ` · ${Math.round(info.fps)}fps` : ""}`;
       dev.els.ytPlatform.textContent = `${PLATFORMS[dev.platform].name} - ${PLATFORMS[dev.platform].note}`;
       dev.els.ytSource.textContent = video.path;
-      dev.els.ytOutput.textContent = dev.root ? `${dev.root}\\shorts` : "open a workspace folder first";
+      dev.els.ytOutput.textContent = dev.outDir
+        ? dev.outDir
+        : "Shorts folder (chosen when you run)";
     } else {
       dev.els.ytPreview.removeAttribute("src");
       dev.els.ytPreview.load?.();
     }
     const ready = dev.videos.some((v) => v.info?.hasAudio);
-    dev.els.shortsRun.disabled = !(ready && dev.root) || dev.shortsBusy;
+    // No `dev.root` here: a workspace is not needed to cut a short.
+    dev.els.shortsRun.disabled = !ready || dev.shortsBusy;
     // CONTINUE only exists when a run actually stopped short. It resumes the
     // same video from the transcript saved on disk, so the seconds already read
     // are not paid for twice.
@@ -2357,17 +2360,59 @@
     return { made: state.made.length - before };
   }
 
+  /**
+   * The folder a run exports into, verified before any work starts.
+   *
+   * Writable-checking up front matters: a run that discovers at cut time that
+   * its folder is read-only has already spent the transcript and the model calls.
+   * The check is done by writing a small probe file, because a directory can exist
+   * and still refuse writes.
+   */
+  async function ensureShortsOutput() {
+    let dir = "";
+    try {
+      const r = await D.shortsRoot();
+      dir = String(r?.dir || "");
+    } catch (err) {
+      throw new Error(`I could not work out where to save the shorts - ${err?.message || err}`);
+    }
+    if (!dir) throw new Error("I could not work out where to save the shorts.");
+    // The main process creates the folder and writes a probe file into it, which
+    // is the only reliable test: a directory can exist and still refuse writes.
+    // Doing it here means a bad folder fails now, not after the transcript is paid
+    // for. `ok:false` comes back with the reason the write failed.
+    let check = null;
+    try {
+      check = await D.shortsRoot();
+    } catch (err) {
+      check = { ok: false, error: String(err?.message || err) };
+    }
+    if (check && check.ok === false) {
+      throw new Error(`I cannot write to the Shorts folder (${dir}) - ${check.error || "it refused a test file"}`);
+    }
+    // Remember it for the UI so the panel shows the real destination instead of
+    // a workspace path.
+    dev.outDir = dir;
+    return dir;
+  }
+
   async function runShorts(resume = false) {
     if (dev.shortsBusy) return;
     const queue = dev.videos.filter((v) => v.info?.hasAudio && v.state !== "working"
       && (!resume || v.resumable));
     if (!queue.length) return;
-    if (!dev.root) {
-      shutdown("Open a workspace folder first - the shorts and their scripts are written into it.");
-      return;
-    }
+    // Shorts do not need a coding workspace. They export to the Shorts folder,
+    // which is created on demand - needing a folder open was the reason a run
+    // died with "Open a workspace folder first" before it cut anything.
     if (!CM()) {
       shutdown("FAILED\nclip-math.js did not load - reload the app and try again.");
+      return;
+    }
+    try {
+      const out = await ensureShortsOutput();
+      dev.outDir = out;
+    } catch (err) {
+      shutdown(`FAILED\n${err.message || err}`);
       return;
     }
     dev.shortsBusy = true;
