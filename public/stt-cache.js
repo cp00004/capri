@@ -18,8 +18,10 @@
   "use strict";
 
   /* Bumped whenever the stored shape changes. A doc from another version is
-     ignored instead of being guessed at. */
-  const VERSION = 1;
+     ignored instead of being guessed at.
+     2: the identity became a content fingerprint, not path + size. A v1 doc may
+     belong to a different file of the same name and length, so it is not reused. */
+  const VERSION = 2;
 
   /* Regions come from the same silence scan of the same file, so they are
      identical run to run. The tolerance only absorbs float drift; it is far too
@@ -45,32 +47,42 @@
   /**
    * What identifies "the same video" for caching.
    *
-   * Path plus byte size. Size catches a re-encode or a different file entirely.
-   * Duration is stored too but deliberately left out of the id: ffprobe can
-   * report a few tenths of a second differently between runs, and putting that
-   * in the file name would make the cache silently miss on exactly the re-runs it
-   * exists for. Duration is checked when loading instead, where a tolerance can
-   * absorb that drift and still reject a shorter cut.
+   * A content fingerprint when the probe could make one: size plus the head and
+   * tail of the file, hashed. That makes two different clips of the same name and
+   * length distinguishable, which path + size could not do - and a wrong cache hit
+   * puts a transcript's timestamps on footage that never said those words.
+   *
+   * The path and size are still stored on the doc so the mismatch can be explained,
+   * and so an old doc can be rejected with a reason rather than silently.
    */
   function identity(path, info) {
     const abs = String(path || "");
     const size = num(info?.size);
     const duration = num(info?.duration);
+    const fingerprint = String(info?.fingerprint || "");
     const ok = Boolean(abs) && duration > 0;
+    // The fingerprint is what the id is built on. Without one there is no safe
+    // way to tell two same-sized files apart, so caching is skipped rather than
+    // guessed at - a slow read is better than a wrong transcript.
     return {
-      ok,
+      ok: ok && Boolean(fingerprint),
       path: abs,
       size,
       duration: Math.round(duration * 1000) / 1000,
-      // Lower-case the path so a differently-cased Windows path still matches.
-      id: ok ? hash(`${abs.toLowerCase()}|${size}`) : "",
+      fingerprint,
+      id: ok && fingerprint ? hash(`${fingerprint}|${size}`) : "",
     };
   }
 
   function empty(ident) {
     return {
       version: VERSION,
-      video: { path: String(ident?.path || ""), size: num(ident?.size), duration: num(ident?.duration) },
+      video: {
+        path: String(ident?.path || ""),
+        size: num(ident?.size),
+        duration: num(ident?.duration),
+        fingerprint: String(ident?.fingerprint || ""),
+      },
       regions: {},
       updatedAt: "",
     };
@@ -79,15 +91,17 @@
   /**
    * True only when this doc was written for this exact file.
    *
-   * A duration that moved by more than a second means the file changed, and every
-   * stored timestamp is then suspect - so the whole cache is dropped rather than
-   * partially trusted.
+   * The fingerprint is checked first because it is the only thing that actually
+   * says "same bytes". Path and size are checked too, but as metadata: a moved or
+   * copied file with an identical fingerprint is the same video and its cache is
+   * still good. A duration that moved by more than a second is rejected as well,
+   * because every stored timestamp would then be on the wrong clock.
    */
   function sameVideo(doc, ident) {
     if (!doc || doc.version !== VERSION || !ident?.ok) return false;
     if (!doc.regions || typeof doc.regions !== "object") return false;
     const v = doc.video || {};
-    if (String(v.path || "").toLowerCase() !== String(ident.path || "").toLowerCase()) return false;
+    if (!v.fingerprint || String(v.fingerprint) !== String(ident.fingerprint)) return false;
     if (num(v.size) !== num(ident.size)) return false;
     if (Math.abs(num(v.duration) - num(ident.duration)) > 1) return false;
     return true;
