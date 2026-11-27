@@ -26,6 +26,10 @@
     info: null,
     videos: [],
     shortsBusy: false,
+    // The folder Shorts Studio exports into, as reported by the main process.
+    outDir: "",
+    // Set by the "fresh transcription" control; consumed by the next read.
+    freshTranscript: false,
     // Only ever set by the real-app check; see `forTest` on window.CapriDev.
     pickOverride: null,
     platform: "youtube",
@@ -103,7 +107,28 @@
       ytPlatform: $("ytFactPlatform"),
       ytSource: $("ytFactSource"),
       ytOutput: $("ytFactOutput"),
+      shortsFolder: $("shortsFolder"),
+      shortsFresh: $("shortsFresh"),
     };
+    // Where the shorts go is a per-run choice, not a workspace detail, so it is
+    // switched from here. The native picker is replaced in tests via the same
+    // seam as the video picker.
+    dev.els.shortsFolder?.addEventListener("click", async () => {
+      try {
+        const r = await D.pickShortsRoot();
+        if (!r?.dir) return;
+        dev.outDir = r.dir;
+        paintStudio();
+        sysLine(`shorts will be saved in ${r.dir}`);
+      } catch (err) {
+        sysLine(`could not change the folder: ${err?.message || err}`);
+      }
+    });
+    dev.els.shortsFresh?.addEventListener("change", () => {
+      // Blocking otherwise: the fresh read is what the checkbox is for, and a
+      // transcript that is complete but wrong is exactly when a user needs it.
+      dev.freshTranscript = Boolean(dev.els.shortsFresh.checked);
+    });
   }
 
   function sysLine(text) {
@@ -1371,13 +1396,16 @@
       dev.els.ytFrame.textContent = `${info.width}x${info.height}${info.fps ? ` · ${Math.round(info.fps)}fps` : ""}`;
       dev.els.ytPlatform.textContent = `${PLATFORMS[dev.platform].name} - ${PLATFORMS[dev.platform].note}`;
       dev.els.ytSource.textContent = video.path;
-      dev.els.ytOutput.textContent = dev.root ? `${dev.root}\\shorts` : "open a workspace folder first";
+      dev.els.ytOutput.textContent = dev.outDir
+        ? dev.outDir
+        : "Shorts folder (chosen when you run)";
     } else {
       dev.els.ytPreview.removeAttribute("src");
       dev.els.ytPreview.load?.();
     }
     const ready = dev.videos.some((v) => v.info?.hasAudio);
-    dev.els.shortsRun.disabled = !(ready && dev.root) || dev.shortsBusy;
+    // No `dev.root` here: a workspace is not needed to cut a short.
+    dev.els.shortsRun.disabled = !ready || dev.shortsBusy;
     // CONTINUE only exists when a run actually stopped short. It resumes the
     // same video from the transcript saved on disk, so the seconds already read
     // are not paid for twice.
@@ -1418,6 +1446,9 @@
       // Set at the point of the early return so the empty run can name the real
       // cause instead of always blaming the bar.
       empty: "",
+      // Analysis and export are tracked separately: a clip can be found and
+      // approved and still have no MP4, and that is not an empty analysis.
+      export: { exported: 0, failed: 0 },
     };
   }
 
@@ -1439,24 +1470,40 @@
    * did. A cache belonging to a different cut of a same-named file is dropped
    * rather than reused: its timestamps would land on the wrong seconds.
    */
-  async function openTranscriptCache(video, info, report) {
+  /**
+   * Open the saved transcript for this file, or start a fresh one.
+   *
+   * `force` skips the saved work on purpose. A transcript can be complete and
+   * still wrong - the provider misheard, or the user simply wants it redone - and
+   * without this there was no way to ask for that.
+   */
+  async function openTranscriptCache(video, info, report, force) {
     const SC = window.CapriSttCache;
     if (!SC || typeof D?.sttCacheLoad !== "function") return null;
     const ident = SC.identity(video, info);
-    if (!ident.ok) return null;
+    if (!ident.ok) {
+      // Say why instead of silently reading it again every run.
+      report.notes.push("this file has no content fingerprint, so its transcript cannot be resumed next time");
+      return null;
+    }
+    if (force) {
+      try { await D.sttCacheDrop(ident.id); } catch { /* the fresh read overwrites it anyway */ }
+      report.notes.push("you asked for a fresh transcription, so the saved one was not reused");
+      return { id: ident.id, ident, doc: SC.empty(ident), store: D };
+    }
     let doc = null;
     try { doc = await D.sttCacheLoad(ident.id); } catch { doc = null; }
     if (doc && !SC.sameVideo(doc, ident)) {
-      report.degraded.push("discarded a saved transcript that belonged to a different version of this file");
+      report.degraded.push("discarded a saved transcript whose fingerprint did not match this file");
       try { await D.sttCacheDrop(ident.id); } catch { /* the stale file is simply ignored */ }
       doc = null;
     }
     return { id: ident.id, ident, doc: doc || SC.empty(ident), store: D };
   }
 
-  async function readVideo(video, info, report) {
+  async function readVideo(video, info, report, force = false) {
     // Loaded before the transcript starts so a resumed run knows what it can skip.
-    const cache = await openTranscriptCache(video, info, report).catch(() => null);
+    const cache = await openTranscriptCache(video, info, report, force).catch(() => null);
     const [audio, chunks, scenes] = await Promise.all([
       D.audioAnalyse({ video, sampleRate: 16000 }).catch((err) => ({ ok: false, reason: String(err?.message || err), events: [] })),
       D.speechChunks({ video, targetSeconds: 45, maxSeconds: 90, minSeconds: 8 }).catch((err) => ({ ok: false, reason: String(err?.message || err), chunks: [] })),
@@ -1903,6 +1950,73 @@
     return { cues: CM().settleCues(built.cues), source: built.source };
   }
 
+  /**
+   * The upload package for one clip: title, hook, caption, hashtags, the score
+   * breakdown and where the file actually is.
+   *
+   * Built from the item rather than passed around, because it has to be rebuilt
+   * whenever an export is retried - the file path is not known until the MP4
+   * exists, and a package pointing at a file that is not there is worse than none.
+   */
+  function metaFor(item) {
+    const { pick, plan, start, end } = item;
+    const p = plan || {};
+    const review = pick.review || p.review || {};
+    const components = item.components || p.components || {};
+    const evidence = item.evidence || [];
+    const file = item.cut?.abs || item.cut?.path || "";
+    return [
+      `VIDEO\n${item.videoName}`,
+      `PLATFORM\n${PLATFORMS[item.platform]?.name || item.platform}`,
+      `TITLE\n${review.title || ""}`,
+      `HOOK\n${review.hook_line || ""}`,
+      `CAPTION\n${review.caption || ""}`,
+      `HASHTAGS\n${(review.hashtags || []).map((h) => `#${h}`).join(" ")}`,
+      `DESCRIPTION\n${review.description || ""}`,
+      `WHY IT KEEPS VIEWERS\n${review.why || p.moment?.why || ""}`,
+      `ENTERTAINMENT SCORE\n${pick.score ?? "?"}/100`,
+      `SCORE BREAKDOWN\nhumor ${components.humor ?? "?"} · unexpected ${components.unexpected ?? "?"} · reaction ${components.reaction ?? "?"} · entertainment ${components.entertainment ?? "?"} · context ${components.context ?? "?"} · replay ${components.replay ?? "?"} · hook ${components.hook ?? "?"}`,
+      `EVIDENCE\n${evidence.length ? evidence.map((e) => `${e.type} @ ${e.start}-${e.end}s (${Math.round(e.confidence * 100)}%)`).join(", ") : "none inside the clip"}`,
+      `VALIDATION\npass two ${p.passTwo === "accepted" ? "accepted" : "not reviewed"} · captions ${item.captionSource === "word" ? "word-accurate" : item.captionSource === "segment" ? "approximate" : "none"}`,
+      `SOURCE\n${item.video}`,
+      `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
+      // The real location, so the info file tells the user where the MP4 is
+      // instead of a workspace-relative `shorts/...` that does not exist.
+      `FILE\n${file}`,
+    ].join("\n\n");
+  }
+
+  /**
+   * Render one clip's captions and MP4, then its package file.
+   *
+   * Reused by the retry path: an export that failed before is retried by calling
+   * this again, which re-encodes the file but never re-plans, re-reviews or
+   * re-transcribes. `item` is updated in place so the caller keeps one object.
+   */
+  async function exportClip(item) {
+    const { fileBase, start, end } = item;
+    const length = end - start;
+    const info = item.info;
+    // `info` is only needed for the frame size; a retry after a restart may not
+    // have it, so fall back to the source's own dimensions chosen by cutClip.
+    const built = cuesForClip(item.read || {}, start, end);
+    await D.writeShorts(`shorts/${fileBase}.srt`, buildSrt(built.cues));
+    await D.writeShorts(`shorts/${fileBase}.ass`, buildAss(built.cues));
+    const cut = await D.cut({
+      video: item.video,
+      start,
+      duration: length,
+      out: `shorts/${fileBase}.mp4`,
+      captions: `shorts/${fileBase}.ass`,
+      width: info?.width,
+      height: info?.height,
+    });
+    item.cut = cut;
+    item.cues = built.cues.length;
+    item.captionSource = built.source;
+    return { cut, fileBase, cues: built.cues.length, captionSource: built.source };
+  }
+
   function buildSrt(cues) {
     return cues.map((c, i) => `${i + 1}\n${srtTime(c.start)} --> ${srtTime(c.end)}\n${c.text}`).join("\n\n") + "\n";
   }
@@ -2027,6 +2141,54 @@
   }
 
   /**
+   * A bounded queue for visual work.
+   *
+   * A review job grabs frames and uploads them, and each upload is the expensive
+   * part of a relay's minute. Three at once is what the run already did; more
+   * would only queue at the provider anyway. The point of this helper is that the
+   * cap is stated once and the work is always released, including on a throw.
+   */
+  function visualQueue(size = 2) {
+    let active = 0;
+    const waiting = [];
+    const run = (job) => new Promise((resolve, reject) => {
+      const start = () => {
+        active += 1;
+        Promise.resolve()
+          .then(job)
+          .then((v) => { active -= 1; next(); resolve(v); })
+          .catch((e) => { active -= 1; next(); reject(e); });
+      };
+      if (active < size) start();
+      else waiting.push(start);
+    });
+    const next = () => {
+      const start = waiting.shift();
+      if (start) start();
+    };
+    return run;
+  }
+
+  /** Retry a visual job once, with a short jittered wait, before giving up on it. */
+  async function withVisualRetry(job, attempts = 2) {
+    let last = null;
+    for (let i = 1; i <= attempts; i += 1) {
+      try {
+        return await job();
+      } catch (err) {
+        last = err;
+        const status = Number(err?.status);
+        // Only a transient refusal is worth another call. A rejected window is a
+        // verdict, not a fault, and retrying it just spends quota.
+        const transient = status === 429 || status >= 500 || !Number.isFinite(status);
+        if (!transient || i === attempts) break;
+        await new Promise((r) => setTimeout(r, 800 * i + Math.round(Math.random() * 600)));
+      }
+    }
+    throw last;
+  }
+
+  /**
    * The read for one platform: plan, propose, review, rank, then cut.
    *
    * Nothing here decides what is funny. The endpoints do that, and the ranker
@@ -2131,6 +2293,10 @@
     // 4. Pass two: review every proposal on its own evidence.
     const reviewed = [];
     let ri = 0;
+    // Two visual jobs at a time, not three workers on three frames at once: each
+    // upload spends a relay's per-minute budget, so a wider fan-out only converts
+    // a working review into a 429 and then a transcript-only fallback.
+    const visualSlot = visualQueue(2);
     const reviewWorker = async () => {
       while (ri < moments.length) {
         const moment = moments[ri++];
@@ -2139,38 +2305,50 @@
         const candidate = candidates.find((c) => moment.end > c.start && moment.start < c.end) || {
           kind: "dialogue", strength: 0.3, events: [],
         };
-        const times = reviewTimes(Number(moment.start), Number(moment.end));
-        const shot2 = await framesAtTimes(video.path, times, 720).catch(() => ({ frames: [], failed: times.length }));
-        report.vision.frames += shot2.frames.length;
-        if (!shot2.frames.length) report.vision.failed += 1;
         try {
-          const data = await apiJson("/api/dev/clip/review", {
-            duration: info.duration,
-            platform,
-            moment,
-            transcript: { words: read.words, segments: read.segments, granularity: read.granularity },
-            events: read.events,
-            ocr: ocr?.samples || [],
-            frames: shot2.frames,
-            minClip: CLIP.min,
-            maxClip: CLIP.max,
-          }, 180_000);
+          // Frames are taken inside the slot too: decoding four 720px stills at
+          // once is the same oversubscription on the machine as on the relay.
+          const data = await visualSlot(() => withVisualRetry(async () => {
+            const times = reviewTimes(Number(moment.start), Number(moment.end));
+            const shot2 = await framesAtTimes(video.path, times, 720).catch(() => ({ frames: [], failed: times.length }));
+            report.vision.frames += shot2.frames.length;
+            if (!shot2.frames.length) report.vision.failed += 1;
+            return apiJson("/api/dev/clip/review", {
+              duration: info.duration,
+              platform,
+              moment,
+              transcript: { words: read.words, segments: read.segments, granularity: read.granularity },
+              events: read.events,
+              ocr: ocr?.samples || [],
+              frames: shot2.frames,
+              minClip: CLIP.min,
+              maxClip: CLIP.max,
+            }, 180_000);
+          }));
           const review = data?.review;
-          if (!review) return;
+          if (!review) continue;
+          // Provenance is a fact about the review, not a guess: it says whether
+          // the second pass saw a picture or only the transcript. Kept on the
+          // candidate so the results panel can never imply full validation for a
+          // text-only read.
+          const seen = data?.provenance || { transcript: true, visual: false, note: data?.vision || "no picture supplied" };
           if (data?.vision) {
             report.degraded.push(`review at ${clock(moment.start)} was partly blind: ${data.vision}`);
           }
+          if (!seen.visual) report.vision.partial = Math.max(Number(report.vision.partial) || 0, 1);
           report.passes.reviewed += 1;
           if (review.decision === "reject") {
             report.passes.rejected += 1;
             reviewed.push({
               id: `${platform}:${moment.start}-${moment.end}`,
               rejected: true,
-              moment, candidate, review,
+              moment, candidate, review, provenance: seen,
               start: Number(moment.start), end: Number(moment.end),
               reasons: [review.reject_reason || "rejected on review"],
             });
-            return;
+            // Not `return`: that ended this worker's whole loop, so one rejection
+            // silently stopped every later moment in the list from being reviewed.
+            continue;
           }
           report.passes.accepted += 1;
           reviewed.push({
@@ -2180,6 +2358,7 @@
             bareReaction: Boolean(candidate.bareReaction),
             hasDialogue: speechInside(read, Number(review.start), Number(review.end)),
             passTwo: "accepted",
+            provenance: seen,
           });
         } catch (err) {
           report.passes.reviewed += 1;
@@ -2221,6 +2400,13 @@
 
     const byId = new Map(reviewed.map((r) => [r.id, r]));
     const picks = (ranked?.picks || []).map((p) => ({ ...byId.get(p.id), ...p })).filter((p) => p.moment);
+    // The ranker compares content, not provenance. Carrying the review's
+    // provenance back onto each pick keeps the "was this actually watched?"
+    // answer attached to the clip that gets cut.
+    for (const p of picks) {
+      const src = byId.get(p.id);
+      if (src) p.provenance = p.provenance || src.provenance;
+    }
     if (!picks.length) {
       report.empty = "rank";
       if (!ctx.multi) throw new Error("Nothing cleared the bar for posting.");
@@ -2289,72 +2475,112 @@
       const end = pick.end;
       const length = end - start;
       shortsProgress(`VIDEO ${tag}${label} · CUTTING ${i + 1}/${planned.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s · ${pick.score}/100`);
+      // One row per planned clip, added before the encode so a failed export is
+      // still a known candidate rather than a lost one. `status` is the only
+      // thing that differs between a clip and a clip that failed to render.
+      state.seq += 1;
+      const review = pick.review || {};
+      const item = {
+        // `pick` is the post-ready shape the results panel renders; `plan` keeps
+        // the planner's own fields (moment, components, passTwo) for the package
+        // file and the score breakdown.
+        pick: { ...review, start, end, score: pick.score },
+        plan: pick,
+        start, end,
+        fileBase: `${slug(review.title || pick.moment?.kind || "short")}-${stamp}-${state.seq}`,
+        base: "",
+        video: video.path,
+        videoName: entry.name,
+        info,
+        read,
+        platform,
+        pfx,
+        report,
+        // Derived once so the results panel does not have to know where they
+        // came from, and so a retried export keeps the same provenance.
+        evidence: CM().eventsWithin(read.events || [], start, end),
+        components: pick.components || {},
+        // What the pipeline actually saw for this clip. `visual:false` means a
+        // transcript-only judgement, which the panel must say out loud rather
+        // than presenting as a full visual validation.
+        provenance: pick.provenance || pick.moment?.provenance || { transcript: true, visual: false, note: "judged from the transcript only" },
+        captionSource: "",
+        status: "pending",
+        error: "",
+        attempts: 0,
+        suggested: { start: pick.start, end: pick.end, score: pick.score },
+      };
+      state.made.push(item);
+      const key = `${start.toFixed(2)}|${end.toFixed(2)}`;
       try {
-        const key = `${start.toFixed(2)}|${end.toFixed(2)}`;
-        let hold = cutCache.get(key);
-        let captionSource = "none";
-        if (!hold) {
-          state.seq += 1;
-          const fileBase = `${slug(pick.review?.title || pick.moment?.kind || "short")}-${stamp}-${state.seq}`;
-          const built = cuesForClip(read, start, end);
-          captionSource = built.source;
-          await D.write(`shorts/${fileBase}.srt`, buildSrt(built.cues));
-          await D.write(`shorts/${fileBase}.ass`, buildAss(built.cues));
-          const cut = await D.cut({
-            video: video.path,
-            start,
-            duration: length,
-            out: `shorts/${fileBase}.mp4`,
-            captions: `shorts/${fileBase}.ass`,
-            width: info.width,
-            height: info.height,
-          });
-          hold = { cut, fileBase, cues: built.cues.length, captionSource };
-          cutCache.set(key, hold);
+        const cacheHit = cutCache.get(key);
+        if (cacheHit) {
+          // The same footage already encoded for the other platform: reuse the
+          // file, only the info file differs.
+          Object.assign(item, cacheHit);
+        } else {
+          const done = await exportClip(item);
+          cutCache.set(key, { cut: done.cut, fileBase: done.fileBase, cues: done.cues, captionSource: done.captionSource });
         }
-        captionSource = hold.captionSource;
-
-        const evidence = CM().eventsWithin(read.events, start, end);
-        const components = pick.components || {};
-        const review = pick.review || {};
-        const base = `${hold.fileBase}${pfx}`;
-        const meta = [
-          `VIDEO\n${entry.name}`,
-          `PLATFORM\n${feed}`,
-          `TITLE\n${review.title || ""}`,
-          `HOOK\n${review.hook_line || ""}`,
-          `CAPTION\n${review.caption || ""}`,
-          `HASHTAGS\n${(review.hashtags || []).map((h) => `#${h}`).join(" ")}`,
-          `DESCRIPTION\n${review.description || ""}`,
-          `WHY IT KEEPS VIEWERS\n${review.why || pick.moment?.why || ""}`,
-          `ENTERTAINMENT SCORE\n${pick.score ?? "?"}/100`,
-          `SCORE BREAKDOWN\nhumor ${components.humor ?? "?"} · unexpected ${components.unexpected ?? "?"} · reaction ${components.reaction ?? "?"} · entertainment ${components.entertainment ?? "?"} · context ${components.context ?? "?"} · replay ${components.replay ?? "?"} · hook ${components.hook ?? "?"}`,
-          `EVIDENCE\n${evidence.length ? evidence.map((e) => `${e.type} @ ${e.start}-${e.end}s (${Math.round(e.confidence * 100)}%)`).join(", ") : "none inside the clip"}`,
-          `VALIDATION\npass two ${pick.passTwo === "accepted" ? "accepted" : "not reviewed"} · captions ${captionSource === "word" ? "word-accurate" : captionSource === "segment" ? "approximate" : "none"}`,
-          `SOURCE\n${video.path}`,
-          `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
-          `FILE\nshorts/${hold.fileBase}.mp4`,
-        ].join("\n\n");
-        await D.write(`shorts/${base}.txt`, meta);
-        state.made.push({
-          pick: { ...review, start, end, score: pick.score },
-          cut: hold.cut,
-          base,
-          meta,
-          videoName: entry.name,
-          platform,
-          report,
-          evidence,
-          components,
-          captionSource,
-          suggested: { start: pick.start, end: pick.end, score: pick.score },
-        });
+        item.base = `${item.fileBase}${pfx}`;
+        item.meta = metaFor(item);
+        await D.writeShorts(`shorts/${item.base}.txt`, item.meta);
+        item.status = "exported";
+        item.error = "";
       } catch (err) {
-        state.failures.push(`${entry.name}${ctx.multi ? ` ${feed}` : ""} ${clock(start)}-${clock(end)}: ${err.message || err}`);
+        // A clip is not thrown away because its MP4 failed. The analysis is done
+        // and paid for; the file is the only missing part, so the candidate stays
+        // listed with its failure and can be rendered again on its own.
+        item.status = "export-failed";
+        item.error = String(err?.message || err);
+        item.attempts += 1;
+        state.failures.push(`${entry.name}${ctx.multi ? ` ${feed}` : ""} ${clock(start)}-${clock(end)}: export failed - ${item.error}`);
       }
     }
-    entry.state = state.made.length > before ? "done" : "nothing postable";
-    return { made: state.made.length - before };
+    const exported = state.made.slice(before).filter((m) => m.status === "exported").length;
+    const failedExports = state.made.slice(before).filter((m) => m.status === "export-failed").length;
+    // Kept on the report so the run summary can tell "analysis found nothing"
+    // apart from "analysis found clips and the encoder failed" - two different
+    // problems with two different fixes.
+    report.export = { ...(report.export || {}), exported: (report.export?.exported || 0) + exported, failed: (report.export?.failed || 0) + failedExports };
+    entry.state = exported ? "done" : failedExports ? "export failed" : "nothing postable";
+    return { made: exported, failedExports };
+  }
+
+  /**
+   * The folder a run exports into, verified before any work starts.
+   *
+   * Writable-checking up front matters: a run that discovers at cut time that
+   * its folder is read-only has already spent the transcript and the model calls.
+   * The check is done by writing a small probe file, because a directory can exist
+   * and still refuse writes.
+   */
+  async function ensureShortsOutput() {
+    let dir = "";
+    try {
+      const r = await D.shortsRoot();
+      dir = String(r?.dir || "");
+    } catch (err) {
+      throw new Error(`I could not work out where to save the shorts - ${err?.message || err}`);
+    }
+    if (!dir) throw new Error("I could not work out where to save the shorts.");
+    // The main process creates the folder and writes a probe file into it, which
+    // is the only reliable test: a directory can exist and still refuse writes.
+    // Doing it here means a bad folder fails now, not after the transcript is paid
+    // for. `ok:false` comes back with the reason the write failed.
+    let check = null;
+    try {
+      check = await D.shortsRoot();
+    } catch (err) {
+      check = { ok: false, error: String(err?.message || err) };
+    }
+    if (check && check.ok === false) {
+      throw new Error(`I cannot write to the Shorts folder (${dir}) - ${check.error || "it refused a test file"}`);
+    }
+    // Remember it for the UI so the panel shows the real destination instead of
+    // a workspace path.
+    dev.outDir = dir;
+    return dir;
   }
 
   async function runShorts(resume = false) {
@@ -2362,12 +2588,18 @@
     const queue = dev.videos.filter((v) => v.info?.hasAudio && v.state !== "working"
       && (!resume || v.resumable));
     if (!queue.length) return;
-    if (!dev.root) {
-      shutdown("Open a workspace folder first - the shorts and their scripts are written into it.");
-      return;
-    }
+    // Shorts do not need a coding workspace. They export to the Shorts folder,
+    // which is created on demand - needing a folder open was the reason a run
+    // died with "Open a workspace folder first" before it cut anything.
     if (!CM()) {
       shutdown("FAILED\nclip-math.js did not load - reload the app and try again.");
+      return;
+    }
+    try {
+      const out = await ensureShortsOutput();
+      dev.outDir = out;
+    } catch (err) {
+      shutdown(`FAILED\n${err.message || err}`);
       return;
     }
     dev.shortsBusy = true;
@@ -2396,8 +2628,18 @@
           // when regions are still missing, so the reader is called again and it
           // resumes from the saved regions instead.
           let read = entry.read;
+          let fresh = false;
+          if (dev.freshTranscript) {
+            // Asked for a fresh transcript: ignore both the saved doc and the
+            // in-session read, read the whole file again, and clear the request so
+            // a following run reuses what this one produced.
+            entry.read = null;
+            read = null;
+            fresh = true;
+            dev.freshTranscript = false;
+          }
           if (!read || read.duration !== info.duration || read.incomplete) {
-            read = await readVideo(video.path, info, report);
+            read = await readVideo(video.path, info, report, fresh);
             entry.read = { ...read, duration: info.duration };
           } else {
             // The cached read is still valid; copy its shape into the report so
@@ -2452,11 +2694,19 @@
             }
           }
           const allNothing = results.every((r) => r.nothing || r.failed);
-          if (allNothing && !state.made.some((m) => m.report === report)) {
+          const mine = state.made.filter((m) => m.report === report);
+          const okCount = mine.filter((m) => m.status === "exported").length;
+          const failedCount = mine.filter((m) => m.status === "export-failed").length;
+          if (allNothing && !okCount && !failedCount) {
             const first = results.find((r) => r.failed);
             entry.state = first ? "failed" : "nothing postable";
             if (first && !multi) throw new Error(first.failed);
           }
+          // Analysis and export are separate outcomes. An approved clip whose MP4
+          // did not render is still a result - it is not "nothing postable", and
+          // saying so would hide work the user can retry.
+          if (okCount) entry.state = "done";
+          else if (failedCount) entry.state = "export failed";
           renderShortsResults(state.made, false);
         } catch (err) {
           entry.state = "failed";
@@ -2469,7 +2719,7 @@
           renderVideoList();
         }
       }
-      if (!state.made.length) {
+      if (!state.made.some((m) => m.status === "exported" || m.status === "export-failed")) {
         // Nothing was produced, so the reason is the whole result: name the
         // actual cause instead of a generic failure. "unknown error" used to
         // hide a transcript that was still queued behind the speech budget.
@@ -2486,11 +2736,19 @@
         throw new Error(`every video failed - ${real}`);
       }
       renderShortsResults(state.made, true);
-      const where = state.made[0].cut.path.slice(0, state.made[0].cut.path.lastIndexOf("\\") + 1);
+      const where = dev.outDir || "";
+      const good = state.made.filter((m) => m.status === "exported").length;
+      const bad = state.made.filter((m) => m.status === "export-failed").length;
       shortsProgress(
-        `DONE\n${state.made.length} short${state.made.length === 1 ? "" : "s"} from ${queue.length} video${queue.length === 1 ? "" : "s"}${state.failures.length ? ` · ${state.failures.length} skipped` : ""}\n${where}`
+        `DONE\n${good} short${good === 1 ? "" : "s"} exported from ${queue.length} video${queue.length === 1 ? "" : "s"}`
+        + `${bad ? ` · ${bad} failed to render (RETRY EXPORT keeps the analysis)` : ""}`
+        + `${state.failures.length ? ` · ${state.failures.length} skipped` : ""}\n${where}`
       );
-      sysLine(`${state.made.length} short${state.made.length === 1 ? "" : "s"} ready in shorts/`);
+      sysLine(
+        bad
+          ? `${good} short${good === 1 ? "" : "s"} ready, ${bad} file${bad === 1 ? "" : "s"} failed to render - RETRY EXPORT does not re-analyse`
+          : `${good} short${good === 1 ? "" : "s"} ready in ${where || "the Shorts folder"}`
+      );
     } catch (err) {
       shutdown(`FAILED\n${err.message || err}`);
     } finally {
@@ -2523,6 +2781,14 @@
     const proposed = passes.reduce((n, p) => n + (p.proposed || 0), 0);
     const accepted = passes.reduce((n, p) => n + (p.accepted || 0), 0);
     const rejected = passes.reduce((n, p) => n + (p.rejected || 0), 0);
+    // An encoder failure is not an empty analysis. If clips were found and
+    // approved, say so and name the export as the problem - blaming the bar here
+    // would send the user to re-run an analysis that worked.
+    const exportFailed = (reports || []).reduce((n, r) => n + (r?.export?.failed || 0), 0);
+    const exported = (reports || []).reduce((n, r) => n + (r?.export?.exported || 0), 0);
+    if (exportFailed && !exported) {
+      return `the analysis found and approved ${exportFailed} clip${exportFailed === 1 ? "" : "s"}, but the MP4 export failed - the clips are still listed and RETRY EXPORT re-renders them without reading the video again`;
+    }
 
     if (stages.has("plan")) {
       return `the whole video was read, but no stretch of it could be proposed for review${proposed ? ` (${proposed} proposed)` : ""}`;
@@ -2565,27 +2831,55 @@
       if (scroll) box.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
+    // Clips that cleared analysis and only failed to render are counted
+    // separately. They are real candidates - calling the run "nothing postable"
+    // because ffmpeg failed would throw away paid work and mislead the user about
+    // what the video contained.
+    const exported = entries.filter((e) => e.status !== "export-failed");
+    const failed = entries.filter((e) => e.status === "export-failed");
     const head = document.createElement("div");
     head.className = "yt-results-head";
     const h = document.createElement("h4");
     const sources = new Set(entries.map((e) => e.videoName || "this video"));
-    h.textContent = `${entries.length} short${entries.length === 1 ? "" : "s"} from ${sources.size} video${sources.size === 1 ? "" : "s"}`;
+    const made = exported.length;
+    h.textContent = `${made} short${made === 1 ? "" : "s"} ready${failed.length ? ` · ${failed.length} failed to export` : ""} from ${sources.size} video${sources.size === 1 ? "" : "s"}`;
     head.appendChild(h);
     const reveal = document.createElement("button");
     reveal.type = "button";
     reveal.className = "dev-mini";
     reveal.textContent = "OPEN SHORTS FOLDER";
-    reveal.addEventListener("click", () => D.reveal(entries[0].cut.path));
+    reveal.addEventListener("click", () => D.reveal(exported[0]?.cut?.path || failed[0]?.fileBase || "."));
     head.appendChild(reveal);
     box.appendChild(head);
+    if (failed.length) {
+      // Say what happened in the user's terms. The analysis is not repeated on a
+      // retry, which is the point: the expensive part is already done.
+      const note = document.createElement("p");
+      note.className = "yt-meta";
+      note.textContent = `${failed.length} clip${failed.length === 1 ? " was" : "s were"} analysed and approved but the MP4 did not render. `
+        + "Your review work is kept - RETRY EXPORT re-renders only the file, it does not analyse the video again.";
+      box.appendChild(note);
+    }
+    // Visual validation is not required to keep a candidate: if every visual
+    // provider failed, the clip stays in the list marked transcript-only so it can
+    // be reviewed later. This banner is in the existing panel, not a new screen.
+    const transcriptOnly = entries.filter((e) => !e.provenance?.visual);
+    if (transcriptOnly.length) {
+      const note = document.createElement("p");
+      note.className = "yt-meta";
+      note.textContent = `${transcriptOnly.length} of ${entries.length} clip${entries.length === 1 ? "" : "s"} were judged from the transcript only - no picture reached the model for ${transcriptOnly.length === 1 ? "it" : "them"}. `
+        + "They are kept so you can still review them; they are not fully visually validated.";
+      box.appendChild(note);
+    }
     const copyText = (pick) => `${pick.title || ""}\n${(pick.hashtags || []).map((t) => `#${t}`).join(" ")}`;
     const copy = (text, note) => {
       navigator.clipboard?.writeText(text).then(() => sysLine(note)).catch(() => {});
     };
     for (const entry of entries) {
       const { pick, cut, base, meta } = entry;
+      const isFailed = entry.status === "export-failed";
       const card = document.createElement("article");
-      card.className = "yt-short";
+      card.className = `yt-short${isFailed ? " export-failed" : ""}`;
       const frame = document.createElement("div");
       frame.className = "yt-short-frame";
       const player = document.createElement("video");
@@ -2593,7 +2887,9 @@
       player.controls = true;
       player.preload = "metadata";
       player.playsInline = true;
-      player.src = cut.abs ? mediaUrl(cut.abs) : "";
+      // A failed clip has no file to play. Leave the element empty rather than
+      // pointing it at a path that does not exist and showing a browser error.
+      if (!isFailed && cut?.abs) player.src = mediaUrl(cut.abs);
       frame.appendChild(player);
       const num = document.createElement("span");
       num.className = "yt-short-num";
@@ -2610,6 +2906,23 @@
       when.className = "dev-when";
       when.textContent = `${clock(pick.start)} - ${clock(pick.end)} · ${length.toFixed(1)}s · ${PLATFORMS[entry.platform || dev.platform].name}${pick.score ? ` · score ${pick.score}/100` : ""}`;
       body.appendChild(when);
+      if (isFailed) {
+        // Three separate facts, so "failed" is not mistaken for "not funny":
+        // the analysis passed, the file is missing, and this is what retrying does.
+        const badge = document.createElement("div");
+        badge.className = "yt-short-status";
+        badge.textContent = "EXPORT FAILED · ANALYSIS DONE";
+        body.appendChild(badge);
+        const why = document.createElement("p");
+        why.className = "yt-meta";
+        why.textContent = entry.error || "The MP4 could not be written.";
+        body.appendChild(why);
+      } else if (entry.status === "exported") {
+        const badge = document.createElement("div");
+        badge.className = "yt-short-status ok";
+        badge.textContent = "EXPORTED · FILE VERIFIED";
+        body.appendChild(badge);
+      }
       const from = document.createElement("div");
       from.className = "yt-short-from";
       from.textContent = `from ${entry.videoName || "selected video"}`;
@@ -2620,12 +2933,46 @@
       body.appendChild(tags);
       const actions = document.createElement("div");
       actions.className = "dev-actions";
-      const openBtn = document.createElement("button");
-      openBtn.type = "button";
-      openBtn.className = "dev-mini";
-      openBtn.textContent = "OPEN FILE";
-      openBtn.addEventListener("click", () => D.open(cut.path).catch((e) => sysLine(String(e.message || e))));
-      actions.appendChild(openBtn);
+      if (isFailed) {
+        // Retry only the render. The candidate, its window, its review and its
+        // captions are all still here, so nothing is analysed a second time.
+        const retry = document.createElement("button");
+        retry.type = "button";
+        retry.className = "dev-mini";
+        retry.textContent = "RETRY EXPORT";
+        retry.addEventListener("click", async () => {
+          retry.disabled = true;
+          retry.textContent = "RENDERING…";
+          try {
+            const done = await exportClip(entry);
+            entry.base = `${done.fileBase}${entry.pfx || ""}`;
+            entry.meta = metaFor(entry);
+            await D.writeShorts(`shorts/${entry.base}.txt`, entry.meta);
+            entry.status = "exported";
+            entry.error = "";
+            entry.attempts += 1;
+            sysLine(`export fixed - ${entry.base}.mp4`);
+            renderShortsResults(entries, false);
+          } catch (err) {
+            entry.error = String(err?.message || err);
+            entry.attempts += 1;
+            retry.disabled = false;
+            retry.textContent = "RETRY EXPORT";
+            const line = document.createElement("p");
+            line.className = "yt-meta";
+            line.textContent = `Still failed: ${entry.error}`;
+            body.insertBefore(line, actions);
+          }
+        });
+        actions.appendChild(retry);
+      } else {
+        const openBtn = document.createElement("button");
+        openBtn.type = "button";
+        openBtn.className = "dev-mini";
+        openBtn.textContent = "OPEN FILE";
+        openBtn.addEventListener("click", () => D.open(cut.path).catch((e) => sysLine(String(e.message || e))));
+        actions.appendChild(openBtn);
+      }
       const copyBtn = document.createElement("button");
       copyBtn.type = "button";
       copyBtn.className = "dev-mini";
@@ -2642,7 +2989,8 @@
       const info = document.createElement("details");
       info.className = "yt-short-info";
       const sum = document.createElement("summary");
-      sum.textContent = `${base}.txt · written next to the video`;
+      const shownBase = base || entry.fileBase || "package";
+      sum.textContent = isFailed ? `${shownBase}.txt · package ready, video missing` : `${shownBase}.txt · written next to the video`;
       info.appendChild(sum);
       const pre = document.createElement("pre");
       pre.className = "yt-short-txt";
@@ -2663,12 +3011,18 @@
       const scoreWord = (n) => (n >= 70 ? "strong" : n >= 50 ? "fair" : "weak");
       const rows = [
         ["ENTERTAINMENT", `${pick.score ?? "?"}/100 · ${scoreWord(Number(pick.score))}`, "score"],
-        ["WHY IT WAS PICKED", pick.why || entry.pick?.why || "not explained", ""],
+        ["WHY IT WAS PICKED", pick.why || entry.plan?.review?.why || entry.plan?.moment?.why || "not explained", ""],
         ["WINDOW", `${clock(entry.suggested?.start ?? pick.start)} → ${clock(entry.suggested?.end ?? pick.end)} suggested · ${clock(pick.start)} → ${clock(pick.end)} cut`, ""],
-        ["AUDIO EVENTS", (entry.evidence || []).length
-          ? entry.evidence.map((e) => `${e.type.replace(/_/g, " ")} ${e.start}-${e.end}s (${Math.round((e.confidence || 0) * 100)}%)`).join("\n")
+        ["AUDIO EVENTS", (entry.evidence || entry.plan?.evidence || []).length
+          ? (entry.evidence || entry.plan.evidence).map((e) => `${e.type.replace(/_/g, " ")} ${e.start}-${e.end}s (${Math.round((e.confidence || 0) * 100)}%)`).join("\n")
           : "none detected inside this clip", ""],
-        ["FULL VALIDATION", entry.pick?.passTwo === "accepted" ? "yes — second read accepted it" : "no — accepted on the first pass only", "warn"],
+        ["FULL VALIDATION", (entry.plan?.passTwo || entry.pick?.passTwo) === "accepted" ? "yes — second read accepted it" : "no — accepted on the first pass only", "warn"],
+        // Provenance, said plainly. A clip judged from the transcript is a real
+        // clip, but it was not watched - and the difference is the whole point of
+        // this row.
+        ["VISUAL CHECK", entry.provenance?.visual
+          ? `yes — ${entry.provenance.note || "frames seen"}`
+          : `no — ${entry.provenance?.note || "judged from the transcript only"}`, entry.provenance?.visual ? "" : "warn"],
         ["CAPTIONS", entry.captionSource === "word" ? "word-accurate timing" : entry.captionSource === "segment" ? "approximate — sentence timing only" : "none", entry.captionSource === "word" ? "" : "warn"],
       ];
       const comp = entry.components || {};

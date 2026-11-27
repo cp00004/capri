@@ -174,6 +174,19 @@ test("visual work is queued and bounded", () => {
   assert.match(retry, /Math\.random\(\)/, "the wait is jittered");
 });
 
+test("a missing caption file fails the export instead of exporting silently", () => {
+  // The reported class of bug: the clip was called done while the thing the user
+  // asked for was quietly dropped. Captions were the same: an absent .ass was
+  // skipped and the MP4 was reported as a success, so the panel said the captions
+  // were burned in when they were not.
+  const src = codeOnly(read(path.join(ROOT, "lib/clipping/media-analytics.cjs")));
+  const fn = src.slice(src.indexOf("async function cutClip"), src.indexOf("async function cutClip") + 2200);
+  assert.ok(!/if \(captions && fs\.existsSync\(captions\)\)/.test(fn),
+    "a conditional burn-in is the silent skip");
+  assert.match(fn, /if \(captions\) \{/, "naming captions is a request for them");
+  assert.match(fn, /The caption file is missing/, "and a missing file is an error");
+});
+
 test("one rejected clip does not stop the rest being reviewed", () => {
   const src = codeOnly(read(DEV_JS));
   const loop = src.slice(src.indexOf("const reviewWorker = async () =>"), src.indexOf("await Promise.all([reviewWorker()"));

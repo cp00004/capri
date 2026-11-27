@@ -1339,6 +1339,16 @@ body[data-glitch="subtle"] .portrait.glitching .hex-inner { animation-duration: 
 .yt-short-body h4 { margin: 0; font-family: var(--font); font-size: 17px; letter-spacing: 0.3px; color: var(--white); }
 .yt-short .dev-when { color: var(--mint); }
 .yt-short-from { color: var(--ink-faint); font-size: 10.5px; letter-spacing: 0.3px; }
+/* Export state is a separate fact from quality: a clip that analysed and
+   passed but whose MP4 failed must not look the same as a poor clip. */
+.yt-short-status { align-self: flex-start; font-family: var(--mono); font-size: 9.5px; letter-spacing: 1.1px; padding: 2px 7px; border: 1px solid rgba(255, 60, 60, 0.55); color: #ff6b6b; background: rgba(255, 40, 40, 0.08); }
+.yt-short-status.ok { border-color: rgba(80, 240, 180, 0.45); color: var(--mint); background: rgba(60, 240, 180, 0.07); }
+.yt-short.export-failed { border-left-color: #ff4d4d; }
+.yt-short.export-failed .yt-short-frame { opacity: 0.5; }
+.yt-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 12px; }
+.yt-tools .dev-btn { padding: 6px 12px; }
+.yt-check { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.6px; color: var(--ink-dim); cursor: pointer; }
+.yt-check input { accent-color: var(--pink); }
 .yt-short .dev-tags { color: var(--mint); word-break: break-word; }
 .yt-short .dev-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .yt-short .dev-actions .dev-mini { flex: 0 0 auto; padding: 6px 12px; }
