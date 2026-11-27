@@ -151,6 +151,10 @@ if (fs.existsSync(exeDir)) {
     // The cache is keyed on the file's bytes, not its name: path + size could not
     // tell two same-length downloads apart.
     ok("packaged stt-cache.js keys on a content fingerprint", /fingerprint/.test(cache) && /VERSION = 2/.test(cache));
+    // Tightening the identity must not throw away a transcript the user already
+    // paid for: a v1 doc that provably belongs to this exact file is upgraded.
+    ok("packaged stt-cache.js upgrades a v1 transcript", /function upgrade\(doc, ident\)/.test(cache) && /function legacyId\(/.test(cache));
+    ok("packaged dev.js looks for a v1 transcript before giving up", /SC\.legacyId\(video, info\)/.test(dev));
   }
   const storePath = path.join(appRoot, "lib", "clipping", "stt-cache-store.cjs");
   if (fs.existsSync(storePath)) {
