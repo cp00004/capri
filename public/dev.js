@@ -3376,6 +3376,8 @@
       setBusy: (on) => { dev.shortsBusy = Boolean(on); paintStudio(); },
       /** Run the real batch and hand back its promise. */
       runShorts: (resume) => runShorts(Boolean(resume)),
+      /** The cache decision a run makes before it reads a word, for a real app check. */
+      openTranscriptCache: (video, info, report, force) => openTranscriptCache(video, info, report, Boolean(force)),
     },
   };
 
