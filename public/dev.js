@@ -1906,6 +1906,73 @@
     return { cues: CM().settleCues(built.cues), source: built.source };
   }
 
+  /**
+   * The upload package for one clip: title, hook, caption, hashtags, the score
+   * breakdown and where the file actually is.
+   *
+   * Built from the item rather than passed around, because it has to be rebuilt
+   * whenever an export is retried - the file path is not known until the MP4
+   * exists, and a package pointing at a file that is not there is worse than none.
+   */
+  function metaFor(item) {
+    const { pick, plan, start, end } = item;
+    const p = plan || {};
+    const review = pick.review || p.review || {};
+    const components = p.components || {};
+    const evidence = CM().eventsWithin(item.read?.events || [], start, end);
+    const file = item.cut?.abs || item.cut?.path || "";
+    return [
+      `VIDEO\n${item.videoName}`,
+      `PLATFORM\n${PLATFORMS[item.platform]?.name || item.platform}`,
+      `TITLE\n${review.title || ""}`,
+      `HOOK\n${review.hook_line || ""}`,
+      `CAPTION\n${review.caption || ""}`,
+      `HASHTAGS\n${(review.hashtags || []).map((h) => `#${h}`).join(" ")}`,
+      `DESCRIPTION\n${review.description || ""}`,
+      `WHY IT KEEPS VIEWERS\n${review.why || p.moment?.why || ""}`,
+      `ENTERTAINMENT SCORE\n${pick.score ?? "?"}/100`,
+      `SCORE BREAKDOWN\nhumor ${components.humor ?? "?"} · unexpected ${components.unexpected ?? "?"} · reaction ${components.reaction ?? "?"} · entertainment ${components.entertainment ?? "?"} · context ${components.context ?? "?"} · replay ${components.replay ?? "?"} · hook ${components.hook ?? "?"}`,
+      `EVIDENCE\n${evidence.length ? evidence.map((e) => `${e.type} @ ${e.start}-${e.end}s (${Math.round(e.confidence * 100)}%)`).join(", ") : "none inside the clip"}`,
+      `VALIDATION\npass two ${p.passTwo === "accepted" ? "accepted" : "not reviewed"} · captions ${item.captionSource === "word" ? "word-accurate" : item.captionSource === "segment" ? "approximate" : "none"}`,
+      `SOURCE\n${item.video}`,
+      `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
+      // The real location, so the info file tells the user where the MP4 is
+      // instead of a workspace-relative `shorts/...` that does not exist.
+      `FILE\n${file}`,
+    ].join("\n\n");
+  }
+
+  /**
+   * Render one clip's captions and MP4, then its package file.
+   *
+   * Reused by the retry path: an export that failed before is retried by calling
+   * this again, which re-encodes the file but never re-plans, re-reviews or
+   * re-transcribes. `item` is updated in place so the caller keeps one object.
+   */
+  async function exportClip(item) {
+    const { fileBase, start, end } = item;
+    const length = end - start;
+    const info = item.info;
+    // `info` is only needed for the frame size; a retry after a restart may not
+    // have it, so fall back to the source's own dimensions chosen by cutClip.
+    const built = cuesForClip(item.read || {}, start, end);
+    await D.writeShorts(`shorts/${fileBase}.srt`, buildSrt(built.cues));
+    await D.writeShorts(`shorts/${fileBase}.ass`, buildAss(built.cues));
+    const cut = await D.cut({
+      video: item.video,
+      start,
+      duration: length,
+      out: `shorts/${fileBase}.mp4`,
+      captions: `shorts/${fileBase}.ass`,
+      width: info?.width,
+      height: info?.height,
+    });
+    item.cut = cut;
+    item.cues = built.cues.length;
+    item.captionSource = built.source;
+    return { cut, fileBase, cues: built.cues.length, captionSource: built.source };
+  }
+
   function buildSrt(cues) {
     return cues.map((c, i) => `${i + 1}\n${srtTime(c.start)} --> ${srtTime(c.end)}\n${c.text}`).join("\n\n") + "\n";
   }
@@ -2292,78 +2359,61 @@
       const end = pick.end;
       const length = end - start;
       shortsProgress(`VIDEO ${tag}${label} · CUTTING ${i + 1}/${planned.length}\n${clock(start)} -> ${clock(end)} · ${length.toFixed(1)}s · ${pick.score}/100`);
+      // One row per planned clip, added before the encode so a failed export is
+      // still a known candidate rather than a lost one. `status` is the only
+      // thing that differs between a clip and a clip that failed to render.
+      state.seq += 1;
+      const review = pick.review || {};
+      const item = {
+        // `pick` is the post-ready shape the results panel renders; `plan` keeps
+        // the planner's own fields (moment, components, passTwo) for the package
+        // file and the score breakdown.
+        pick: { ...review, start, end, score: pick.score },
+        plan: pick,
+        start, end,
+        fileBase: `${slug(review.title || pick.moment?.kind || "short")}-${stamp}-${state.seq}`,
+        base: "",
+        video: video.path,
+        videoName: entry.name,
+        info,
+        read,
+        platform,
+        report,
+        status: "pending",
+        error: "",
+        attempts: 0,
+        suggested: { start: pick.start, end: pick.end, score: pick.score },
+      };
+      state.made.push(item);
+      const key = `${start.toFixed(2)}|${end.toFixed(2)}`;
       try {
-        const key = `${start.toFixed(2)}|${end.toFixed(2)}`;
-        let hold = cutCache.get(key);
-        let captionSource = "none";
-        if (!hold) {
-          state.seq += 1;
-          const fileBase = `${slug(pick.review?.title || pick.moment?.kind || "short")}-${stamp}-${state.seq}`;
-          const built = cuesForClip(read, start, end);
-          captionSource = built.source;
-          // Written into the Shorts folder, not the workspace. `D.write` is
-          // workspace-bound and threw when no folder was open, which is exactly
-          // the case this feature has to work in.
-          await D.writeShorts(`shorts/${fileBase}.srt`, buildSrt(built.cues));
-          await D.writeShorts(`shorts/${fileBase}.ass`, buildAss(built.cues));
-          const cut = await D.cut({
-            video: video.path,
-            start,
-            duration: length,
-            out: `shorts/${fileBase}.mp4`,
-            captions: `shorts/${fileBase}.ass`,
-            width: info.width,
-            height: info.height,
-          });
-          hold = { cut, fileBase, cues: built.cues.length, captionSource };
-          cutCache.set(key, hold);
+        const cacheHit = cutCache.get(key);
+        if (cacheHit) {
+          // The same footage already encoded for the other platform: reuse the
+          // file, only the info file differs.
+          Object.assign(item, cacheHit, { status: "exported" });
+          item.base = `${item.fileBase}${pfx}`;
+          item.meta = metaFor(item);
+          await D.writeShorts(`shorts/${item.base}.txt`, item.meta);
+        } else {
+          const done = await exportClip(item);
+          Object.assign(item, done, { status: "exported" });
+          cutCache.set(key, { cut: done.cut, fileBase: done.fileBase, cues: done.cues, captionSource: done.captionSource });
         }
-        captionSource = hold.captionSource;
-
-        const evidence = CM().eventsWithin(read.events, start, end);
-        const components = pick.components || {};
-        const review = pick.review || {};
-        const base = `${hold.fileBase}${pfx}`;
-        const meta = [
-          `VIDEO\n${entry.name}`,
-          `PLATFORM\n${feed}`,
-          `TITLE\n${review.title || ""}`,
-          `HOOK\n${review.hook_line || ""}`,
-          `CAPTION\n${review.caption || ""}`,
-          `HASHTAGS\n${(review.hashtags || []).map((h) => `#${h}`).join(" ")}`,
-          `DESCRIPTION\n${review.description || ""}`,
-          `WHY IT KEEPS VIEWERS\n${review.why || pick.moment?.why || ""}`,
-          `ENTERTAINMENT SCORE\n${pick.score ?? "?"}/100`,
-          `SCORE BREAKDOWN\nhumor ${components.humor ?? "?"} · unexpected ${components.unexpected ?? "?"} · reaction ${components.reaction ?? "?"} · entertainment ${components.entertainment ?? "?"} · context ${components.context ?? "?"} · replay ${components.replay ?? "?"} · hook ${components.hook ?? "?"}`,
-          `EVIDENCE\n${evidence.length ? evidence.map((e) => `${e.type} @ ${e.start}-${e.end}s (${Math.round(e.confidence * 100)}%)`).join(", ") : "none inside the clip"}`,
-          `VALIDATION\npass two ${pick.passTwo === "accepted" ? "accepted" : "not reviewed"} · captions ${captionSource === "word" ? "word-accurate" : captionSource === "segment" ? "approximate" : "none"}`,
-          `SOURCE\n${video.path}`,
-          `WINDOW\n${start.toFixed(2)}s - ${end.toFixed(2)}s`,
-          // The real location, so the info file tells the user where the MP4
-          // actually is instead of a workspace-relative `shorts/...` that no
-          // longer describes this export.
-          `FILE\n${hold.cut.abs || hold.cut.path}`,
-        ].join("\n\n");
-        await D.writeShorts(`shorts/${base}.txt`, meta);
-        state.made.push({
-          pick: { ...review, start, end, score: pick.score },
-          cut: hold.cut,
-          base,
-          meta,
-          videoName: entry.name,
-          platform,
-          report,
-          evidence,
-          components,
-          captionSource,
-          suggested: { start: pick.start, end: pick.end, score: pick.score },
-        });
       } catch (err) {
-        state.failures.push(`${entry.name}${ctx.multi ? ` ${feed}` : ""} ${clock(start)}-${clock(end)}: ${err.message || err}`);
+        // A clip is not thrown away because its MP4 failed. The analysis is done
+        // and paid for; the file is the only missing part, so the candidate stays
+        // listed with its failure and can be rendered again on its own.
+        item.status = "export-failed";
+        item.error = String(err?.message || err);
+        item.attempts += 1;
+        state.failures.push(`${entry.name}${ctx.multi ? ` ${feed}` : ""} ${clock(start)}-${clock(end)}: export failed - ${item.error}`);
       }
     }
-    entry.state = state.made.length > before ? "done" : "nothing postable";
-    return { made: state.made.length - before };
+    const exported = state.made.slice(before).filter((m) => m.status === "exported").length;
+    const failedExports = state.made.slice(before).filter((m) => m.status === "export-failed").length;
+    entry.state = exported ? "done" : failedExports ? "export failed" : "nothing postable";
+    return { made: exported, failedExports };
   }
 
   /**
