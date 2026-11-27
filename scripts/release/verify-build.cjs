@@ -60,6 +60,15 @@ if (fs.existsSync(exeDir)) {
     ok(`packaged ${f} present`, fs.existsSync(p));
   }
   const serverPath = path.join(appRoot, "server.js");
+  const scoringPath = path.join(appRoot, "lib", "clipping", "scoring.cjs");
+  if (fs.existsSync(scoringPath)) {
+    const scoring = fs.readFileSync(scoringPath, "utf8");
+    // The reported failure: a long stream's windows all tied on strength, the
+    // stable sort broke the tie by timestamp, and the opening 13 minutes of a
+    // 204-minute stream used up every slot.
+    ok("packaged scoring.cjs spreads windows across the timeline", /function spread\(/.test(scoring));
+    ok("packaged scoring.cjs counts speech as evidence", /opts\.hasDialogue\) score \+= 0\.25/.test(scoring));
+  }
   if (fs.existsSync(serverPath)) {
     const server = fs.readFileSync(serverPath, "utf8");
     ok("packaged server.js imports the retry policy", /stt-retry\.cjs/.test(server));
@@ -71,6 +80,9 @@ if (fs.existsSync(exeDir)) {
     ok("packaged server.js does not blame pictures for a cap", /function isRelayCap\(/.test(server));
     // The planner must see timed words, or a word-accurate read looks silent.
     ok("packaged server.js plans from words", /body\.words/.test(server));
+    // The propose stage must read the reply wrapper correctly, or its provider,
+    // vision note and debug reply are all silently undefined.
+    ok("packaged server.js reads the propose reply wrapper", /const reply = out\.out \|\| \{\}/.test(server));
   }
   const devPath = path.join(appRoot, "public", "dev.js");
   if (fs.existsSync(devPath)) {
@@ -101,6 +113,10 @@ if (fs.existsSync(exeDir)) {
     ok("packaged dev.js sends words to the planner", /words:\s*read\.words/.test(dev));
     ok("packaged dev.js treats a recovered budget pause as a note", /nothing is missing from the transcript/.test(dev));
     ok("packaged dev.js explains nothing-postable", /renderShortsResults\(\[\], false, reports, real\)/.test(dev));
+    // The reported failure: a 3.4-hour stream whose transcript was complete ended
+    // "nothing postable" because the planner only ever looked at its intro.
+    ok("packaged dev.js salvages an empty screening pass", /the screening pass proposed nothing/.test(dev));
+    ok("packaged dev.js names the stage that emptied the run", /function explainEmpty/.test(dev));
     ok("packaged app.js can hand the screen back", /window\.capriAppResume\s*=/.test(fs.readFileSync(path.join(appRoot, "public", "app.js"), "utf8")));
   }
   const htmlPath = path.join(appRoot, "public", "index.html");
