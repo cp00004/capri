@@ -1691,7 +1691,7 @@ async function handleClipPropose(req, res) {
     return Number.isFinite(t) && t >= w.start - 3 && t <= w.end + 3;
   }).slice(0, 1);
 
-  const runWindow = async (w) => {
+  const runWindow = async (w, queueMs = 45_000) => {
     const lines = analysis.transcriptBlock(transcript, w.start, w.end);
     const spoken = lines.replace(/\s+/g, " ").length;
     const evLines = analysis.eventBlock(events, w.start, w.end);
@@ -1724,7 +1724,7 @@ async function handleClipPropose(req, res) {
     const out = await jsonCompletion([
       { role: "system", content: analysis.PASS_ONE_SYSTEM(platform) },
       { role: "user", content },
-    ], 0.3, { queueMs: 45_000 });
+    ], 0.3, { queueMs });
     const parsed = out.parsed;
     // `jsonCompletion` returns `{ parsed, out }`, not the reply itself. Reading
     // `out.provider` / `out.content` off the wrapper gave undefined every time,
@@ -1763,14 +1763,30 @@ async function handleClipPropose(req, res) {
     };
   };
 
+  // Pass one is a shortlist, and a shortlist is never worth losing the run over.
+  // Twelve windows fanned out three at a time, each allowed to queue for 45s and
+  // sweep four times, can outlast the caller's own clock - and when it does, the
+  // caller aborts, retries the whole fan-out, and the video ends as "signal is
+  // aborted without reason" on a transcript that read perfectly. So this endpoint
+  // now owns a deadline well inside the caller's: whatever is judged by then is
+  // returned, and the windows still waiting are reported as deferred rather than
+  // failed, because they were never judged and the strict review will take them.
+  const DEADLINE_MS = 420_000;
+  const startedAt = Date.now();
+  const deadline = startedAt + DEADLINE_MS;
   const results = [];
+  const deferred = [];
   let next = 0;
   const workers = async () => {
     while (next < windows.length) {
       const w = windows[next];
       next += 1;
+      const room = deadline - Date.now();
+      // Only start a window that still has time to answer in. Half a minute is
+      // the least worth spending: less than that is a near-certain queue wait.
+      if (room < 30_000) { deferred.push(w); continue; }
       try {
-        results.push(await runWindow(w));
+        results.push(await runWindow(w, Math.min(45_000, room - 20_000)));
       } catch (err) {
         results.push({ window: w, moments: [], error: String(err?.message || err) });
       }
@@ -1784,7 +1800,7 @@ async function handleClipPropose(req, res) {
   // Windows that were judged from text because their pictures could not be sent.
   const visionGaps = [...new Set(results.map((r) => r.vision).filter(Boolean))];
 
-  if (!moments.length && failures.length === results.length) {
+  if (!moments.length && results.length && failures.length === results.length) {
     return devToolError(res, 502, failures[0]?.error || "Every window failed.");
   }
 
@@ -1793,8 +1809,12 @@ async function handleClipPropose(req, res) {
     failures,
     providers,
     visionGaps,
+    // Windows the deadline reached before they could be judged. Not failures:
+    // nothing was asked, so the caller is free to review them directly.
+    deferred: deferred.map((w) => ({ start: w.start, end: w.end })),
+    elapsedMs: Date.now() - startedAt,
     windows: results.map((r) => ({ window: r.window, got: (r.moments || []).length, error: r.error, skipped: r.skipped, raw: r.raw, coerced: r.coerced, vision: r.vision })),
-    watched: { windows: windows.length, failed: failures.length },
+    watched: { windows: windows.length, failed: failures.length, deferred: deferred.length },
   });
 }
 

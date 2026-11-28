@@ -27,6 +27,7 @@ const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "../..");
 const DEV_JS = path.join(ROOT, "public/dev.js");
+const SERVER = path.join(ROOT, "server.js");
 const TOOLS = path.join(ROOT, "lib/dev-tools.cjs");
 const PRELOAD = path.join(ROOT, "electron/preload.cjs");
 
@@ -252,6 +253,39 @@ test("a broken screening pass reviews the planned windows instead of giving up",
   assert.match(block, /the planned windows were reviewed directly/, "and says what it did instead");
   assert.match(block, /proposed\s*\?/, "the salvage note distinguishes an empty pass from a broken one");
   assert.match(block, /did not answer, so the window itself was reviewed/, "a broken pass says so plainly");
+});
+
+test("the screening pass finishes inside its caller's clock instead of being killed", () => {
+  // The reported run sat in "READING THE MOMENTS" for 965s and then died with
+  // "signal is aborted without reason". The client gives the proposal step 600s;
+  // the endpoint fanned twelve windows across three workers, each free to queue
+  // for 45s and sweep four times, so it could outlast that clock. When it did,
+  // the caller aborted, retried the whole fan-out, and a complete transcript
+  // ended as an unexplained abort.
+  const src = codeOnly(read(SERVER));
+  const at = src.indexOf("const runWindow = async (w, queueMs = 45_000)");
+  assert.ok(at > 0, "each window takes a queue budget");
+  const block = src.slice(src.indexOf("const DEADLINE_MS"), src.indexOf("await Promise.all([workers(), workers(), workers()])") + 60);
+  assert.match(block, /const DEADLINE_MS = 420_000/, "the endpoint owns a deadline inside the caller's 600s");
+  assert.match(block, /if \(room < 30_000\) \{ deferred\.push\(w\); continue; \}/,
+    "a window with no time left is deferred, not started");
+  assert.match(block, /Math\.min\(45_000, room - 20_000\)/, "and a started window cannot outlast the deadline");
+  assert.match(src, /deferred: deferred\.map\(\(w\) => \(\{ start: w\.start, end: w\.end \}\)\)/,
+    "the deferred windows are returned so the review can take them");
+  // Deferred is not failed: a run where everything was deferred must not 502.
+  assert.match(src, /results\.length && failures\.length === results\.length/,
+    "only a window that was actually asked about can fail");
+});
+
+test("a screening pass that ran out of time still reviews its windows", () => {
+  const src = codeOnly(read(DEV_JS));
+  assert.match(src, /const deferredWindows = proposed\?\.deferred \|\| \[\]/,
+    "the client reads the deferred windows");
+  assert.match(src, /the screening pass ran out of time before \$\{deferredWindows\.length\}/,
+    "and says so in the notes rather than dropping them silently");
+  const block = src.slice(src.indexOf("for (const c of candidates.filter((x) => x.deferred)"), src.indexOf("for (const c of candidates.filter((x) => x.deferred)") + 600);
+  assert.match(block, /moments\.push\(\{/, "they go to the strict review");
+  assert.match(block, /\.slice\(0, 4\)/, "bounded, because each review is a paid call");
 });
 
 test("a speech chunk that times out names the chunk, not a bare abort", () => {

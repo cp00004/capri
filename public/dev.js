@@ -2337,6 +2337,21 @@
     if (proposed?.failures?.length) {
       report.degraded.push(`${proposed.failures.length} window(s) failed in pass one: ${proposed.failures[0].error}`);
     }
+    // Windows the screening pass ran out of time for. Nothing was asked about
+    // them, so they are not failures - they are handed to the strict review
+    // below like any other planned window that produced no proposal.
+    const deferredWindows = proposed?.deferred || [];
+    if (deferredWindows.length) {
+      report.notes.push(
+        `the screening pass ran out of time before ${deferredWindows.length} window${deferredWindows.length === 1 ? "" : "s"}, so ${deferredWindows.length === 1 ? "it was" : "they were"} reviewed directly`
+      );
+      // Anything the screening pass did not return a moment for is still a
+      // candidate for the review: nothing about it has been judged yet.
+      for (const w of deferredWindows) {
+        const c = candidates.find((x) => Math.abs(x.start - Number(w.start)) < 0.5 && Math.abs(x.end - Number(w.end)) < 0.5);
+        if (c) c.deferred = true;
+      }
+    }
     // Windows the model judged without all their pictures. Not fatal, but the
     // user should know the read was partly blind rather than assume it saw.
     if (proposed?.visionGaps?.length) {
@@ -2373,6 +2388,18 @@
       report.empty = "plan";
       if (!ctx.multi) throw new Error("She read the whole video but no stretch of it could even be proposed.");
       return { nothing: true };
+    }
+    // A window the screening pass never reached is a plan, not a verdict. Add
+    // the ones it deferred so a slow pass cannot shrink the run: bounded like
+    // the salvage path, because the strict review is a paid call per window.
+    for (const c of candidates.filter((x) => x.deferred).slice(0, 4)) {
+      if (moments.some((m) => m.end > c.start && m.start < c.end)) continue;
+      moments.push({
+        start: c.start, end: c.end,
+        kind: c.kind || "other",
+        why: "the screening pass ran out of time, so the window itself was reviewed",
+        setup: "", payoff: "", uses: [], confidence: 0.3,
+      });
     }
 
     // 4. Pass two: review every proposal on its own evidence.
