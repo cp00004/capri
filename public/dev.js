@@ -3464,6 +3464,15 @@
       runShorts: (resume) => runShorts(Boolean(resume)),
       /** The cache decision a run makes before it reads a word, for a real app check. */
       openTranscriptCache: (video, info, report, force) => openTranscriptCache(video, info, report, Boolean(force)),
+      /**
+       * The real staged request helper.
+       *
+       * A check cannot wait out a 600s model call, so the only way to prove what
+       * a timeout *says* in the shipped app is to hand the real function a short
+       * clock and a bridge that never answers. It replaces the transport, never
+       * the behaviour.
+       */
+      apiJson: (...args) => apiJson(...args),
     },
   };
 
