@@ -115,7 +115,7 @@ if (fs.existsSync(exeDir)) {
     ok("packaged dev.js explains nothing-postable", /renderShortsResults\(\[\], false, reports, real, /.test(dev));
     // A stage that broke is not an empty video: the panel has to say which one.
     ok("packaged dev.js tells a broken stage from an empty video", /"analysis stopped early" : "nothing postable"/.test(dev));
-    ok("packaged dev.js names the stage in a timeout", /the \$\{label\} step did not answer within/.test(dev));
+    ok("packaged dev.js names the stage in a timeout", /did not answer within \$\{seconds\}s, so it was stopped/.test(dev));
     // The reported failure: a 3.4-hour stream whose transcript was complete ended
     // "nothing postable" because the planner only ever looked at its intro.
     ok("packaged dev.js salvages an empty screening pass", /the screening pass proposed nothing/.test(dev));

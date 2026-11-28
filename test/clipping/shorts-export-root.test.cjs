@@ -205,11 +205,14 @@ test("a stage that timed out is named, not reported as an abort", () => {
   const src = codeOnly(read(DEV_JS));
   const fn = src.slice(src.indexOf("async function apiJson"), src.indexOf("function visualQueue"));
   assert.ok(fn.length > 300, "apiJson should be findable");
-  assert.match(fn, /async function apiJson\(path, body, timeoutMs, label = "analysis"\)/,
+  assert.match(fn, /async function apiJson\(path, body, timeoutMs, label = "the analysis step"\)/,
     "each call names its stage");
-  assert.match(fn, /the \$\{label\} step did not answer within \$\{seconds\}s, so it was stopped/,
+  assert.match(fn, /`\$\{label\} did not answer within \$\{seconds\}s, so it was stopped`/,
     "a timeout says which step stopped and after how long");
   assert.ok(!/signal is aborted/.test(fn), "it does not pass the browser's wording through");
+  // The label is a whole phrase, so the sentence reads naturally.
+  assert.match(fn, /\$\{label\} did not answer/, "the label is used as a phrase, not a noun");
+  assert.ok(!/\$\{label\} step did not answer/.test(fn), "no 'the review at 0:42 step'");
 });
 
 test("a timed-out stage is retried once, and a refusal is not retried forever", () => {
@@ -220,11 +223,11 @@ test("a timed-out stage is retried once, and a refusal is not retried forever", 
     "only a transient failure is worth another call");
   assert.match(fn, /if \(!worthRetrying \|\| attempt === 2\) break/, "and the loop is bounded");
   assert.match(fn, /Math\.random\(\)/, "the wait is jittered");
-  // Every stage passes its own name.
-  for (const label of ["clip planning", "clip proposal", "ranking"]) {
+  // Every stage passes its own phrase to name itself in a timeout.
+  for (const label of ["the clip planning step", "the clip proposal step", "the ranking step"]) {
     assert.match(src, new RegExp(`\\}, [0-9_]+, "${label}"\\)`), `${label} is labelled at the call site`);
   }
-  assert.match(src, /`review at \$\{clock\(moment\.start\)\}`/, "each review names its timestamp");
+  assert.match(src, /`the review at \$\{clock\(moment\.start\)\}`/, "each review names its timestamp");
 });
 
 test("a broken ranker keeps the clips the review approved", () => {

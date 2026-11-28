@@ -2167,7 +2167,7 @@
    * the transcript is already saved, so the worst case is one extra model call,
    * and a stage that is simply broken fails fast with its own name on it.
    */
-  async function apiJson(path, body, timeoutMs, label = "analysis") {
+  async function apiJson(path, body, timeoutMs, label = "the analysis step") {
     const seconds = Math.max(1, Math.round(Number(timeoutMs) / 1000));
     let last = null;
     for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -2183,7 +2183,7 @@
         const data = await res.json().catch(() => null);
         if (!res.ok) {
           const err = Object.assign(
-            new Error(data?.message || data?.error || `the ${label} step was refused (${res.status})`),
+            new Error(data?.message || data?.error || `${label} was refused (${res.status})`),
             { status: res.status }
           );
           throw err;
@@ -2193,9 +2193,11 @@
         // An abort surfaces as a DOMException with a useless message, and so
         // does a dropped socket. Give both a name the user can act on.
         const aborted = err?.name === "AbortError" || /aborted/i.test(String(err?.message || ""));
+        // The label is a whole phrase, so "the review at 0:42 did not answer" is
+        // a sentence rather than "the review at 0:42 step".
         const named = aborted
           ? Object.assign(
-            new Error(`the ${label} step did not answer within ${seconds}s, so it was stopped`),
+            new Error(`${label} did not answer within ${seconds}s, so it was stopped`),
             { status: 0 }
           )
           : err;
@@ -2283,7 +2285,7 @@
       // cannot see the speech and proposes nothing.
       words: read.words,
       maxCandidates: 12,
-    }, 60_000, "clip planning");
+    }, 60_000, "the clip planning step");
     const candidates = (plan?.candidates || []).filter((c) => c.end - c.start >= 4);
     if (!candidates.length) {
       report.empty = "plan";
@@ -2320,7 +2322,7 @@
         ocr: ocr?.samples || [],
         frames: shot.frames,
         windows: candidates.map((c) => ({ start: c.start, end: c.end })),
-      }, 600_000, "clip proposal");
+      }, 600_000, "the clip proposal step");
     } catch (err) {
       // The screening pass broke. Its output is only a shortlist - the strict
       // review is the verdict - so the planned windows are still reviewed rather
@@ -2406,7 +2408,7 @@
               frames: shot2.frames,
               minClip: CLIP.min,
               maxClip: CLIP.max,
-            }, 180_000, `review at ${clock(moment.start)}`);
+            }, 180_000, `the review at ${clock(moment.start)}`);
           }));
           const review = data?.review;
           if (!review) continue;
@@ -2486,7 +2488,7 @@
         minClip: CLIP.min,
         maxClip: CLIP.max,
         max: 6,
-      }, 60_000, "ranking");
+      }, 60_000, "the ranking step");
     } catch (err) {
       report.degraded.push(`the ranking step failed (${err?.message || err}) - the clips that passed review were kept and ordered by review score instead`);
     }
