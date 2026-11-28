@@ -220,7 +220,8 @@ test("a timed-out stage is retried once, and a refusal is not retried forever", 
   const src = codeOnly(read(DEV_JS));
   const fn = src.slice(src.indexOf("async function apiJson"), src.indexOf("function visualQueue"));
   assert.match(fn, /for \(let attempt = 1; attempt <= 2; attempt \+= 1\)/, "exactly one retry");
-  assert.match(fn, /const worthRetrying = aborted \|\| !Number\.isFinite\(status\) \|\| status === 0 \|\| status === 429 \|\| status >= 500/,
+  assert.match(fn, /const selfBounded = status === 502 && \/did not answer within/, "a stage the server already stopped is recognised");
+  assert.match(fn, /const worthRetrying = !selfBounded\s*\n?\s*&& \(aborted \|\| !Number\.isFinite\(status\) \|\| status === 0 \|\| status === 429 \|\| status >= 500\)/,
     "only a transient failure is worth another call");
   assert.match(fn, /if \(!worthRetrying \|\| attempt === 2\) break/, "and the loop is bounded");
   assert.match(fn, /Math\.random\(\)/, "the wait is jittered");
@@ -303,6 +304,36 @@ test("the strict reviews are bounded, and the drop is reported", () => {
   // The cap has to be several times the six the ranker can place, or a good
   // clip can be dropped before the verdict.
   assert.match(block, /\.slice\(0, REVIEW_CAP\)/, "bounded by the cap");
+});
+
+test("a review endpoint owns a clock and gives its provider slot back", () => {
+  // The reported failure: six reviews timed out at the client's 180s, and every
+  // later review then timed out too - on a server that answers a single review in
+  // about a second once restarted. Each abandoned review was still running and
+  // still holding a provider slot, so the queue starved for the rest of the run.
+  const src = codeOnly(read(SERVER));
+  const at = src.indexOf("const REVIEW_DEADLINE_MS = 150_000");
+  assert.ok(at > 0, "the review endpoint owns a deadline inside the caller's 180s");
+  const block = src.slice(at, at + 1500);
+  assert.match(block, /deadlineCtrl\.abort\(\)/, "the deadline cancels the call itself");
+  assert.match(block, /res\.on\("close", onClose\)/, "a caller who hangs up is noticed");
+  assert.match(block, /res\.off\("close", onClose\)/, "and the listener is removed once the answer is sent");
+  assert.match(block, /signal: deadlineCtrl\.signal/, "the signal reaches the provider call");
+  assert.match(block, /if \(res\.writableEnded \|\| res\.destroyed\) return undefined;/, "no reply is written to a hung-up caller");
+  // The message must name the stage and its limit, not a bare abort.
+  assert.match(block, /the review did not answer within \$\{Math\.round\(REVIEW_DEADLINE_MS \/ 1000\)\}s, so it was stopped/,
+    "a stopped review says so in words");
+});
+
+test("a review the server already stopped is not repeated", () => {
+  // Retrying a self-bounded stage would spend the same minutes twice; the server
+  // has already said the answer will not come.
+  const src = codeOnly(read(DEV_JS));
+  const at = src.indexOf("const selfBounded =");
+  assert.ok(at > 0, "the client recognises a self-bounded failure");
+  const block = src.slice(at, at + 400);
+  assert.match(block, /did not answer within/, "it is matched by the server's own wording");
+  assert.match(block, /!selfBounded/, "and excluded from the retry decision");
 });
 
 test("a speech chunk that times out names the chunk, not a bare abort", () => {

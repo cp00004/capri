@@ -2206,7 +2206,13 @@
         // A dropped socket arrives with no status at all, which is exactly the
         // transient case. Treating that as "not worth retrying" singled out the
         // one failure a second attempt actually fixes.
-        const worthRetrying = aborted || !Number.isFinite(status) || status === 0 || status === 429 || status >= 500;
+        //
+        // One exception: when the server says it already stopped the work on its
+        // own clock, repeating it just spends the same minutes again. That is a
+        // bounded answer, not a transient fault.
+        const selfBounded = status === 502 && /did not answer within .* so it was stopped/i.test(String(named?.message || ""));
+        const worthRetrying = !selfBounded
+          && (aborted || !Number.isFinite(status) || status === 0 || status === 429 || status >= 500);
         if (!worthRetrying || attempt === 2) break;
         await new Promise((r) => setTimeout(r, 1200 + Math.round(Math.random() * 800)));
       } finally {

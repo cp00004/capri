@@ -1917,18 +1917,44 @@ async function handleClipReview(req, res) {
     content.push(devImagePart(f.dataUrl));
   }
 
+  // This endpoint has to own a clock, for two reasons that both showed up in the
+  // same run. A review that stops answering leaves its provider slot held, and
+  // the caller's 180s clock then expires with the work still running; six of
+  // those stranded every relay and every later review timed out at 180s even
+  // though a clean server answers in about a second. And a caller that gives up
+  // never says so, so the work is never cancelled. Owning a shorter deadline and
+  // watching for the caller hanging up fixes both: the slot is always given back.
+  const REVIEW_DEADLINE_MS = 150_000;
+  const deadlineCtrl = new AbortController();
+  const deadlineTimer = setTimeout(() => deadlineCtrl.abort(), REVIEW_DEADLINE_MS);
+  const onClose = () => {
+    // Only a caller who went away early. A finished response also emits close.
+    if (!res.writableEnded) deadlineCtrl.abort();
+  };
+  res.on("close", onClose);
+
   let out;
   let parsed;
   try {
     const answered = await jsonCompletion([
       { role: "system", content: analysis.PASS_TWO_SYSTEM(platform) },
       { role: "user", content },
-    ], 0.2, { queueMs: 30_000 });
+    ], 0.2, { queueMs: 20_000, signal: deadlineCtrl.signal });
     out = answered.out;
     parsed = answered.parsed;
   } catch (err) {
-    return devToolError(res, 502, String(err?.message || "The review could not run."));
+    clearTimeout(deadlineTimer);
+    res.off("close", onClose);
+    // Nobody is listening if they hung up, so there is nothing to write and no
+    // point reporting it: the client has already named this stage itself.
+    if (res.writableEnded || res.destroyed) return undefined;
+    const why = deadlineCtrl.signal.aborted
+      ? `the review did not answer within ${Math.round(REVIEW_DEADLINE_MS / 1000)}s, so it was stopped`
+      : String(err?.message || "The review could not run.");
+    return devToolError(res, 502, why);
   }
+  clearTimeout(deadlineTimer);
+  res.off("close", onClose);
   const review = analysis.coerceReview(parsed, moment, duration, limits);
   if (!review) return devToolError(res, 502, "The review returned nothing usable.");
 
