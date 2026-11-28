@@ -691,7 +691,7 @@ function providerLimit(name) {
  * the slot back - including on a throw. A waiter is woken by the release rather
  * than polling, so a long queue does not spin.
  */
-function acquireProvider(name) {
+function acquireProvider(name, signal) {
   const key = String(name || "unknown");
   const limit = providerLimit(key);
   const active = providerInFlight.get(key) || 0;
@@ -699,12 +699,36 @@ function acquireProvider(name) {
     providerInFlight.set(key, active + 1);
     return Promise.resolve(() => releaseProvider(key));
   }
-  return new Promise((resolve) => {
+  // A waiter parked in this queue used to be invisible to whoever was waiting
+  // on the request: with no deadline here, it stayed parked until a slot freed,
+  // so a caller's own clock expired with the answer still unsent. Accepting the
+  // signal lets the deadline take a queued window out of the line.
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(Object.assign(new Error("the screening pass ran out of time"), { status: 0, deadline: true }));
+      return;
+    }
     const queue = providerWaiters.get(key) || [];
-    queue.push(() => {
+    let settled = false;
+    const entry = () => {
+      if (settled) return;
+      settled = true;
+      if (signal) signal.removeEventListener("abort", onAbort);
       providerInFlight.set(key, (providerInFlight.get(key) || 0) + 1);
       resolve(() => releaseProvider(key));
-    });
+    };
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      // Leave the queue rather than waking to do nothing: a slot handed to an
+      // abandoned waiter is a slot the next real window never sees.
+      const list = providerWaiters.get(key) || [];
+      const at = list.indexOf(entry);
+      if (at >= 0) list.splice(at, 1);
+      reject(Object.assign(new Error("the screening pass ran out of time"), { status: 0, deadline: true }));
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+    queue.push(entry);
     providerWaiters.set(key, queue);
   });
 }
@@ -1124,7 +1148,7 @@ async function collectDevCompletion({ messages, tools, temperature, queueMs = 0,
       // One slot per provider, so three review workers do not stack onto the same
       // free relay and turn a working key into a 429. Released in `finally` on
       // every path - a leaked slot would starve the queue for the rest of the run.
-      const release = await acquireProvider(provider.name);
+      const release = await acquireProvider(provider.name, signal);
       let upstream;
       try {
         // Cancelling here is what actually frees the socket: without it an
