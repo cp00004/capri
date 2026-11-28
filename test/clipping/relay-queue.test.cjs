@@ -336,3 +336,100 @@ test("every relay dead still fails without waiting", async () => {
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.logs.length, 3, `expected one sweep, got ${r.logs.join(", ")}`);
 });
+
+test("a handed-over provider slot is a transfer, not a second acquisition", async () => {
+  // The reported run stalled at "REVIEWING 7/7" with no network traffic at all:
+  // the concurrency counter had climbed past its limit and never came down, so
+  // every later review queued for a turn that could never arrive.
+  //
+  // Root cause: `releaseProvider` woke a waiter, and the waiter incremented the
+  // counter again. One release therefore raised the count by one, and the count
+  // only ever fell on a real release - so recorded concurrency grew without
+  // bound while nothing was actually in flight.
+  const src = fs.readFileSync(SERVER_JS, "utf8");
+  const at = src.indexOf("function providerLimit");
+  const end = src.indexOf("function isCooling");
+  assert.ok(at > 0 && end > at, "the provider slot code is findable");
+  const block = src.slice(at, end);
+
+  // Execute the real acquire/release pair, not a model of it.
+  const sandbox = { PROVIDER_CONCURRENCY: { groq: 2 }, console };
+  vm.createContext(sandbox);
+  vm.runInContext(
+    `const providerInFlight = new Map();
+     const providerWaiters = new Map();
+     ${block}
+     this.acquire = acquireProvider;
+     this.release = releaseProvider;
+     this.inFlight = providerInFlight;
+     this.waiters = providerWaiters;
+     this.limit = providerLimit;`,
+    sandbox,
+    { filename: "slots.js" },
+  );
+
+  // Drain a two-slot provider through many sequential handovers. Each cycle takes
+  // both slots then gives them back, so the counter must return to zero every
+  // time. A transfer that also counts would climb instead.
+  for (let cycle = 0; cycle < 12; cycle += 1) {
+    const a = await sandbox.acquire("groq");
+    const b = await sandbox.acquire("groq");
+    assert.strictEqual(sandbox.inFlight.get("groq") || 0, 2, `cycle ${cycle}: both slots should be held`);
+    // A third request must queue while both are held.
+    let thirdSettled = false;
+    const third = sandbox.acquire("groq").then((fn) => { thirdSettled = true; return fn; });
+    await Promise.resolve();
+    assert.strictEqual(thirdSettled, false, `cycle ${cycle}: the third request should wait for a free slot`);
+    a();
+    const c = await third;
+    assert.strictEqual(sandbox.inFlight.get("groq") || 0, 2,
+      `cycle ${cycle}: handing the slot over must not raise the count above the limit`);
+    b();
+    c();
+    assert.strictEqual(sandbox.inFlight.get("groq") || 0, 0,
+      `cycle ${cycle}: every slot given back should leave the provider free`);
+    assert.strictEqual((sandbox.waiters.get("groq") || []).length, 0,
+      `cycle ${cycle}: no waiter should be left in the queue`);
+  }
+});
+
+test("a waiter that gives up does not keep a slot from the next caller", async () => {
+  // The same run's other half: a review that timed out stayed parked in the
+  // queue. When a slot was freed it went to that abandoned waiter, which then
+  // did nothing, so the next real review never got a turn.
+  const src = fs.readFileSync(SERVER_JS, "utf8");
+  const at = src.indexOf("function providerLimit");
+  const end = src.indexOf("function isCooling");
+  const block = src.slice(at, end);
+
+  const sandbox = { PROVIDER_CONCURRENCY: { groq: 1 }, console };
+  vm.createContext(sandbox);
+  vm.runInContext(
+    `const providerInFlight = new Map();
+     const providerWaiters = new Map();
+     ${block}
+     this.acquire = acquireProvider;
+     this.release = releaseProvider;
+     this.waiters = providerWaiters;
+     this.inFlight = providerInFlight;`,
+    sandbox,
+    { filename: "slots2.js" },
+  );
+
+  const held = await sandbox.acquire("groq");
+  const ctrl = new AbortController();
+  const abandoned = sandbox.acquire("groq", ctrl.signal);
+  await Promise.resolve();
+  ctrl.abort();
+  await assert.rejects(abandoned, /ran out of time/, "the abandoned waiter should be told it ran out of time");
+  assert.strictEqual((sandbox.waiters.get("groq") || []).length, 0, "and must leave the queue");
+
+  // The slot is still held, so a fresh caller queues behind nothing and gets it
+  // as soon as it is released - not handed to the dead waiter.
+  const next = sandbox.acquire("groq");
+  held();
+  const got = await next;
+  assert.ok(typeof got === "function", "the next real caller should receive the slot");
+  got();
+  assert.strictEqual(sandbox.inFlight.get("groq") || 0, 0, "and giving it back leaves the provider free");
+});

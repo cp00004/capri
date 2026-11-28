@@ -714,7 +714,11 @@ function acquireProvider(name, signal) {
       if (settled) return;
       settled = true;
       if (signal) signal.removeEventListener("abort", onAbort);
-      providerInFlight.set(key, (providerInFlight.get(key) || 0) + 1);
+      // The slot is handed over, not taken again. Counting it here as well made
+      // the counter climb with every handover while only ever falling once per
+      // release, so after a couple of queued windows the provider looked full
+      // forever: no network call was made, no slot was held, and every later
+      // review in the run sat waiting for a turn that could never come.
       resolve(() => releaseProvider(key));
     };
     const onAbort = () => {
@@ -736,10 +740,14 @@ function acquireProvider(name, signal) {
 function releaseProvider(key) {
   const next = (providerWaiters.get(key) || []).shift();
   if (next) {
+    // Hand the slot straight over: the count already includes it, so this is a
+    // transfer, not a release followed by a new acquisition.
     next();
     return;
   }
-  providerInFlight.set(key, Math.max(0, (providerInFlight.get(key) || 1) - 1));
+  const now = (providerInFlight.get(key) || 0) - 1;
+  if (now <= 0) providerInFlight.delete(key);
+  else providerInFlight.set(key, now);
 }
 
 /** Is this provider cooling right now? Used to skip it instead of burning a call. */
