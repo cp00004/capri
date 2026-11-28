@@ -263,13 +263,13 @@ test("the screening pass finishes inside its caller's clock instead of being kil
   // the caller aborted, retried the whole fan-out, and a complete transcript
   // ended as an unexplained abort.
   const src = codeOnly(read(SERVER));
-  const at = src.indexOf("const runWindow = async (w, queueMs = 45_000)");
-  assert.ok(at > 0, "each window takes a queue budget");
+  const at = src.indexOf("const runWindow = async (w, queueMs = 45_000, signal)");
+  assert.ok(at > 0, "each window takes a queue budget and a deadline signal");
   const block = src.slice(src.indexOf("const DEADLINE_MS"), src.indexOf("await Promise.all([workers(), workers(), workers()])") + 60);
-  assert.match(block, /const DEADLINE_MS = 420_000/, "the endpoint owns a deadline inside the caller's 600s");
-  assert.match(block, /if \(room < 30_000\) \{ deferred\.push\(w\); continue; \}/,
-    "a window with no time left is deferred, not started");
+  assert.match(block, /const DEADLINE_MS = 240_000/, "the endpoint owns a deadline well inside the caller's 600s");
+  assert.match(block, /if \(room < 30_000 \|\| deadlineCtrl\.signal\.aborted\)/, "a window with no time left is deferred, not started");
   assert.match(block, /Math\.min\(45_000, room - 20_000\)/, "and a started window cannot outlast the deadline");
+  assert.match(block, /deadlineCtrl\.abort\(\)/, "the deadline cancels what is already in flight");
   assert.match(src, /deferred: deferred\.map\(\(w\) => \(\{ start: w\.start, end: w\.end \}\)\)/,
     "the deferred windows are returned so the review can take them");
   // Deferred is not failed: a run where everything was deferred must not 502.

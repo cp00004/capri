@@ -1090,7 +1090,7 @@ function devToolError(res, status, message) {
   return json(res, status, { error: "dev_failed", message });
 }
 
-async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 }) {
+async function collectDevCompletion({ messages, tools, temperature, queueMs = 0, signal }) {
   const vision = devHasImages(messages);
   const candidates = devCandidates(vision);
   let lastErr = null;
@@ -1106,6 +1106,10 @@ async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 
   const queuedUntil = Date.now() + Math.max(0, Number(queueMs) || 0);
   let sweeps = 0;
   for (;;) {
+    // A caller with its own deadline must be able to stop this work, not merely
+    // stop starting more of it: an in-flight sweep can hold the socket open long
+    // after the caller expects an answer, and the socket is what dies.
+    if (signal?.aborted) throw Object.assign(new Error("the screening pass ran out of time"), { status: 0, deadline: true });
     sweeps += 1;
     let retryable = 0;
     // Skip a relay that is still cooling instead of spending a call to find out.
@@ -1123,8 +1127,11 @@ async function collectDevCompletion({ messages, tools, temperature, queueMs = 0 
       const release = await acquireProvider(provider.name);
       let upstream;
       try {
+        // Cancelling here is what actually frees the socket: without it an
+        // aborted deadline still waits for the relay to answer.
+        if (signal?.aborted) throw Object.assign(new Error("the screening pass ran out of time"), { status: 0, deadline: true });
         try {
-          upstream = await chatCompletion({ provider, messages, tools, temperature });
+          upstream = await chatCompletion({ provider, messages, tools, temperature, signal });
         } catch (err) {
           lastErr = err;
           if (vision && !visionErr) visionErr = err;
@@ -1313,9 +1320,9 @@ function isRelayCap(err) {
   return /rate limit|capped|too many requests/i.test(String(err?.message || ""));
 }
 
-async function shortsCompletion(messages, temperature, queueMs = 0) {
+async function shortsCompletion(messages, temperature, queueMs = 0, signal) {
   if (!devHasImages(messages)) {
-    return collectDevCompletion({ messages, tools: undefined, temperature, queueMs });
+    return collectDevCompletion({ messages, tools: undefined, temperature, queueMs, signal });
   }
 
   const imageCount = (list) => list.reduce((n, m) => n + (Array.isArray(m.content)
@@ -1352,7 +1359,7 @@ async function shortsCompletion(messages, temperature, queueMs = 0) {
   for (const plan of plans) {
     const list = plan.keep > 0 ? withImages(plan.keep) : textOnly(messages);
     try {
-      const out = await collectDevCompletion({ messages: list, tools: undefined, temperature, queueMs });
+      const out = await collectDevCompletion({ messages: list, tools: undefined, temperature, queueMs, signal });
       if (plan.keep === total && !firstErr) return out;
       // Strip a trailing full stop so the note does not read "...choom..".
       const why = String(firstErr?.message || "the relay refused the request").replace(/[.\s]+$/, "").slice(0, 160);
@@ -1385,10 +1392,10 @@ async function shortsCompletion(messages, temperature, queueMs = 0) {
  * off the whole window. That is what produced "5 window(s) failed in pass one:
  * the model returned unreadable JSON" on a run whose transcript was fine.
  */
-async function jsonCompletion(messages, temperature, { queueMs = 0, attempts = 3 } = {}) {
+async function jsonCompletion(messages, temperature, { queueMs = 0, attempts = 3, signal } = {}) {
   let lastErr = null;
   for (let i = 1; i <= attempts; i += 1) {
-    const out = await shortsCompletion(messages, temperature, queueMs);
+    const out = await shortsCompletion(messages, temperature, queueMs, signal);
     try {
       return { parsed: analysis.parseModelJson(out.content), out };
     } catch (err) {
@@ -1691,7 +1698,7 @@ async function handleClipPropose(req, res) {
     return Number.isFinite(t) && t >= w.start - 3 && t <= w.end + 3;
   }).slice(0, 1);
 
-  const runWindow = async (w, queueMs = 45_000) => {
+  const runWindow = async (w, queueMs = 45_000, signal) => {
     const lines = analysis.transcriptBlock(transcript, w.start, w.end);
     const spoken = lines.replace(/\s+/g, " ").length;
     const evLines = analysis.eventBlock(events, w.start, w.end);
@@ -1724,7 +1731,7 @@ async function handleClipPropose(req, res) {
     const out = await jsonCompletion([
       { role: "system", content: analysis.PASS_ONE_SYSTEM(platform) },
       { role: "user", content },
-    ], 0.3, { queueMs });
+    ], 0.3, { queueMs, signal });
     const parsed = out.parsed;
     // `jsonCompletion` returns `{ parsed, out }`, not the reply itself. Reading
     // `out.provider` / `out.content` off the wrapper gave undefined every time,
@@ -1774,6 +1781,13 @@ async function handleClipPropose(req, res) {
   const DEADLINE_MS = 240_000;
   const startedAt = Date.now();
   const deadline = startedAt + DEADLINE_MS;
+  // A signal, not just a start-gate. Gating only the *next* window leaves an
+  // in-flight sweep free to hold the socket open past the caller's clock, and
+  // the socket - not the window - is what the caller sees fail.
+  const deadlineCtrl = new AbortController();
+  const deadlineTimer = setTimeout(() => {
+    deadlineCtrl.abort();
+  }, DEADLINE_MS);
   const results = [];
   const deferred = [];
   let next = 0;
@@ -1784,15 +1798,23 @@ async function handleClipPropose(req, res) {
       const room = deadline - Date.now();
       // Only start a window that still has time to answer in. Half a minute is
       // the least worth spending: less than that is a near-certain queue wait.
-      if (room < 30_000) { deferred.push(w); continue; }
+      if (room < 30_000 || deadlineCtrl.signal.aborted) { deferred.push(w); continue; }
       try {
-        results.push(await runWindow(w, Math.min(45_000, room - 20_000)));
+        results.push(await runWindow(w, Math.min(45_000, room - 20_000), deadlineCtrl.signal));
       } catch (err) {
-        results.push({ window: w, moments: [], error: String(err?.message || err) });
+        // A window stopped by the deadline was never judged, so it belongs with
+        // the deferred ones - reporting it as a failure would say the model
+        // rejected footage it never saw.
+        if (deadlineCtrl.signal.aborted) deferred.push(w);
+        else results.push({ window: w, moments: [], error: String(err?.message || err) });
       }
     }
   };
-  await Promise.all([workers(), workers(), workers()]);
+  try {
+    await Promise.all([workers(), workers(), workers()]);
+  } finally {
+    clearTimeout(deadlineTimer);
+  }
 
   const moments = results.flatMap((r) => (r.moments || []).map((m) => ({ ...m, window: r.window, provider: r.provider, provenance: r.provenance })));
   const failures = results.filter((r) => r.error).map((r) => ({ window: r.window, error: r.error }));
