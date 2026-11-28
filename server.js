@@ -1771,7 +1771,7 @@ async function handleClipPropose(req, res) {
   // now owns a deadline well inside the caller's: whatever is judged by then is
   // returned, and the windows still waiting are reported as deferred rather than
   // failed, because they were never judged and the strict review will take them.
-  const DEADLINE_MS = 420_000;
+  const DEADLINE_MS = 240_000;
   const startedAt = Date.now();
   const deadline = startedAt + DEADLINE_MS;
   const results = [];
