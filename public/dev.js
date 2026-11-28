@@ -1953,6 +1953,25 @@
   }
 
 
+  /**
+   * Browser wording for a cut request is not a verdict on the footage.
+   *
+   * "signal is aborted without reason" names no stage and no limit, and it was
+   * reported twice on transcripts that had read completely. It is the browser's
+   * own text for a request that was cut, so it can surface from any transport
+   * call - not only the ones `apiJson` already names. Whatever path raised it,
+   * it must never be shown as if it were a finding about the video.
+   */
+  function nameAbortError(text) {
+    const said = String(text || "");
+    // Chromium uses two spellings for a cut request: "signal is aborted without
+    // reason" and "The user aborted a request." Both name no stage, and neither
+    // is something the footage did.
+    return /signal is aborted|aborted without reason|the user aborted a request|\bAbortError\b/i.test(said)
+      ? "a step was stopped before it answered - it names no stage, so a request was cut short rather than a verdict on the footage"
+      : said;
+  }
+
   function clock(t) {
     const s = Math.max(0, Math.round(Number(t) || 0));
     const h = Math.floor(s / 3600);
@@ -2694,7 +2713,7 @@
         // and paid for; the file is the only missing part, so the candidate stays
         // listed with its failure and can be rendered again on its own.
         item.status = "export-failed";
-        item.error = String(err?.message || err);
+        item.error = nameAbortError(String(err?.message || err));
         item.attempts += 1;
         state.failures.push(`${entry.name}${ctx.multi ? ` ${feed}` : ""} ${clock(start)}-${clock(end)}: export failed - ${item.error}`);
       }
@@ -2849,7 +2868,7 @@
             try {
               results.push(await runPlatform(ctx));
             } catch (err) {
-              state.failures.push(`${entry.name}${multi ? ` ${PLATFORMS[platform].name}` : ""}: ${err.message || err}`);
+              state.failures.push(`${entry.name}${multi ? ` ${PLATFORMS[platform].name}` : ""}: ${nameAbortError(err?.message || err)}`);
               results.push({ failed: String(err.message || err) });
             } finally {
               if (ctx.tick) { clearInterval(ctx.tick); ctx.tick = null; }
@@ -2876,7 +2895,7 @@
           // what it did read is already on disk, so the next press finishes it
           // instead of starting the video again.
           if (report.transcript && report.transcript.complete === false) entry.resumable = true;
-          state.failures.push(`${entry.name}: ${err.message || err}`);
+          state.failures.push(`${entry.name}: ${nameAbortError(err?.message || err)}`);
         } finally {
           renderVideoList();
         }
@@ -2890,7 +2909,13 @@
         // The heading says which one, because the fix is different: one is a
         // re-run, the other means the footage genuinely had nothing.
         const broke = Boolean(state.failures.length);
-        const real = state.failures[0]
+        // A named stage is what the user can act on. A bare abort is what the
+        // browser says when a request is cut - it names no step and no limit, and
+        // it is exactly the line that was reported as "signal is aborted without
+        // reason" twice while the transcript had in fact read cleanly. Whatever
+        // path produced it, it must not reach the panel untranslated.
+        const nameAbort = nameAbortError;
+        const real = nameAbort(state.failures[0])
           || (reports.some((r) => r?.transcript && r.transcript.complete === false)
             ? "the transcript is still incomplete - the speech left unread is saved, so CONTINUE finishes it"
             : reports.length
@@ -2916,7 +2941,7 @@
           : `${good} short${good === 1 ? "" : "s"} ready in ${where || "the Shorts folder"}`
       );
     } catch (err) {
-      shutdown(`FAILED\n${err.message || err}`);
+      shutdown(`FAILED\n${nameAbortError(err?.message || err)}`);
     } finally {
       // `dev.shortsBusy` is the lock every other control reads: the X button,
       // PICK VIDEOS, selecting a row, and the run button itself. If it is ever

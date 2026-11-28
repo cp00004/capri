@@ -108,7 +108,7 @@ test("a failed export keeps the candidate and its analysis", () => {
   const loop = src.slice(src.indexOf("for (let i = 0; i < planned.length"), src.indexOf("const exported = state.made.slice(before)"));
   assert.match(loop, /state\.made\.push\(item\)/, "the candidate is listed before the encode");
   assert.match(loop, /item\.status = "export-failed"/, "a failed encode is its own status");
-  assert.match(loop, /item\.error = String/, "the reason is kept");
+  assert.match(loop, /item\.error = nameAbortError\(String/, "the reason is kept, in words the user can act on");
   // The expensive parts are already on the item, so a retry has them.
   for (const field of ["read", "plan", "pick", "provenance", "fileBase"]) {
     assert.match(loop, new RegExp(`${field}[:,]`), `${field} is carried on the candidate`);
@@ -336,13 +336,50 @@ test("a review the server already stopped is not repeated", () => {
   assert.match(block, /!selfBounded/, "and excluded from the retry decision");
 });
 
+test("a bare abort never reaches the panel as if it were a finding", () => {
+  // Reported twice: "videoplayback (2).mp4 YouTube Shorts: signal is aborted
+  // without reason" on a transcript that had read perfectly. That is the
+  // browser's own text for a request that was cut; it names no stage, so it
+  // cannot be shown as though the footage had been judged and found wanting.
+  const src = codeOnly(read(DEV_JS));
+  const at = src.indexOf("function nameAbortError");
+  assert.ok(at > 0, "there is one place that translates a bare abort");
+  const fn = src.slice(at, at + 520);
+  assert.match(fn, /signal is aborted/, "it recognises the reported wording");
+  assert.match(fn, /aborted without reason/, "including the without-reason variant");
+  assert.match(fn, /AbortError/, "and a named AbortError");
+  assert.match(fn, /names no stage/, "and says plainly that no stage was named");
+  assert.ok(!/return said;[\s\S]*signal is aborted/.test(fn), "it does not pass the browser text through");
+
+  // Every path that can surface a failure uses it, or the raw text leaks again.
+  for (const site of ["state.failures.push", "shutdown(`FAILED"]) {
+    const hits = src.split(site).length - 1;
+    assert.ok(hits >= 1, `${site} should exist`);
+  }
+  const failLines = src.split("\n").filter((l) => l.includes("state.failures.push"));
+  assert.ok(failLines.length >= 3, "every failure push is findable");
+  for (const line of failLines) {
+    assert.match(line, /nameAbortError\(err|item\.error/,
+      `this failure is translated: ${line.trim().slice(0, 90)}`);
+  }
+  assert.match(src, /state\.failures\.push\(`\$\{entry\.name\}: \$\{nameAbortError/, "a whole-video failure is named");
+  assert.match(src, /item\.error = nameAbortError/, "an export failure is named");
+  assert.match(src, /shutdown\(`FAILED\\n\$\{nameAbortError/, "the panel header text is named");
+
+  // And the panel's own summary line must not reintroduce the raw wording.
+  const summary = src.slice(src.indexOf("const real = nameAbort"), src.indexOf("const real = nameAbort") + 300);
+  assert.match(summary, /nameAbort\(state\.failures\[0\]\)/, "the summary line is translated too");
+});
+
 test("a speech chunk that times out names the chunk, not a bare abort", () => {
   // The reported line came from the read itself: "signal is aborted without
   // reason". It named no chunk and no limit, so a transcript that had actually
   // been read looked like an unexplained failure.
   const src = codeOnly(read(DEV_JS));
   const at = src.indexOf("const ask = async (region, index)");
-  const ask = src.slice(at, src.indexOf("/** Fold one server answer", at));
+  // Bound it by the next declaration, so a helper added later cannot be
+  // swallowed by this slice and appear to be part of the chunk request.
+  const ask = src.slice(at, src.indexOf("const collect = (data, offset)", at));
   assert.ok(ask.length > 400, "the chunk request should be findable");
   assert.match(ask, /err\?\.name === "AbortError"/, "an abort is recognised");
   assert.match(ask, /the speech reader did not answer for \$\{clock\(region\.start\)\} within 900s/,
