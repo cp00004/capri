@@ -2500,7 +2500,11 @@
         }
       }
     };
-    await Promise.all([reviewWorker(), reviewWorker(), reviewWorker()]);
+    // Three workers on a two-slot queue means the third parks outside the slot
+    // waiting for a turn it only gets after a full review. Two workers, two
+    // slots: every review starts as soon as one finishes, and none is left
+    // holding a place in line while the progress line says "REVIEWING".
+    await Promise.all([reviewWorker(), reviewWorker()]);
 
     if (!reviewed.some((r) => !r.rejected)) {
       report.empty = "review";
