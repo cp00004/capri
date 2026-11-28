@@ -174,9 +174,27 @@ test("nothing postable is followed by the reason", () => {
   // MP4 failed is a result, not an empty run.
   const empty = dev.indexOf('if (!state.made.some((m) => m.status === "exported" || m.status === "export-failed"))');
   assert.ok(empty > 0, "the no-clips path should exist");
-  const block = dev.slice(empty, empty + 1600);
-  assert.match(block, /renderShortsResults\(\[\], false, reports, real\)/,
+  const block = dev.slice(empty, empty + 1800);
+  assert.match(block, /renderShortsResults\(\[\], false, reports, real/,
     "the reason is shown in the panel, not only thrown into a banner");
+});
+
+test("a stage that broke is not reported as an empty video", () => {
+  const src = fs.readFileSync(path.resolve(__dirname, "../../public/dev.js"), "utf8");
+  const dev = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  // The heading is a parameter, so the panel can say which of the two happened.
+  const fn = dev.slice(dev.indexOf("function renderShortsResults"), dev.indexOf("function appendReport"));
+  assert.match(fn, /heading = "nothing postable"/, "the heading defaults to the empty-video wording");
+  assert.match(fn, /h\.textContent = heading \|\| "nothing postable"/, "and the caller can override it");
+
+  // A run with recorded failures must not claim the footage held no clips.
+  const empty = dev.indexOf('if (!state.made.some((m) => m.status === "exported" || m.status === "export-failed"))');
+  assert.ok(empty > 0, "the no-clips path should exist");
+  const block = dev.slice(empty, empty + 1800);
+  assert.match(block, /const broke = Boolean\(state\.failures\.length\)/, "a failure is detected");
+  assert.match(block, /broke \? "analysis stopped early" : "nothing postable"/,
+    "a broken stage gets its own heading");
 });
 
 test("a failed export is not reported as an empty analysis", () => {

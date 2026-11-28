@@ -804,6 +804,11 @@ function createWindow() {
     minWidth:        420,
     minHeight:       620,
     frame:           true,
+    // A guard-spawned copy has no window to show. Without this it appeared the
+    // moment it was constructed and then hid itself in ready-to-show - a visible
+    // flash from a process that was never meant to be on screen. The real app is
+    // unaffected: it is still built visible.
+    show:            !HIDDEN_MODE,
     titleBarStyle:   "hidden",
     titleBarOverlay: { color: "#05070a", symbolColor: "#b9c8bf", height: 34 },
     autoHideMenuBar: true,
@@ -2204,18 +2209,53 @@ function nnnStopTimer() {
   nnnTimer = null;
 }
 
+/**
+ * What the background guard should be doing right now.
+ *
+ *   "minute" - the lock is on and the season is running: the task has to knock
+ *              often, because a killed app must be picked back up within five
+ *              minutes.
+ *   "daily"  - the lock is armed but November has not started: the task only has
+ *              to exist so the season can switch itself on with the app shut.
+ *   ""       - nothing to guard. No task, no login shortcut, no extra process.
+ *
+ * The old code created the five-minute task unconditionally, so it fired all
+ * year and every firing started a whole Electron app just to read the calendar,
+ * find the season off and leave a minute later. That is a fresh Capri in Task
+ * Manager every five minutes, forever, for a lock that is not even armed.
+ */
+function nnnTaskModeWanted(now = new Date()) {
+  if (process.platform !== "win32") return "";
+  // Read the stored state directly. Calling nnnLoad() here would recurse: loading
+  // runs the calendar, the calendar can arm the lock, and arming re-arms the task.
+  let stored = {};
+  try { stored = readJson(nnnFile()) || {}; } catch { return ""; }
+  const active = Boolean(stored.active);
+  const { start, end } = nnnSeason(now);
+  // A code release ends the season for this machine; the calendar must not put
+  // the guard back on afterwards.
+  const dismissed = Number(stored.dismissed) === end;
+  if (active && !dismissed && now.getTime() < end) {
+    return now.getTime() >= start ? "minute" : "daily";
+  }
+  return "";
+}
+
 // The scheduled task is what keeps the lock alive with Capri shut: the same exe
-// starts hidden at logon and again every night, looks at the calendar and either
-// guards or leaves.
+// starts hidden at logon and again on a schedule, looks at the calendar and
+// either guards or leaves. It only exists while the lock is armed.
+let nnnTaskApplied = null;
 function nnnTaskEnsure() {
   if (process.platform !== "win32" || GUARD_MODE) return;
   const exe = process.execPath;
   if (!exe.toLowerCase().includes("capri")) return;
+  const wanted = nnnTaskModeWanted();
+  if (wanted === nnnTaskApplied) return;
+  if (!wanted) { nnnTaskApplied = ""; nnnTaskRemove(); return; }
+  nnnTaskApplied = wanted;
   const tr = `"${exe}" --nnn-guard`;
-  // The guard now leaves as soon as the real app answers, so the task has to
-  // knock often: a killed app is picked back up within five minutes instead of
-  // sitting dead until the next night.
-  execFile("schtasks.exe", ["/Create", "/TN", NNN_TASK, "/TR", tr, "/SC", "MINUTE", "/MO", "5", "/F"],
+  const cadence = wanted === "minute" ? ["/SC", "MINUTE", "/MO", "5"] : ["/SC", "DAILY", "/MO", "1"];
+  execFile("schtasks.exe", ["/Create", "/TN", NNN_TASK, "/TR", tr, ...cadence, "/F"],
     { windowsHide: true, timeout: 15000 }, (err) => {
       if (err) logLine(`nnn: guard task failed (${err.message.trim().split("\n").pop()})`);
     });
@@ -2238,8 +2278,31 @@ function nnnLoginShortcut(exe) {
     });
 }
 
+/**
+ * Take the background guard back out when the lock is not armed.
+ *
+ * Without this the task and its Startup shortcut outlive the season: a machine
+ * that ran one November keeps starting Capri.exe every five minutes for the
+ * rest of the year. Removing them is the point, not a nicety - nothing else
+ * ever did.
+ */
+function nnnTaskRemove() {
+  if (process.platform !== "win32" || GUARD_MODE) return;
+  if (nnnTaskModeWanted()) return;
+  execFile("schtasks.exe", ["/Delete", "/TN", NNN_TASK, "/F"], { windowsHide: true, timeout: 15000 }, () => {});
+  execFile("schtasks.exe", ["/Delete", "/TN", `${NNN_TASK} Login`, "/F"], { windowsHide: true, timeout: 15000 }, () => {});
+  const dir = path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
+  const lnk = path.join(dir, "Capri NNN Guard.lnk").replace(/'/g, "''");
+  const ps = `Remove-Item -LiteralPath '${lnk}' -Force -ErrorAction SilentlyContinue`;
+  execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps],
+    { windowsHide: true, timeout: 20000 }, () => {});
+}
+
 function nnnTaskStart() {
   if (process.platform !== "win32" || GUARD_MODE) return;
+  // Starting the task while the lock is off is what produced the extra window:
+  // the guard booted, found nothing to guard and idled. Nothing to start.
+  if (!nnnTaskModeWanted()) return;
   execFile("schtasks.exe", ["/Run", "/TN", NNN_TASK], { windowsHide: true, timeout: 10000 }, () => {});
 }
 
@@ -2294,6 +2357,10 @@ function nnnRelease(reason, opts = {}) {
   if (nnn.sites) nnnHosts(false);
   nnnLockFiles(false);
   nnnSave();
+  // The guard outlived the lock before: released in November, the five-minute
+  // task kept starting Capri.exe for the rest of the year. Releasing takes it out.
+  nnnTaskApplied = null;
+  nnnTaskRemove();
   logLine(`nnn: released (${reason})`);
   setTimeout(nnnEnsureHosts, 1500);
   sendEyeNnn();
@@ -2486,13 +2553,13 @@ function nnnGuardBoot() {
     return;
   }
   nnnLockFiles(false);
-  // Outside the season there is nothing to guard. Stay a minute in case the
-  // clock turns while this starts, then leave instead of idling all year.
+  // Outside the season there is nothing to guard, so leave at once. This used to
+  // sit here for a minute "in case the clock turns", which meant every five
+  // minutes the machine grew a whole Electron app that existed only to wait. The
+  // task knocks again soon enough, and the real app creates it when November
+  // actually starts.
   nnnStopTimer();
-  setTimeout(() => {
-    if (nnnCheckSchedule().mode === "active") { nnnLockFiles(true); nnnStart(); }
-    else guardLeave("season is off");
-  }, 60_000);
+  guardLeave("season is off");
 }
 
 ipcMain.handle("capri-nnn", async (_event, payload) => {
@@ -3156,13 +3223,14 @@ app.whenReady().then(async () => {
   // The calendar is watched even while the lock is off, so the season can
   // switch itself on with the app already open.
   setInterval(() => { try { nnnCheckSchedule(); } catch { /* keep going */ } }, 60_000);
-  // Re-assert the guard while the season runs: deleting the task or stopping
-  // it from Task Scheduler only buys a few minutes.
+  // Re-assert the guard while the season runs, and take it back out when it does
+  // not: deleting the task from Task Scheduler only buys a few minutes, and a
+  // task left behind from a past November starts Capri every five minutes all
+  // year. nnnTaskEnsure works in both directions and only acts on a change.
   setInterval(() => {
     try {
-      if (!nnnSealed()) return;
       nnnTaskEnsure();
-      nnnTaskStart();
+      if (nnnSealed()) nnnTaskStart();
     } catch { /* keep going */ }
   }, 10 * 60_000);
   setInterval(sendEyeNnn, 30_000);

@@ -1719,6 +1719,16 @@
           );
         }
         return await res.json();
+      } catch (err) {
+        // An abort here is a chunk that took longer than its own clock. The
+        // browser's own wording for that ("signal is aborted without reason")
+        // names neither the chunk nor the clock, so say it properly.
+        throw err?.name === "AbortError"
+          ? Object.assign(
+            new Error(`the speech reader did not answer for ${clock(region.start)} within 900s, so that chunk was stopped`),
+            { status: 0 }
+          )
+          : err;
       } finally {
         clearTimeout(timer);
       }
@@ -2146,22 +2156,62 @@
     return [...new Set(out)];
   }
 
-  async function apiJson(path, body, timeoutMs) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-      const res = await bridge().api(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok) throw new Error(data?.message || data?.error || `request refused (${res.status})`);
-      return data;
-    } finally {
-      clearTimeout(timer);
+  /**
+   * One JSON call to the local server, bounded by its own clock.
+   *
+   * `label` names the stage so a timeout says "the ranking step did not answer"
+   * instead of the browser's "signal is aborted without reason", which told the
+   * user nothing and read like an empty analysis.
+   *
+   * A timeout or a 5xx gets one more try. That is deliberately not a retry loop:
+   * the transcript is already saved, so the worst case is one extra model call,
+   * and a stage that is simply broken fails fast with its own name on it.
+   */
+  async function apiJson(path, body, timeoutMs, label = "analysis") {
+    const seconds = Math.max(1, Math.round(Number(timeoutMs) / 1000));
+    let last = null;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await bridge().api(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) {
+          const err = Object.assign(
+            new Error(data?.message || data?.error || `the ${label} step was refused (${res.status})`),
+            { status: res.status }
+          );
+          throw err;
+        }
+        return data;
+      } catch (err) {
+        // An abort surfaces as a DOMException with a useless message, and so
+        // does a dropped socket. Give both a name the user can act on.
+        const aborted = err?.name === "AbortError" || /aborted/i.test(String(err?.message || ""));
+        const named = aborted
+          ? Object.assign(
+            new Error(`the ${label} step did not answer within ${seconds}s, so it was stopped`),
+            { status: 0 }
+          )
+          : err;
+        last = named;
+        const status = Number(named?.status);
+        // A dropped socket arrives with no status at all, which is exactly the
+        // transient case. Treating that as "not worth retrying" singled out the
+        // one failure a second attempt actually fixes.
+        const worthRetrying = aborted || !Number.isFinite(status) || status === 0 || status === 429 || status >= 500;
+        if (!worthRetrying || attempt === 2) break;
+        await new Promise((r) => setTimeout(r, 1200 + Math.round(Math.random() * 800)));
+      } finally {
+        clearTimeout(timer);
+      }
     }
+    throw last;
   }
 
   /**
@@ -2233,7 +2283,7 @@
       // cannot see the speech and proposes nothing.
       words: read.words,
       maxCandidates: 12,
-    }, 60_000);
+    }, 60_000, "clip planning");
     const candidates = (plan?.candidates || []).filter((c) => c.end - c.start >= 4);
     if (!candidates.length) {
       report.empty = "plan";
@@ -2260,7 +2310,7 @@
       waited += 1;
       shortsProgress(`VIDEO ${tag}${label} · READING THE MOMENTS\n${candidates.length} windows · ${read.granularity === "word" ? "word-accurate" : "approximate"} transcript · ${shot.frames.length} frames · ${waited}s`);
     }, 1000);
-    let proposed;
+    let proposed = null;
     try {
       proposed = await apiJson("/api/dev/clip/propose", {
         duration: info.duration,
@@ -2270,7 +2320,12 @@
         ocr: ocr?.samples || [],
         frames: shot.frames,
         windows: candidates.map((c) => ({ start: c.start, end: c.end })),
-      }, 600_000);
+      }, 600_000, "clip proposal");
+    } catch (err) {
+      // The screening pass broke. Its output is only a shortlist - the strict
+      // review is the verdict - so the planned windows are still reviewed rather
+      // than reporting a whole transcript as empty because one call failed.
+      report.degraded.push(`the screening pass failed (${err?.message || err}) - the planned windows were reviewed directly`);
     } finally {
       if (ctx.tick) { clearInterval(ctx.tick); ctx.tick = null; }
     }
@@ -2287,22 +2342,26 @@
       report.vision.partial = proposed.visionGaps.length;
     }
     // Pass one is a shortlist, not the verdict - pass two is what decides. So
-    // when it comes back empty on a stream whose transcript is complete, do not
-    // end the run: hand the plan's own windows to the strict review and let it
-    // judge the real footage. A whole transcript must never produce nothing
-    // simply because the cheap screening pass was cautious.
+    // when it comes back empty (or broke outright) on a stream whose transcript
+    // is complete, do not end the run: hand the plan's own windows to the strict
+    // review and let it judge the real footage. A whole transcript must never
+    // produce nothing simply because the cheap screening pass was cautious.
     if (!moments.length) {
       // Four is deliberate: the strict review is a paid model call per window,
       // so a cautious screening pass gets a bounded second chance, not 12 calls.
       const salvaged = candidates.slice(0, 4).map((c) => ({
         start: c.start, end: c.end,
         kind: c.kind || "other",
-        why: "the screening pass was cautious, so the window itself was reviewed",
+        why: proposed
+          ? "the screening pass was cautious, so the window itself was reviewed"
+          : "the screening pass did not answer, so the window itself was reviewed",
         setup: "", payoff: "", uses: [], confidence: 0.3,
       }));
       if (salvaged.length) {
         report.notes.push(
-          `the screening pass proposed nothing, so ${salvaged.length} planned window${salvaged.length === 1 ? "" : "s"} ${salvaged.length === 1 ? "was" : "were"} sent straight to the strict review`
+          proposed
+            ? `the screening pass proposed nothing, so ${salvaged.length} planned window${salvaged.length === 1 ? "" : "s"} ${salvaged.length === 1 ? "was" : "were"} sent straight to the strict review`
+            : `${salvaged.length} planned window${salvaged.length === 1 ? " was" : "s were"} sent straight to the strict review instead of giving up on the read`
         );
         moments.push(...salvaged);
         report.passes.proposed += salvaged.length;
@@ -2347,7 +2406,7 @@
               frames: shot2.frames,
               minClip: CLIP.min,
               maxClip: CLIP.max,
-            }, 180_000);
+            }, 180_000, `review at ${clock(moment.start)}`);
           }));
           const review = data?.review;
           if (!review) continue;
@@ -2401,29 +2460,49 @@
     }
 
     // 5. Global ranking with one rubric.
-    const ranked = await apiJson("/api/dev/clip/rank", {
-      clips: reviewed.map((r) => ({
-        id: r.id,
-        start: r.start,
-        end: r.end,
-        review: r.review,
-        candidate: {
-          kind: r.candidate.kind,
-          strength: r.candidate.strength,
-          events: (r.candidate.events || []).map((e) => ({ type: e.type, start: e.start, end: e.end, confidence: e.confidence })),
-        },
-        bareReaction: r.bareReaction,
-        hasDialogue: r.hasDialogue,
-        passTwo: r.rejected ? "rejected" : "accepted",
-      })),
-      minClip: CLIP.min,
-      maxClip: CLIP.max,
-      max: 6,
-    }, 60_000);
+    //
+    // If the ranker itself breaks, the clips that already passed the strict review
+    // are still worth cutting: the review is what decides whether a clip holds up,
+    // and the ranker only orders them. Throwing approved work away because an
+    // ordering step timed out is the same class of bug as calling a failed export
+    // "nothing postable".
+    let ranked = null;
+    try {
+      ranked = await apiJson("/api/dev/clip/rank", {
+        clips: reviewed.map((r) => ({
+          id: r.id,
+          start: r.start,
+          end: r.end,
+          review: r.review,
+          candidate: {
+            kind: r.candidate.kind,
+            strength: r.candidate.strength,
+            events: (r.candidate.events || []).map((e) => ({ type: e.type, start: e.start, end: e.end, confidence: e.confidence })),
+          },
+          bareReaction: r.bareReaction,
+          hasDialogue: r.hasDialogue,
+          passTwo: r.rejected ? "rejected" : "accepted",
+        })),
+        minClip: CLIP.min,
+        maxClip: CLIP.max,
+        max: 6,
+      }, 60_000, "ranking");
+    } catch (err) {
+      report.degraded.push(`the ranking step failed (${err?.message || err}) - the clips that passed review were kept and ordered by review score instead`);
+    }
     report.rank = ranked;
 
     const byId = new Map(reviewed.map((r) => [r.id, r]));
-    const picks = (ranked?.picks || []).map((p) => ({ ...byId.get(p.id), ...p })).filter((p) => p.moment);
+    let picks = (ranked?.picks || []).map((p) => ({ ...byId.get(p.id), ...p })).filter((p) => p.moment);
+    // With no ranking, fall back to the clips the strict review approved, best
+    // review score first. Bounded to the same six the ranker would have returned.
+    if (!ranked) {
+      picks = reviewed
+        .filter((r) => !r.rejected)
+        .sort((a, b) => Number(b.review?.score ?? b.review?.confidence ?? 0) - Number(a.review?.score ?? a.review?.confidence ?? 0))
+        .slice(0, 6)
+        .map((r) => ({ ...r, score: Number(r.review?.score ?? Math.round((Number(r.review?.confidence) || 0) * 100)) }));
+    }
     // The ranker compares content, not provenance. Carrying the review's
     // provenance back onto each pick keeps the "was this actually watched?"
     // answer attached to the clip that gets cut.
@@ -2748,15 +2827,19 @@
         // actual cause instead of a generic failure. "unknown error" used to
         // hide a transcript that was still queued behind the speech budget.
         const reports = dev.videos.filter((v) => v.clipReport).map((v) => v.clipReport);
+        // A step that broke is not the same result as "the video had no clips".
+        // The heading says which one, because the fix is different: one is a
+        // re-run, the other means the footage genuinely had nothing.
+        const broke = Boolean(state.failures.length);
         const real = state.failures[0]
           || (reports.some((r) => r?.transcript && r.transcript.complete === false)
             ? "the transcript is still incomplete - the speech left unread is saved, so CONTINUE finishes it"
             : reports.length
               ? explainEmpty(reports)
               : "no video could be analysed");
-        // Shown in the panel before it is thrown, so "nothing postable" is
-        // followed by the reason instead of leaving the user guessing.
-        renderShortsResults([], false, reports, real);
+        // Shown in the panel before it is thrown, so the header is followed by the
+        // reason instead of leaving the user guessing.
+        renderShortsResults([], false, reports, real, broke ? "analysis stopped early" : "nothing postable");
         throw new Error(`every video failed - ${real}`);
       }
       renderShortsResults(state.made, true);
@@ -2831,7 +2914,7 @@
   // caption/info script sits next to it, and the copy buttons grab the post.
   // With no clips it still renders the reason, because a run that produced
   // nothing needs an explanation more than a success does.
-  function renderShortsResults(entries, scroll = true, failingReports = [], reason = "") {
+  function renderShortsResults(entries, scroll = true, failingReports = [], reason = "", heading = "nothing postable") {
     const box = dev.els.shortsResult;
     box.textContent = "";
     box.classList.remove("hidden");
@@ -2839,7 +2922,10 @@
       const head = document.createElement("div");
       head.className = "yt-results-head";
       const h = document.createElement("h4");
-      h.textContent = "nothing postable";
+      // A broken stage is not an empty video. Saying "nothing postable" over a
+      // timeout told the user her footage had no clips when the truth was that a
+      // step never answered - two problems with completely different next steps.
+      h.textContent = heading || "nothing postable";
       head.appendChild(h);
       box.appendChild(head);
       // Say why in one plain line. "nothing postable" on its own leaves the user

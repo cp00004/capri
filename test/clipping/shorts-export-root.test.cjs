@@ -197,3 +197,72 @@ test("one rejected clip does not stop the rest being reviewed", () => {
   const run = src.slice(src.indexOf("async function runPlatform"), src.indexOf("async function runPlatform") + 9000);
   assert.match(run, /const visualSlot = visualQueue\(2\)/, "three workers share one two-slot queue");
 });
+
+test("a stage that timed out is named, not reported as an abort", () => {
+  // The reported line was "signal is aborted without reason": a DOMException
+  // message, which named neither the stage nor what to do about it, on a run whose
+  // transcript had been read completely.
+  const src = codeOnly(read(DEV_JS));
+  const fn = src.slice(src.indexOf("async function apiJson"), src.indexOf("function visualQueue"));
+  assert.ok(fn.length > 300, "apiJson should be findable");
+  assert.match(fn, /async function apiJson\(path, body, timeoutMs, label = "analysis"\)/,
+    "each call names its stage");
+  assert.match(fn, /the \$\{label\} step did not answer within \$\{seconds\}s, so it was stopped/,
+    "a timeout says which step stopped and after how long");
+  assert.ok(!/signal is aborted/.test(fn), "it does not pass the browser's wording through");
+});
+
+test("a timed-out stage is retried once, and a refusal is not retried forever", () => {
+  const src = codeOnly(read(DEV_JS));
+  const fn = src.slice(src.indexOf("async function apiJson"), src.indexOf("function visualQueue"));
+  assert.match(fn, /for \(let attempt = 1; attempt <= 2; attempt \+= 1\)/, "exactly one retry");
+  assert.match(fn, /const worthRetrying = aborted \|\| !Number\.isFinite\(status\) \|\| status === 0 \|\| status === 429 \|\| status >= 500/,
+    "only a transient failure is worth another call");
+  assert.match(fn, /if \(!worthRetrying \|\| attempt === 2\) break/, "and the loop is bounded");
+  assert.match(fn, /Math\.random\(\)/, "the wait is jittered");
+  // Every stage passes its own name.
+  for (const label of ["clip planning", "clip proposal", "ranking"]) {
+    assert.match(src, new RegExp(`\\}, [0-9_]+, "${label}"\\)`), `${label} is labelled at the call site`);
+  }
+  assert.match(src, /`review at \$\{clock\(moment\.start\)\}`/, "each review names its timestamp");
+});
+
+test("a broken ranker keeps the clips the review approved", () => {
+  const src = codeOnly(read(DEV_JS));
+  // Ordering is not the verdict: the strict review is. A failed ranking used to
+  // throw away clips that had already been paid for and approved.
+  assert.match(src, /let ranked = null;/, "the ranking result can be absent");
+  const at = src.indexOf('apiJson("/api/dev/clip/rank"');
+  const rank = src.slice(at - 900, at + 1400);
+  assert.match(rank, /catch \(err\) \{/, "a failed ranking is caught");
+  assert.match(rank, /ordered by review score instead/, "and the degradation is reported");
+  const fallback = src.slice(src.indexOf("if (!ranked) {"), src.indexOf("if (!ranked) {") + 500);
+  assert.match(fallback, /\.filter\(\(r\) => !r\.rejected\)/, "only approved clips are kept");
+  assert.match(fallback, /\.slice\(0, 6\)/, "bounded to what the ranker would have returned");
+});
+
+test("a broken screening pass reviews the planned windows instead of giving up", () => {
+  const src = codeOnly(read(DEV_JS));
+  const at = src.indexOf('apiJson("/api/dev/clip/propose"');
+  const block = src.slice(at - 400, at + 2600);
+  assert.match(block, /catch \(err\) \{/, "a failed screening pass is caught");
+  assert.match(block, /the planned windows were reviewed directly/, "and says what it did instead");
+  assert.match(block, /proposed\s*\?/, "the salvage note distinguishes an empty pass from a broken one");
+  assert.match(block, /did not answer, so the window itself was reviewed/, "a broken pass says so plainly");
+});
+
+test("a speech chunk that times out names the chunk, not a bare abort", () => {
+  // The reported line came from the read itself: "signal is aborted without
+  // reason". It named no chunk and no limit, so a transcript that had actually
+  // been read looked like an unexplained failure.
+  const src = codeOnly(read(DEV_JS));
+  const at = src.indexOf("const ask = async (region, index)");
+  const ask = src.slice(at, src.indexOf("/** Fold one server answer", at));
+  assert.ok(ask.length > 400, "the chunk request should be findable");
+  assert.match(ask, /err\?\.name === "AbortError"/, "an abort is recognised");
+  assert.match(ask, /the speech reader did not answer for \$\{clock\(region\.start\)\} within 900s/,
+    "and it names the chunk and the clock that stopped it");
+  assert.ok(!/signal is aborted/.test(ask), "the browser's wording is replaced, not passed on");
+  // It stays a one-shot retry, not a new queue wait.
+  assert.match(ask, /\{ status: 0 \}/, "it is reported as a stopped request");
+});
