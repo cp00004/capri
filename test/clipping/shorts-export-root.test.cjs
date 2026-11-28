@@ -288,6 +288,23 @@ test("a screening pass that ran out of time still reviews its windows", () => {
   assert.match(block, /\.slice\(0, 4\)/, "bounded, because each review is a paid call");
 });
 
+test("the strict reviews are bounded, and the drop is reported", () => {
+  // Pass one names up to three moments per window. Twelve windows can therefore
+  // mean forty paid reviews, and an observed run spent an hour on them to choose
+  // between clips the ranker could never have placed - it only returns six.
+  const src = codeOnly(read(DEV_JS));
+  const at = src.indexOf("const REVIEW_CAP = 12;");
+  assert.ok(at > 0, "the review set is capped");
+  const block = src.slice(at, at + 700);
+  assert.match(block, /if \(moments\.length > REVIEW_CAP\)/, "only when the pass overproduced");
+  assert.match(block, /sort\(\(a, b\) => Number\(b\.confidence \?\? 0\) - Number\(a\.confidence \?\? 0\)\)/,
+    "the most confident are kept, not the first twelve by timestamp");
+  assert.match(block, /report\.notes\.push/, "and the drop is stated, not silent");
+  // The cap has to be several times the six the ranker can place, or a good
+  // clip can be dropped before the verdict.
+  assert.match(block, /\.slice\(0, REVIEW_CAP\)/, "bounded by the cap");
+});
+
 test("a speech chunk that times out names the chunk, not a bare abort", () => {
   // The reported line came from the read itself: "signal is aborted without
   // reason". It named no chunk and no limit, so a transcript that had actually

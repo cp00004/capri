@@ -2402,6 +2402,26 @@
       });
     }
 
+    // Pass one may name up to three moments in each of twelve windows, so "every
+    // proposal" can mean forty strict reviews - each a paid call that can queue,
+    // and the ranker only ever returns six. Reviewing them all took most of an
+    // hour on a long stream to choose between clips that were never going to
+    // place. Keep the strongest dozen, which is several times what the ranker
+    // can use, and say so when the rest were dropped rather than silently
+    // shrinking the field.
+    const REVIEW_CAP = 12;
+    if (moments.length > REVIEW_CAP) {
+      const kept = moments
+        .slice()
+        .sort((a, b) => Number(b.confidence ?? 0) - Number(a.confidence ?? 0))
+        .slice(0, REVIEW_CAP);
+      report.notes.push(
+        `the screening pass named ${moments.length} moments; the ${REVIEW_CAP} most confident were reviewed`
+      );
+      moments.length = 0;
+      moments.push(...kept);
+    }
+
     // 4. Pass two: review every proposal on its own evidence.
     const reviewed = [];
     let ri = 0;
